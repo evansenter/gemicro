@@ -260,10 +260,15 @@ impl LlmClient {
 
                 match chunk {
                     Some(Ok(response)) => {
-                        if let Some(text) = response.text() {
-                            yield LlmStreamChunk {
-                                text: text.to_string(),
-                            };
+                        match response.text() {
+                            Some(text) => {
+                                yield LlmStreamChunk {
+                                    text: text.to_string(),
+                                };
+                            }
+                            None => {
+                                log::warn!("Skipping stream chunk with no text content");
+                            }
                         }
                     }
                     Some(Err(e)) => {
