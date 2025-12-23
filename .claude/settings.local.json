@@ -13,7 +13,9 @@
       "Bash(cargo check:*)",
       "Bash(git ls-remote:*)",
       "Bash(gh pr merge:*)",
-      "Bash(git stash:*)"
+      "Bash(git stash:*)",
+      "Bash(gh pr checks:*)",
+      "Bash(gh run watch:*)"
     ]
   }
 }
