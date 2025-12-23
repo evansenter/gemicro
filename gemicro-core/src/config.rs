@@ -242,7 +242,9 @@ mod tests {
 
         let result = config.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("max_sub_queries must be greater than 0"));
+        assert!(result
+            .unwrap_err()
+            .contains("max_sub_queries must be greater than 0"));
     }
 
     #[test]
@@ -252,7 +254,9 @@ mod tests {
 
         let result = config.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("min_sub_queries must be greater than 0"));
+        assert!(result
+            .unwrap_err()
+            .contains("min_sub_queries must be greater than 0"));
     }
 
     #[test]

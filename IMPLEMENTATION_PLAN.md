@@ -589,38 +589,42 @@ Stats: 4/5 sub-queries succeeded | 1,247 total tokens | 23.4s
 
 ### Phase 2: LLM Client Wrapper (Day 3)
 
-**Goal**: Wrap rust-genai Interactions API
+**Goal**: Wrap rust-genai Interactions API with both buffered and streaming support
 
 **Tasks:**
 
 1. **Implement LlmClient**
    - `/Users/evansenter/Documents/projects/gemicro/gemicro-core/src/llm.rs`
    - `LlmClient::new(client, config)` constructor
-   - `generate(request)` method using Interactions API
+   - `generate(request)` method using Interactions API (buffered)
+   - `generate_stream(request)` method for streaming responses
    - Use `client.interaction().with_model("gemini-3-flash-preview")...`
    - Timeout enforcement with `tokio::time::timeout`
    - Extract text and metadata from `InteractionResponse`
 
 2. **Define request/response types**
    - `LlmRequest { prompt, system_instruction }`
-   - `LlmResponse { text, tokens_used, interaction_id }`
+   - `LlmResponse { text, tokens_used, interaction_id }` (for buffered)
+   - `LlmStreamChunk { text, is_final, usage }` (for streaming)
 
 3. **Token counting**
    - Extract from `InteractionResponse.usage_metadata` if available
-   - **If not exposed**: File feature request, use estimation fallback
+   - Return 0 and log warning if not available (graceful degradation)
+   - For streaming: usage metadata available on final chunk only
 
 4. **Error handling**
    - Map `rust_genai::GenaiError` to `LlmError`
    - Handle timeouts distinctly
-   - Use `log` or `tracing` crate
+   - Use `log` crate for warnings
 
 **Validation**: Unit tests with mock responses
 
 **Acceptance Criteria:**
 - ✅ LlmClient wraps Interactions API
 - ✅ Generates requests with system instructions
-- ✅ Returns tokens_used (real or estimated)
+- ✅ Returns tokens_used (real or 0 with warning)
 - ✅ Enforces timeouts
+- ✅ Supports streaming via `generate_stream()`
 
 ---
 

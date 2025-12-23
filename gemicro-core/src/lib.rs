@@ -26,11 +26,13 @@
 
 pub mod config;
 pub mod error;
+pub mod llm;
 pub mod update;
 
 // Re-export public API
 pub use config::{GemicroConfig, LlmConfig, ResearchConfig, MODEL};
 pub use error::{AgentError, GemicroError, LlmError};
+pub use llm::{LlmClient, LlmRequest, LlmResponse, LlmStreamChunk};
 pub use update::{
     AgentUpdate, FinalResult, ResultMetadata, SubQueryResult, EVENT_DECOMPOSITION_COMPLETE,
     EVENT_DECOMPOSITION_STARTED, EVENT_FINAL_RESULT, EVENT_SUB_QUERY_COMPLETED,
