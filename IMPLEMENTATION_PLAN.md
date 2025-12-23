@@ -13,8 +13,10 @@
 Gemicro is a CLI application for exploring AI agent implementation patterns. The initial implementation focuses on a Deep Research agent that decomposes complex queries into parallel sub-queries, executes them concurrently, and synthesizes results.
 
 **Key Design Decisions:**
+- **Evergreen soft-typing philosophy**: Core types (AgentUpdate, GemicroConfig) use flexible structures that don't require modification when adding new agent types
 - **Streaming-first architecture**: Agents emit real-time updates via async streams
 - **Soft-typed events**: AgentUpdate uses flexible JSON data following [Evergreen spec](https://github.com/google-deepmind/evergreen-spec) philosophy for extensibility
+- **Agent-specific config passed to constructors**: GemicroConfig contains ONLY cross-agent concerns; agent-specific config (like ResearchConfig) passed directly to agent constructors
 - **Two-crate workspace**: gemicro-core (library) + gemicro-cli (binary)
 - **iOS-ready**: Core library has zero platform-specific dependencies
 - **Interactions API**: Uses rust-genai's unified Interactions API
@@ -25,6 +27,76 @@ Gemicro is a CLI application for exploring AI agent implementation patterns. The
 
 **Future Exploration Areas:**
 - **Memory compression schemes**: Explore different context compression approaches (Claude Code does excellent context compression) for managing long conversations and research sessions efficiently
+
+---
+
+## Design Principles (MUST READ)
+
+### Evergreen Soft-Typing Philosophy
+
+**Core Principle**: The gemicro-core library must support adding new agent types **without modifying core types**.
+
+This principle is inspired by the [Evergreen spec](https://github.com/google-deepmind/evergreen-spec):
+- **Pragmatic flexibility over rigid typing**
+- **Semantic meaning in metadata, not structure**
+- **Extensibility without protocol modifications**
+
+### What This Means
+
+#### ✅ DO: Soft-Typed Events
+```rust
+// CORRECT: AgentUpdate uses flexible event_type string
+pub struct AgentUpdate {
+    pub event_type: String,           // "sub_query_completed", "react_step_completed", etc.
+    pub data: serde_json::Value,      // Arbitrary agent-specific data
+    // ...
+}
+```
+
+#### ❌ DON'T: Rigid Enums for Extensible Types
+```rust
+// WRONG: Would require modifying core for each new agent type
+pub enum AgentUpdate {
+    SubQueryCompleted { /* Deep Research */ },
+    ReactStepCompleted { /* ReAct */ },        // ❌ Core modification needed
+    ReflexionCritique { /* Reflexion */ },     // ❌ Core modification needed
+}
+```
+
+#### ✅ DO: Agent-Specific Config Passed to Constructors
+```rust
+// CORRECT: Agent owns its config
+pub struct ResearchConfig { /* Deep Research specific */ }
+impl DeepResearchAgent {
+    pub fn new(config: ResearchConfig) -> Self { /* ... */ }
+}
+
+// Core config contains ONLY cross-agent concerns
+pub struct GemicroConfig {
+    pub llm: LlmConfig,  // ✅ Shared by all agents
+}
+```
+
+#### ❌ DON'T: Embed Agent-Specific Config in Core
+```rust
+// WRONG: Doesn't scale, violates Evergreen philosophy
+pub struct GemicroConfig {
+    pub llm: LlmConfig,
+    pub research: ResearchConfig,        // ❌ Deep Research specific
+    pub react: ReactConfig,              // ❌ Would need to add
+    pub reflexion: ReflexionConfig,      // ❌ Would need to add
+    // ... grows indefinitely
+}
+```
+
+### When to Use Strong Typing
+
+Use rigid types for:
+- **Error hierarchies**: `#[non_exhaustive]` enums work well here
+- **Cross-agent configuration**: Settings truly shared by all agents
+- **Internal implementations**: Agent internals can use any structure
+
+**See CLAUDE.md for comprehensive design philosophy documentation.**
 
 ---
 
@@ -430,8 +502,11 @@ Stats: 4/5 sub-queries succeeded | 1,247 total tokens | 23.4s
 
 5. **Implement configuration types**
    - `/Users/evansenter/Documents/projects/gemicro/gemicro-core/src/config.rs`
-   - `GemicroConfig`, `ResearchConfig`, `LlmConfig`
-   - Hardcode `MODEL = "gemini-3-flash-preview"` as constant
+   - `MODEL` constant: Hardcode `"gemini-3-flash-preview"`
+   - `GemicroConfig`: Contains only cross-agent config (just `LlmConfig`)
+   - `LlmConfig`: Shared LLM settings (timeouts, retries, temperature)
+   - `ResearchConfig`: Agent-specific config (passed to DeepResearchAgent constructor, NOT in GemicroConfig)
+   - **IMPORTANT**: Follow Evergreen philosophy - don't embed agent-specific config in GemicroConfig
    - Implement `Default` with sensible values
 
 6. **Implement lib.rs**

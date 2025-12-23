@@ -6,19 +6,20 @@ use std::time::Duration;
 pub const MODEL: &str = "gemini-3-flash-preview";
 
 /// Top-level configuration for gemicro
+///
+/// Contains only cross-agent configuration. Agent-specific configuration
+/// (like `ResearchConfig`) should be passed directly to agent constructors,
+/// not embedded here. This follows the Evergreen soft-typing philosophy:
+/// extensibility without protocol modifications.
 #[derive(Debug, Clone)]
 pub struct GemicroConfig {
-    /// Configuration for research agents
-    pub research: ResearchConfig,
-
-    /// Configuration for LLM client
+    /// Configuration for LLM client (shared across all agents)
     pub llm: LlmConfig,
 }
 
 impl Default for GemicroConfig {
     fn default() -> Self {
         Self {
-            research: ResearchConfig::default(),
             llm: LlmConfig::default(),
         }
     }
@@ -126,8 +127,8 @@ mod tests {
     #[test]
     fn test_default_gemicro_config() {
         let config = GemicroConfig::default();
-        assert_eq!(config.research.max_sub_queries, 5);
         assert_eq!(config.llm.max_tokens, 2048);
+        assert_eq!(config.llm.timeout, Duration::from_secs(30));
     }
 
     #[test]
