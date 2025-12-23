@@ -2,8 +2,9 @@
 //!
 //! Provides a simplified interface to the rust-genai Interactions API with:
 //! - Automatic timeout enforcement from config
-//! - Normalized token counting (returns 0 with warning if unavailable)
+//! - Optional token counting (`None` if unavailable from API)
 //! - Both buffered (`generate`) and streaming (`generate_stream`) modes
+//! - Automatic retry with exponential backoff on transient failures
 //!
 //! # Example
 //!
@@ -18,7 +19,9 @@
 //! let response = client.generate(request).await?;
 //!
 //! println!("Response: {}", response.text);
-//! println!("Tokens used: {}", response.tokens_used);
+//! if let Some(tokens) = response.tokens_used {
+//!     println!("Tokens used: {}", tokens);
+//! }
 //! # Ok(())
 //! # }
 //! ```
@@ -26,6 +29,7 @@
 use crate::config::{LlmConfig, MODEL};
 use crate::error::LlmError;
 use futures_util::stream::{Stream, StreamExt};
+use rust_genai::GenerationConfig;
 
 /// LLM client wrapping rust-genai with timeout and configuration
 pub struct LlmClient {
@@ -52,21 +56,24 @@ pub struct LlmResponse {
     /// Generated text
     pub text: String,
 
-    /// Number of tokens used (0 if unavailable)
-    pub tokens_used: u32,
+    /// Number of tokens used, if available from the API
+    ///
+    /// `None` indicates the API did not return token usage information.
+    /// This is distinct from `Some(0)` which would mean zero tokens were used.
+    pub tokens_used: Option<u32>,
 
     /// Interaction ID for tracking
     pub interaction_id: String,
 }
 
 /// Chunk from streaming LLM response
+///
+/// The stream ends naturally when no more chunks are available (yields `None`).
+/// There is no artificial "final" marker - simply iterate until the stream ends.
 #[derive(Debug, Clone)]
 pub struct LlmStreamChunk {
-    /// Text content of this chunk
+    /// Text content of this chunk (may be empty for some chunks)
     pub text: String,
-
-    /// Whether this is the final chunk
-    pub is_final: bool,
 }
 
 impl LlmRequest {
@@ -98,6 +105,12 @@ impl LlmClient {
     /// This method waits for the full response before returning.
     /// Use `generate_stream()` for real-time token-by-token output.
     ///
+    /// # Retry Behavior
+    ///
+    /// Transient failures (timeouts, rate limits, temporary API errors) are
+    /// automatically retried up to `config.max_retries` times with exponential
+    /// backoff starting at `config.retry_base_delay_ms`.
+    ///
     /// # Errors
     ///
     /// Returns:
@@ -121,7 +134,33 @@ impl LlmClient {
     pub async fn generate(&self, request: LlmRequest) -> Result<LlmResponse, LlmError> {
         self.validate_request(&request)?;
 
-        let interaction = self.build_interaction(&request);
+        let mut last_error = None;
+
+        for attempt in 0..=self.config.max_retries {
+            match self.generate_once(&request).await {
+                Ok(response) => return Ok(response),
+                Err(e) if Self::is_retryable(&e) && attempt < self.config.max_retries => {
+                    log::warn!(
+                        "LLM request failed (attempt {}/{}): {}, retrying...",
+                        attempt + 1,
+                        self.config.max_retries + 1,
+                        e
+                    );
+                    last_error = Some(e);
+                    tokio::time::sleep(self.config.retry_delay(attempt)).await;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+
+        // This shouldn't be reachable, but just in case
+        Err(last_error
+            .unwrap_or_else(|| LlmError::Other("Retry loop exited unexpectedly".to_string())))
+    }
+
+    /// Execute a single generate request (no retries)
+    async fn generate_once(&self, request: &LlmRequest) -> Result<LlmResponse, LlmError> {
+        let interaction = self.build_interaction(request);
 
         // Execute with timeout
         let timeout_duration = self.config.timeout;
@@ -146,11 +185,33 @@ impl LlmClient {
         })
     }
 
+    /// Determine if an error is retryable
+    fn is_retryable(error: &LlmError) -> bool {
+        match error {
+            // Transient failures that may succeed on retry
+            LlmError::Timeout(_) => true,
+            LlmError::RateLimit(_) => true,
+            // API errors may be transient (network issues, server overload)
+            LlmError::GenAi(_) => true,
+            // These are not retryable
+            LlmError::InvalidRequest(_) => false,
+            LlmError::ResponseProcessing(_) => false,
+            LlmError::NoContent => false,
+            LlmError::Other(_) => false,
+        }
+    }
+
     /// Generate a streaming response
     ///
     /// Returns a stream of text chunks as they arrive from the LLM.
-    /// The final chunk has `is_final = true`. Each chunk read is subject
-    /// to the configured timeout.
+    /// The stream ends naturally when the response is complete (yields `None`).
+    ///
+    /// # Timeout Behavior
+    ///
+    /// Each chunk read is subject to the configured timeout. The timeout resets
+    /// for each chunk, so slow streaming (where each chunk arrives within the
+    /// timeout window) will not trigger an error. If no chunk arrives within
+    /// the timeout period, `LlmError::Timeout` is returned.
     ///
     /// # Errors
     ///
@@ -202,7 +263,6 @@ impl LlmClient {
                         if let Some(text) = response.text() {
                             yield LlmStreamChunk {
                                 text: text.to_string(),
-                                is_final: false,
                             };
                         }
                     }
@@ -212,12 +272,7 @@ impl LlmClient {
                     None => break,
                 }
             }
-
-            // Emit final marker
-            yield LlmStreamChunk {
-                text: String::new(),
-                is_final: true,
-            };
+            // Stream ends naturally - no artificial final marker needed
         }
     }
 
@@ -233,11 +288,18 @@ impl LlmClient {
 
     /// Build an interaction from the request (DRY helper)
     fn build_interaction(&self, request: &LlmRequest) -> rust_genai::InteractionBuilder<'_> {
+        let generation_config = GenerationConfig {
+            temperature: Some(self.config.temperature),
+            max_output_tokens: Some(self.config.max_tokens as i32),
+            ..Default::default()
+        };
+
         let mut interaction = self
             .client
             .interaction()
             .with_model(MODEL)
-            .with_text(&request.prompt);
+            .with_text(&request.prompt)
+            .with_generation_config(generation_config);
 
         if let Some(ref system) = request.system_instruction {
             interaction = interaction.with_system_instruction(system);
@@ -246,20 +308,28 @@ impl LlmClient {
         interaction
     }
 
-    /// Extract token count from response, returning 0 with warning if unavailable
-    fn extract_token_count(response: &rust_genai::InteractionResponse) -> u32 {
-        response
+    /// Extract token count from response, returning None if unavailable
+    fn extract_token_count(response: &rust_genai::InteractionResponse) -> Option<u32> {
+        let result = response
             .usage
             .as_ref()
             .and_then(|u| u.total_tokens)
-            .and_then(|t| u32::try_from(t).ok())
-            .unwrap_or_else(|| {
-                log::warn!(
-                    "Token count unavailable for interaction {}, returning 0",
-                    response.id
-                );
-                0
-            })
+            .and_then(|t| {
+                u32::try_from(t).ok().or_else(|| {
+                    log::warn!(
+                        "Token count {} exceeds u32::MAX for interaction {}",
+                        t,
+                        response.id
+                    );
+                    None
+                })
+            });
+
+        if result.is_none() {
+            log::debug!("Token count unavailable for interaction {}", response.id);
+        }
+
+        result
     }
 }
 
@@ -288,29 +358,110 @@ mod tests {
     fn test_llm_response_creation() {
         let response = LlmResponse {
             text: "Generated text".to_string(),
-            tokens_used: 42,
+            tokens_used: Some(42),
             interaction_id: "test-123".to_string(),
         };
 
         assert_eq!(response.text, "Generated text");
-        assert_eq!(response.tokens_used, 42);
+        assert_eq!(response.tokens_used, Some(42));
         assert_eq!(response.interaction_id, "test-123");
+    }
+
+    #[test]
+    fn test_llm_response_with_no_tokens() {
+        let response = LlmResponse {
+            text: "Generated text".to_string(),
+            tokens_used: None,
+            interaction_id: "test-456".to_string(),
+        };
+
+        assert_eq!(response.text, "Generated text");
+        assert!(response.tokens_used.is_none());
     }
 
     #[test]
     fn test_llm_stream_chunk_creation() {
         let chunk = LlmStreamChunk {
             text: "Hello".to_string(),
-            is_final: false,
         };
         assert_eq!(chunk.text, "Hello");
-        assert!(!chunk.is_final);
 
-        let final_chunk = LlmStreamChunk {
+        let empty_chunk = LlmStreamChunk {
             text: String::new(),
-            is_final: true,
         };
-        assert!(final_chunk.is_final);
-        assert!(final_chunk.text.is_empty());
+        assert!(empty_chunk.text.is_empty());
+    }
+
+    #[test]
+    fn test_is_retryable_timeout() {
+        assert!(LlmClient::is_retryable(&LlmError::Timeout(5000)));
+    }
+
+    #[test]
+    fn test_is_retryable_rate_limit() {
+        assert!(LlmClient::is_retryable(&LlmError::RateLimit(
+            "Too many requests".to_string()
+        )));
+    }
+
+    #[test]
+    fn test_is_not_retryable_invalid_request() {
+        assert!(!LlmClient::is_retryable(&LlmError::InvalidRequest(
+            "Bad prompt".to_string()
+        )));
+    }
+
+    #[test]
+    fn test_is_not_retryable_no_content() {
+        assert!(!LlmClient::is_retryable(&LlmError::NoContent));
+    }
+
+    #[test]
+    fn test_is_not_retryable_other() {
+        assert!(!LlmClient::is_retryable(&LlmError::Other(
+            "Unknown error".to_string()
+        )));
+    }
+
+    #[test]
+    fn test_validate_request_empty_prompt() {
+        let genai_client = rust_genai::Client::builder("test-key".to_string()).build();
+        let client = LlmClient::new(genai_client, LlmConfig::default());
+        let request = LlmRequest::new("");
+
+        let result = client.validate_request(&request);
+        assert!(result.is_err());
+        assert!(matches!(result, Err(LlmError::InvalidRequest(_))));
+    }
+
+    #[test]
+    fn test_validate_request_valid_prompt() {
+        let genai_client = rust_genai::Client::builder("test-key".to_string()).build();
+        let client = LlmClient::new(genai_client, LlmConfig::default());
+        let request = LlmRequest::new("Valid prompt");
+
+        let result = client.validate_request(&request);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_generation_config_applied() {
+        use std::time::Duration;
+
+        let config = LlmConfig {
+            temperature: 0.5,
+            max_tokens: 1024,
+            timeout: Duration::from_secs(10),
+            max_retries: 3,
+            retry_base_delay_ms: 500,
+        };
+
+        let genai_client = rust_genai::Client::builder("test-key".to_string()).build();
+        let client = LlmClient::new(genai_client, config.clone());
+
+        // Verify client stored config correctly
+        assert_eq!(client.config.temperature, 0.5);
+        assert_eq!(client.config.max_tokens, 1024);
+        assert_eq!(client.config.max_retries, 3);
     }
 }

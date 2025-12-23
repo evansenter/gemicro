@@ -164,10 +164,7 @@ impl AgentUpdate {
     pub fn as_sub_query_completed(&self) -> Option<SubQueryResult> {
         if self.event_type == EVENT_SUB_QUERY_COMPLETED {
             serde_json::from_value(self.data.clone()).ok().or_else(|| {
-                log::warn!(
-                    "Failed to parse sub_query_completed data: {:?}",
-                    self.data
-                );
+                log::warn!("Failed to parse sub_query_completed data: {:?}", self.data);
                 None
             })
         } else {
