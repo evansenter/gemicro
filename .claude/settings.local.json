@@ -1,24 +1,24 @@
 {
   "permissions": {
     "allow": [
-      "WebFetch(domain:github.com)",
-      "Skill(feature-dev:feature-dev)",
-      "WebFetch(domain:raw.githubusercontent.com)",
-      "Bash(git init:*)",
-      "Bash(git commit:*)",
-      "Bash(gh repo create:*)",
-      "Bash(git push:*)",
-      "Bash(gh pr create:*)",
-      "Bash(gh pr view:*)",
       "Bash(cargo check:*)",
-      "Bash(git ls-remote:*)",
-      "Bash(gh pr merge:*)",
-      "Bash(git stash:*)",
       "Bash(gh pr checks:*)",
+      "Bash(gh pr create:*)",
+      "Bash(gh pr merge:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh repo create:*)",
       "Bash(gh run watch:*)",
-      "Bash(git stash pop:*)",
+      "Bash(git commit:*)",
+      "Bash(git init:*)",
+      "Bash(git ls-remote:*)",
+      "Bash(git push:*)",
       "Bash(git stash apply:*)",
-      "Bash(git stash list:*)"
+      "Bash(git stash list:*)",
+      "Bash(git stash pop:*)",
+      "Bash(git stash:*)",
+      "Skill(feature-dev:feature-dev)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)"
     ]
   }
 }
