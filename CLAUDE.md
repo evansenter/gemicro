@@ -229,6 +229,33 @@ match update.event_type.as_str() {
 3. **Document public APIs**: Use rustdoc for all public items
 4. **Keep it simple**: Avoid premature abstraction; solve today's problem simply
 
+## Claude Code Permissions
+
+The `.claude/settings.local.json` file defines permissions for Claude Code automation. These are developer-specific settings.
+
+### Current Permissions
+
+| Permission | Purpose | Risk Level |
+|------------|---------|------------|
+| `cargo check:*` | Type checking | Low (read-only) |
+| `gh pr checks:*` | View PR CI status | Low (read-only) |
+| `gh pr create:*` | Create pull requests | Low |
+| `gh pr merge:*` | Merge pull requests | Medium - ensure branch protection is enabled |
+| `gh pr view:*` | View PR details | Low (read-only) |
+| `gh repo create:*` | Create repositories | Low |
+| `gh run watch:*` | Monitor GitHub Actions | Low (read-only) |
+| `git commit:*` | Create commits | Low |
+| `git init:*` | Initialize repos | Low |
+| `git ls-remote:*` | Check remote refs | Low (read-only) |
+| `git push:*` | Push to remote | Medium |
+| `git stash:*` | Stash operations (includes pop, apply, list) | Low |
+
+### Security Notes
+
+- `gh pr merge:*` allows merging any PR. Rely on GitHub branch protection rules for safeguards.
+- Wildcard patterns (`:*`) allow any arguments to the command.
+- These are local settings and should be reviewed per-developer based on workflow needs.
+
 ## Questions?
 
 See IMPLEMENTATION_PLAN.md for detailed phase-by-phase implementation details.
