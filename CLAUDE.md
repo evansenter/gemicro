@@ -238,9 +238,11 @@ The `.claude/settings.local.json` file defines permissions for Claude Code autom
 | Permission | Purpose | Risk Level |
 |------------|---------|------------|
 | `cargo check:*` | Type checking | Low (read-only) |
+| `gh api:*` | GitHub API calls | Low-Medium |
 | `gh pr checks:*` | View PR CI status | Low (read-only) |
+| `gh pr comment:*` | Comment on PRs | Low |
 | `gh pr create:*` | Create pull requests | Low |
-| `gh pr merge:*` | Merge pull requests | Medium - ensure branch protection is enabled |
+| `gh pr merge:*` | Merge pull requests | Medium |
 | `gh pr view:*` | View PR details | Low (read-only) |
 | `gh repo create:*` | Create repositories | Low |
 | `gh run watch:*` | Monitor GitHub Actions | Low (read-only) |
@@ -248,11 +250,12 @@ The `.claude/settings.local.json` file defines permissions for Claude Code autom
 | `git init:*` | Initialize repos | Low |
 | `git ls-remote:*` | Check remote refs | Low (read-only) |
 | `git push:*` | Push to remote | Medium |
-| `git stash:*` | Stash operations (includes pop, apply, list) | Low |
+| `git stash:*` | All stash operations (includes destructive: drop, clear) | Low-Medium |
 
 ### Security Notes
 
-- `gh pr merge:*` allows merging any PR. Rely on GitHub branch protection rules for safeguards.
+- **`gh pr merge:*`**: Allows merging any PR. **Branch protection rules are required** to prevent merging unreviewed or failing PRs. Ensure your repository has appropriate protections enabled.
+- **`git stash:*`**: Includes destructive operations (`git stash drop`, `git stash clear`) that permanently delete stashed changes. Use with awareness.
 - Wildcard patterns (`:*`) allow any arguments to the command.
 - These are local settings and should be reviewed per-developer based on workflow needs.
 
