@@ -11,18 +11,10 @@ pub const MODEL: &str = "gemini-3-flash-preview";
 /// (like `ResearchConfig`) should be passed directly to agent constructors,
 /// not embedded here. This follows the Evergreen soft-typing philosophy:
 /// extensibility without protocol modifications.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct GemicroConfig {
     /// Configuration for LLM client (shared across all agents)
     pub llm: LlmConfig,
-}
-
-impl Default for GemicroConfig {
-    fn default() -> Self {
-        Self {
-            llm: LlmConfig::default(),
-        }
-    }
 }
 
 /// Configuration for Deep Research agent
@@ -56,10 +48,15 @@ impl ResearchConfig {
     /// Validate the configuration
     ///
     /// Returns an error if:
-    /// - `min_sub_queries > max_sub_queries`
+    /// - `min_sub_queries` is 0
     /// - `max_sub_queries` is 0
+    /// - `min_sub_queries > max_sub_queries`
     /// - `total_timeout` is 0
     pub fn validate(&self) -> Result<(), String> {
+        if self.min_sub_queries == 0 {
+            return Err("min_sub_queries must be greater than 0".to_string());
+        }
+
         if self.max_sub_queries == 0 {
             return Err("max_sub_queries must be greater than 0".to_string());
         }
@@ -245,7 +242,17 @@ mod tests {
 
         let result = config.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("must be greater than 0"));
+        assert!(result.unwrap_err().contains("max_sub_queries must be greater than 0"));
+    }
+
+    #[test]
+    fn test_research_config_validation_zero_min() {
+        let mut config = ResearchConfig::default();
+        config.min_sub_queries = 0;
+
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("min_sub_queries must be greater than 0"));
     }
 
     #[test]

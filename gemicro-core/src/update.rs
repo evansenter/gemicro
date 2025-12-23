@@ -285,6 +285,42 @@ mod tests {
     }
 
     #[test]
+    fn test_accessor_malformed_data() {
+        use serde_json::json;
+
+        // Correct event_type but wrong data structure
+        let update = AgentUpdate {
+            event_type: EVENT_DECOMPOSITION_COMPLETE.into(),
+            message: "Test".into(),
+            timestamp: std::time::SystemTime::now(),
+            data: json!({ "wrong_field": "not sub_queries" }),
+        };
+
+        // Should return None and log warning (not panic)
+        assert!(update.as_decomposition_complete().is_none());
+
+        // Test sub_query_completed with malformed data
+        let update = AgentUpdate {
+            event_type: EVENT_SUB_QUERY_COMPLETED.into(),
+            message: "Test".into(),
+            timestamp: std::time::SystemTime::now(),
+            data: json!({ "id": "not_a_number" }), // id should be usize
+        };
+
+        assert!(update.as_sub_query_completed().is_none());
+
+        // Test final_result with malformed data
+        let update = AgentUpdate {
+            event_type: EVENT_FINAL_RESULT.into(),
+            message: "Test".into(),
+            timestamp: std::time::SystemTime::now(),
+            data: json!({ "answer": 123 }), // answer should be string
+        };
+
+        assert!(update.as_final_result().is_none());
+    }
+
+    #[test]
     fn test_serialization_roundtrip() {
         let original = AgentUpdate::sub_query_completed(5, "Test".to_string(), 99);
 
