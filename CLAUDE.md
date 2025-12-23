@@ -14,10 +14,15 @@ Gemicro is a CLI agent exploration platform for experimenting with AI agent impl
 
 ### Principles
 
-1. **Extensibility without protocol modifications**: Adding new agent types should NOT require changes to core types
-2. **Semantic meaning in metadata, not structure**: Use string identifiers (`event_type`) rather than enum variants
-3. **Defer constraints to higher layers**: Core protocol stays flexible; implementations add structure
-4. **Forward compatibility**: Unknown event types/configs are gracefully handled
+| Principle | Description |
+|-----------|-------------|
+| **Soft-Typed Events** | `event_type: String` + `data: JSON` instead of rigid enums |
+| **Semantic Meaning in Metadata** | Meaning lives in field names and event_type, not structure |
+| **ID Opacity** | IDs are opaque identifiers—never encode semantics in ID values |
+| **Named Parameters** | JSON fields are named; adding new fields is always non-breaking |
+| **Graceful Unknown Handling** | Unknown event_types and data fields MUST be ignored, not errors |
+| **Idempotent Events** | Events should be safely re-processable without side effects |
+| **Agent-Specific Config Isolation** | Config belongs to agent constructors, not shared context |
 
 ### What This Means in Practice
 
@@ -85,6 +90,33 @@ pub struct GemicroConfig {
     pub react: ReactConfig,              // ❌ Would need to add this
     pub reflexion: ReflexionConfig,      // ❌ And this
     pub planning: PlanningConfig,        // ❌ And this...
+}
+```
+
+#### ✅ DO: Keep AgentContext Minimal
+
+```rust
+// CORRECT: AgentContext has only cross-agent shared resources
+pub struct AgentContext {
+    pub llm: Arc<LlmClient>,  // All agents need LLM access
+    // NO agent-specific config here!
+}
+
+// Config goes to constructor
+let agent = DeepResearchAgent::new(research_config);
+let stream = agent.execute(query, context);
+```
+
+#### ✅ DO: Gracefully Ignore Unknown Events
+
+```rust
+match update.event_type.as_str() {
+    "sub_query_completed" => { /* handle */ }
+    "final_result" => { /* handle */ }
+    _ => {
+        log::warn!("Unknown event type: {}", update.event_type);
+        // Continue - NOT an error
+    }
 }
 ```
 
@@ -185,7 +217,7 @@ match update.event_type.as_str() {
 
 ## Dependencies
 
-- **rust-genai**: Local path dependency (`../rust-genai`)
+- **rust-genai**: Git dependency from GitHub (`evansenter/rust-genai`, branch main)
 - **tokio**: Async runtime
 - **async-stream**: For streaming agent implementations
 - **serde/serde_json**: Soft-typed data serialization

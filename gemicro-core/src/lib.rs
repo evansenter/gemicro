@@ -31,4 +31,8 @@ pub mod update;
 // Re-export public API
 pub use config::{GemicroConfig, LlmConfig, ResearchConfig, MODEL};
 pub use error::{AgentError, GemicroError, LlmError};
-pub use update::{AgentUpdate, FinalResult, ResultMetadata, SubQueryResult};
+pub use update::{
+    AgentUpdate, FinalResult, ResultMetadata, SubQueryResult, EVENT_DECOMPOSITION_COMPLETE,
+    EVENT_DECOMPOSITION_STARTED, EVENT_FINAL_RESULT, EVENT_SUB_QUERY_COMPLETED,
+    EVENT_SUB_QUERY_FAILED, EVENT_SUB_QUERY_STARTED, EVENT_SYNTHESIS_STARTED,
+};

@@ -34,6 +34,19 @@ See [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for detailed implementation
 
 ## Development
 
+### Prerequisites
+
+This project depends on the [rust-genai](https://github.com/evansenter/rust-genai) library (v0.2.0+) via git dependency.
+
+```bash
+# Clone and build
+git clone https://github.com/evansenter/gemicro.git
+cd gemicro
+cargo build
+```
+
+### Building and Testing
+
 ```bash
 # Build workspace
 cargo build
@@ -41,8 +54,23 @@ cargo build
 # Run tests
 cargo test
 
+# Run tests with logging output
+RUST_LOG=debug cargo test
+
 # Build with all features
 cargo build --all-features
+```
+
+### Dependency Note
+
+The workspace `Cargo.toml` references rust-genai from GitHub:
+```toml
+rust-genai = { git = "https://github.com/evansenter/rust-genai", branch = "main" }
+```
+
+For local development of rust-genai, you can temporarily switch to a path dependency:
+```toml
+rust-genai = { path = "../rust-genai" }
 ```
 
 ## Planned Usage (CLI coming in Phase 4)

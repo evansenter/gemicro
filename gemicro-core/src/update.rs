@@ -2,6 +2,15 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::time::SystemTime;
 
+// Event type constants to prevent typos and improve refactorability
+pub const EVENT_DECOMPOSITION_STARTED: &str = "decomposition_started";
+pub const EVENT_DECOMPOSITION_COMPLETE: &str = "decomposition_complete";
+pub const EVENT_SUB_QUERY_STARTED: &str = "sub_query_started";
+pub const EVENT_SUB_QUERY_COMPLETED: &str = "sub_query_completed";
+pub const EVENT_SUB_QUERY_FAILED: &str = "sub_query_failed";
+pub const EVENT_SYNTHESIS_STARTED: &str = "synthesis_started";
+pub const EVENT_FINAL_RESULT: &str = "final_result";
+
 /// Flexible event structure for agent updates.
 ///
 /// Inspired by [Evergreen protocol](https://github.com/google-deepmind/evergreen-spec)'s
@@ -53,7 +62,7 @@ impl AgentUpdate {
     /// Create a decomposition_started event
     pub fn decomposition_started() -> Self {
         Self {
-            event_type: "decomposition_started".into(),
+            event_type: EVENT_DECOMPOSITION_STARTED.into(),
             message: "Decomposing query into sub-queries".into(),
             timestamp: SystemTime::now(),
             data: json!({}),
@@ -63,7 +72,7 @@ impl AgentUpdate {
     /// Create a decomposition_complete event
     pub fn decomposition_complete(sub_queries: Vec<String>) -> Self {
         Self {
-            event_type: "decomposition_complete".into(),
+            event_type: EVENT_DECOMPOSITION_COMPLETE.into(),
             message: format!("Decomposed into {} sub-queries", sub_queries.len()),
             timestamp: SystemTime::now(),
             data: json!({ "sub_queries": sub_queries }),
@@ -73,7 +82,7 @@ impl AgentUpdate {
     /// Create a sub_query_started event
     pub fn sub_query_started(id: usize, query: String) -> Self {
         Self {
-            event_type: "sub_query_started".into(),
+            event_type: EVENT_SUB_QUERY_STARTED.into(),
             message: format!("Sub-query {} started", id),
             timestamp: SystemTime::now(),
             data: json!({ "id": id, "query": query }),
@@ -83,7 +92,7 @@ impl AgentUpdate {
     /// Create a sub_query_completed event
     pub fn sub_query_completed(id: usize, result: String, tokens_used: u32) -> Self {
         Self {
-            event_type: "sub_query_completed".into(),
+            event_type: EVENT_SUB_QUERY_COMPLETED.into(),
             message: format!("Sub-query {} completed", id),
             timestamp: SystemTime::now(),
             data: json!({
@@ -97,7 +106,7 @@ impl AgentUpdate {
     /// Create a sub_query_failed event
     pub fn sub_query_failed(id: usize, error: String) -> Self {
         Self {
-            event_type: "sub_query_failed".into(),
+            event_type: EVENT_SUB_QUERY_FAILED.into(),
             message: format!("Sub-query {} failed", id),
             timestamp: SystemTime::now(),
             data: json!({ "id": id, "error": error }),
@@ -107,7 +116,7 @@ impl AgentUpdate {
     /// Create a synthesis_started event
     pub fn synthesis_started() -> Self {
         Self {
-            event_type: "synthesis_started".into(),
+            event_type: EVENT_SYNTHESIS_STARTED.into(),
             message: "Synthesizing results".into(),
             timestamp: SystemTime::now(),
             data: json!({}),
@@ -117,7 +126,7 @@ impl AgentUpdate {
     /// Create a final_result event
     pub fn final_result(answer: String, metadata: ResultMetadata) -> Self {
         Self {
-            event_type: "final_result".into(),
+            event_type: EVENT_FINAL_RESULT.into(),
             message: "Research complete".into(),
             timestamp: SystemTime::now(),
             data: json!({
@@ -132,10 +141,17 @@ impl AgentUpdate {
     /// Returns `None` if this is not a decomposition_complete event
     /// or if the data doesn't match the expected schema.
     pub fn as_decomposition_complete(&self) -> Option<Vec<String>> {
-        if self.event_type == "decomposition_complete" {
+        if self.event_type == EVENT_DECOMPOSITION_COMPLETE {
             self.data
                 .get("sub_queries")
                 .and_then(|v| serde_json::from_value(v.clone()).ok())
+                .or_else(|| {
+                    log::warn!(
+                        "Failed to parse decomposition_complete data: {:?}",
+                        self.data
+                    );
+                    None
+                })
         } else {
             None
         }
@@ -146,8 +162,14 @@ impl AgentUpdate {
     /// Returns `None` if this is not a sub_query_completed event
     /// or if the data doesn't match the expected schema.
     pub fn as_sub_query_completed(&self) -> Option<SubQueryResult> {
-        if self.event_type == "sub_query_completed" {
-            serde_json::from_value(self.data.clone()).ok()
+        if self.event_type == EVENT_SUB_QUERY_COMPLETED {
+            serde_json::from_value(self.data.clone()).ok().or_else(|| {
+                log::warn!(
+                    "Failed to parse sub_query_completed data: {:?}",
+                    self.data
+                );
+                None
+            })
         } else {
             None
         }
@@ -158,8 +180,11 @@ impl AgentUpdate {
     /// Returns `None` if this is not a final_result event
     /// or if the data doesn't match the expected schema.
     pub fn as_final_result(&self) -> Option<FinalResult> {
-        if self.event_type == "final_result" {
-            serde_json::from_value(self.data.clone()).ok()
+        if self.event_type == EVENT_FINAL_RESULT {
+            serde_json::from_value(self.data.clone()).ok().or_else(|| {
+                log::warn!("Failed to parse final_result data: {:?}", self.data);
+                None
+            })
         } else {
             None
         }
@@ -197,7 +222,7 @@ mod tests {
     #[test]
     fn test_decomposition_started() {
         let update = AgentUpdate::decomposition_started();
-        assert_eq!(update.event_type, "decomposition_started");
+        assert_eq!(update.event_type, EVENT_DECOMPOSITION_STARTED);
         assert_eq!(update.message, "Decomposing query into sub-queries");
     }
 
@@ -206,7 +231,7 @@ mod tests {
         let queries = vec!["Q1".to_string(), "Q2".to_string()];
         let update = AgentUpdate::decomposition_complete(queries.clone());
 
-        assert_eq!(update.event_type, "decomposition_complete");
+        assert_eq!(update.event_type, EVENT_DECOMPOSITION_COMPLETE);
         assert!(update.message.contains("2 sub-queries"));
 
         let extracted = update.as_decomposition_complete().unwrap();
@@ -217,7 +242,7 @@ mod tests {
     fn test_sub_query_completed() {
         let update = AgentUpdate::sub_query_completed(0, "Result".to_string(), 42);
 
-        assert_eq!(update.event_type, "sub_query_completed");
+        assert_eq!(update.event_type, EVENT_SUB_QUERY_COMPLETED);
 
         let result = update.as_sub_query_completed().unwrap();
         assert_eq!(result.id, 0);
@@ -229,7 +254,7 @@ mod tests {
     fn test_sub_query_failed() {
         let update = AgentUpdate::sub_query_failed(1, "Timeout".to_string());
 
-        assert_eq!(update.event_type, "sub_query_failed");
+        assert_eq!(update.event_type, EVENT_SUB_QUERY_FAILED);
         assert!(update.message.contains("failed"));
     }
 
@@ -243,7 +268,7 @@ mod tests {
         };
         let update = AgentUpdate::final_result("Answer".to_string(), metadata);
 
-        assert_eq!(update.event_type, "final_result");
+        assert_eq!(update.event_type, EVENT_FINAL_RESULT);
 
         let result = update.as_final_result().unwrap();
         assert_eq!(result.answer, "Answer");

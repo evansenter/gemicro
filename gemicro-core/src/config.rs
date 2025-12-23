@@ -52,6 +52,33 @@ pub struct ResearchConfig {
     pub total_timeout: Duration,
 }
 
+impl ResearchConfig {
+    /// Validate the configuration
+    ///
+    /// Returns an error if:
+    /// - `min_sub_queries > max_sub_queries`
+    /// - `max_sub_queries` is 0
+    /// - `total_timeout` is 0
+    pub fn validate(&self) -> Result<(), String> {
+        if self.max_sub_queries == 0 {
+            return Err("max_sub_queries must be greater than 0".to_string());
+        }
+
+        if self.min_sub_queries > self.max_sub_queries {
+            return Err(format!(
+                "min_sub_queries ({}) cannot be greater than max_sub_queries ({})",
+                self.min_sub_queries, self.max_sub_queries
+            ));
+        }
+
+        if self.total_timeout.as_secs() == 0 {
+            return Err("total_timeout must be greater than 0".to_string());
+        }
+
+        Ok(())
+    }
+}
+
 impl Default for ResearchConfig {
     fn default() -> Self {
         Self {
@@ -109,8 +136,17 @@ impl LlmConfig {
     /// Get the retry delay for a given attempt number (0-indexed)
     ///
     /// Uses exponential backoff: delay = base_delay * 2^attempt
+    ///
+    /// The delay is capped at 60 seconds to prevent overflow and
+    /// unreasonably long wait times.
     pub fn retry_delay(&self, attempt: u32) -> Duration {
-        let delay_ms = self.retry_base_delay_ms * 2u64.pow(attempt);
+        const MAX_DELAY_MS: u64 = 60_000; // 60 seconds
+
+        let delay_ms = self
+            .retry_base_delay_ms
+            .saturating_mul(2u64.saturating_pow(attempt))
+            .min(MAX_DELAY_MS);
+
         Duration::from_millis(delay_ms)
     }
 }
@@ -161,6 +197,16 @@ mod tests {
     }
 
     #[test]
+    fn test_retry_delay_overflow_protection() {
+        let config = LlmConfig::default();
+
+        // Large attempt numbers should be capped at 60 seconds
+        assert_eq!(config.retry_delay(10), Duration::from_millis(60_000));
+        assert_eq!(config.retry_delay(100), Duration::from_millis(60_000));
+        assert_eq!(config.retry_delay(u32::MAX), Duration::from_millis(60_000));
+    }
+
+    #[test]
     fn test_custom_config() {
         let mut config = ResearchConfig::default();
         config.max_sub_queries = 10;
@@ -168,5 +214,47 @@ mod tests {
 
         assert_eq!(config.max_sub_queries, 10);
         assert!(!config.continue_on_partial_failure);
+    }
+
+    #[test]
+    fn test_research_config_validation_success() {
+        let config = ResearchConfig::default();
+        assert!(config.validate().is_ok());
+
+        let mut config = ResearchConfig::default();
+        config.min_sub_queries = 5;
+        config.max_sub_queries = 5;
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_research_config_validation_min_greater_than_max() {
+        let mut config = ResearchConfig::default();
+        config.min_sub_queries = 10;
+        config.max_sub_queries = 5;
+
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("cannot be greater than"));
+    }
+
+    #[test]
+    fn test_research_config_validation_zero_max() {
+        let mut config = ResearchConfig::default();
+        config.max_sub_queries = 0;
+
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("must be greater than 0"));
+    }
+
+    #[test]
+    fn test_research_config_validation_zero_timeout() {
+        let mut config = ResearchConfig::default();
+        config.total_timeout = Duration::from_secs(0);
+
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("must be greater than 0"));
     }
 }
