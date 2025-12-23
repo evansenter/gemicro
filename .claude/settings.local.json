@@ -15,7 +15,10 @@
       "Bash(gh pr merge:*)",
       "Bash(git stash:*)",
       "Bash(gh pr checks:*)",
-      "Bash(gh run watch:*)"
+      "Bash(gh run watch:*)",
+      "Bash(git stash pop:*)",
+      "Bash(git stash apply:*)",
+      "Bash(git stash list:*)"
     ]
   }
 }
