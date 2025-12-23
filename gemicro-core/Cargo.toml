@@ -1,0 +1,15 @@
+[package]
+name = "gemicro-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rust-genai = { workspace = true }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+async-stream = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+futures-util = { workspace = true }
+log = { workspace = true }
