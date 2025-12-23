@@ -13,8 +13,10 @@
 Gemicro is a CLI application for exploring AI agent implementation patterns. The initial implementation focuses on a Deep Research agent that decomposes complex queries into parallel sub-queries, executes them concurrently, and synthesizes results.
 
 **Key Design Decisions:**
+- **Evergreen soft-typing philosophy**: Core types (AgentUpdate, GemicroConfig) use flexible structures that don't require modification when adding new agent types
 - **Streaming-first architecture**: Agents emit real-time updates via async streams
 - **Soft-typed events**: AgentUpdate uses flexible JSON data following [Evergreen spec](https://github.com/google-deepmind/evergreen-spec) philosophy for extensibility
+- **Agent-specific config passed to constructors**: GemicroConfig contains ONLY cross-agent concerns; agent-specific config (like ResearchConfig) passed directly to agent constructors
 - **Two-crate workspace**: gemicro-core (library) + gemicro-cli (binary)
 - **iOS-ready**: Core library has zero platform-specific dependencies
 - **Interactions API**: Uses rust-genai's unified Interactions API
@@ -25,6 +27,137 @@ Gemicro is a CLI application for exploring AI agent implementation patterns. The
 
 **Future Exploration Areas:**
 - **Memory compression schemes**: Explore different context compression approaches (Claude Code does excellent context compression) for managing long conversations and research sessions efficiently
+
+---
+
+## Design Principles (MUST READ)
+
+### Evergreen Philosophy
+
+**Core Principle**: The gemicro-core library must support adding new agent types **without modifying core types**.
+
+Inspired by the [Evergreen spec](https://github.com/google-deepmind/evergreen-spec), we adopt these principles:
+
+| Principle | Description |
+|-----------|-------------|
+| **Soft-Typed Events** | `event_type: String` + `data: JSON` instead of rigid enums |
+| **Semantic Meaning in Metadata** | Meaning lives in field names and event_type, not structure |
+| **ID Opacity** | IDs are opaque identifiers—never encode semantics in ID values |
+| **Named Parameters** | JSON fields are named; adding new fields is always non-breaking |
+| **Graceful Unknown Handling** | Unknown event_types and data fields MUST be ignored, not errors |
+| **Idempotent Events** | Events should be safely re-processable without side effects |
+| **Agent-Specific Config Isolation** | Config belongs to agent constructors, not shared context |
+
+### Applying These Principles
+
+#### ✅ DO: Soft-Typed Events
+```rust
+// CORRECT: AgentUpdate uses flexible event_type string
+pub struct AgentUpdate {
+    pub event_type: String,           // "sub_query_completed", "react_step_completed", etc.
+    pub data: serde_json::Value,      // Arbitrary agent-specific data
+    // ...
+}
+```
+
+#### ❌ DON'T: Rigid Enums for Extensible Types
+```rust
+// WRONG: Would require modifying core for each new agent type
+pub enum AgentUpdate {
+    SubQueryCompleted { /* Deep Research */ },
+    ReactStepCompleted { /* ReAct */ },        // ❌ Core modification needed
+    ReflexionCritique { /* Reflexion */ },     // ❌ Core modification needed
+}
+```
+
+#### ✅ DO: Agent-Specific Config Passed to Constructors
+```rust
+// CORRECT: Agent owns its config
+pub struct ResearchConfig { /* Deep Research specific */ }
+impl DeepResearchAgent {
+    pub fn new(config: ResearchConfig) -> Self { /* ... */ }
+}
+
+// Core config contains ONLY cross-agent concerns
+pub struct GemicroConfig {
+    pub llm: LlmConfig,  // ✅ Shared by all agents
+}
+```
+
+#### ❌ DON'T: Embed Agent-Specific Config in Core
+```rust
+// WRONG: Doesn't scale, violates Evergreen philosophy
+pub struct GemicroConfig {
+    pub llm: LlmConfig,
+    pub research: ResearchConfig,        // ❌ Deep Research specific
+    pub react: ReactConfig,              // ❌ Would need to add
+    pub reflexion: ReflexionConfig,      // ❌ Would need to add
+    // ... grows indefinitely
+}
+```
+
+#### ✅ DO: Keep AgentContext Minimal (Cross-Agent Resources Only)
+```rust
+// CORRECT: AgentContext has only shared resources
+pub struct AgentContext {
+    pub llm: Arc<LlmClient>,  // ✅ All agents need LLM access
+    // NO agent-specific config here!
+}
+
+// Agent-specific config goes to constructor
+let agent = DeepResearchAgent::new(research_config);
+let stream = agent.execute(query, context);
+```
+
+#### ❌ DON'T: Put Agent Config in Context
+```rust
+// WRONG: Context becomes agent-specific
+pub struct AgentContext {
+    pub llm: Arc<LlmClient>,
+    pub config: ResearchConfig,  // ❌ Only works for Deep Research
+}
+```
+
+#### ✅ DO: Gracefully Ignore Unknown Events/Fields
+```rust
+// CORRECT: Unknown event types are logged, not errors
+match update.event_type.as_str() {
+    "sub_query_completed" => { /* handle */ }
+    "final_result" => { /* handle */ }
+    _ => {
+        log::debug!("Unknown event type: {}", update.event_type);
+        // Continue processing - NOT an error
+    }
+}
+
+// CORRECT: Ignore unknown fields in data
+// If future version adds "confidence_score" to sub_query_completed,
+// older consumers just don't read it - no breakage
+```
+
+#### ✅ DO: Design Idempotent Events
+```rust
+// CORRECT: Events describe state, not commands
+AgentUpdate {
+    event_type: "sub_query_completed",
+    data: json!({
+        "id": 0,
+        "result": "...",
+        "tokens_used": 42,
+    }),
+}
+// Re-processing this event multiple times has no side effects
+// Consumer updates its view of sub-query 0's result
+```
+
+### When to Use Strong Typing
+
+Use rigid types for:
+- **Error hierarchies**: `#[non_exhaustive]` enums work well here
+- **Cross-agent configuration**: Settings truly shared by all agents
+- **Internal implementations**: Agent internals can use any structure
+
+**See CLAUDE.md for comprehensive design philosophy documentation.**
 
 ---
 
@@ -430,8 +563,11 @@ Stats: 4/5 sub-queries succeeded | 1,247 total tokens | 23.4s
 
 5. **Implement configuration types**
    - `/Users/evansenter/Documents/projects/gemicro/gemicro-core/src/config.rs`
-   - `GemicroConfig`, `ResearchConfig`, `LlmConfig`
-   - Hardcode `MODEL = "gemini-3-flash-preview"` as constant
+   - `MODEL` constant: Hardcode `"gemini-3-flash-preview"`
+   - `GemicroConfig`: Contains only cross-agent config (just `LlmConfig`)
+   - `LlmConfig`: Shared LLM settings (timeouts, retries, temperature)
+   - `ResearchConfig`: Agent-specific config (passed to DeepResearchAgent constructor, NOT in GemicroConfig)
+   - **IMPORTANT**: Follow Evergreen philosophy - don't embed agent-specific config in GemicroConfig
    - Implement `Default` with sensible values
 
 6. **Implement lib.rs**
@@ -497,12 +633,12 @@ Stats: 4/5 sub-queries succeeded | 1,247 total tokens | 23.4s
 1. **Define Agent trait and context**
    - `/Users/evansenter/Documents/projects/gemicro/gemicro-core/src/agent.rs`
    - `Agent` trait with streaming `execute()` method
-   - `AgentContext { llm, config }`
+   - `AgentContext { llm }` - ONLY cross-agent resources (see Design Principles)
    - Use `async_stream::try_stream!` macro for implementation
 
 2. **Implement DeepResearchAgent structure**
-   - `DeepResearchAgent::new(config)`
-   - Store configuration
+   - `DeepResearchAgent::new(config: ResearchConfig)` - agent-specific config at construction
+   - Store configuration in agent struct
 
 3. **Implement streaming execute() method**
    ```rust
@@ -968,16 +1104,16 @@ async fn main() -> Result<()> {
 
     let args = cli::Args::parse();
 
-    // Create client and context
+    // Create client and context (cross-agent resources only)
     let client = rust_genai::Client::builder(args.api_key).build();
     let llm = gemicro_core::LlmClient::new(client, args.llm_config());
     let context = gemicro_core::AgentContext {
         llm: std::sync::Arc::new(llm),
-        config: args.research_config(),
+        // NO agent-specific config here - follows Evergreen philosophy
     };
 
-    // Create agent
-    let agent = gemicro_core::DeepResearchAgent::new();
+    // Create agent with its own config (agent-specific)
+    let agent = gemicro_core::DeepResearchAgent::new(args.research_config());
 
     // Get stream
     let stream = agent.execute(&args.query, context).await;
@@ -1100,8 +1236,249 @@ gemicro "Your query" --verbose
 - LangChain's memory management patterns
 - Anthropic's prompt caching strategies
 
+### Control Plane Capabilities
+
+**Current State**: AgentUpdate events are purely observational—they describe what happened but don't control execution.
+
+**Future Direction**: Add bidirectional communication for agent control.
+
+#### Option 1: Separate Control Channel
+```rust
+// Keep AgentUpdate for observations (unidirectional)
+pub struct AgentUpdate { /* existing */ }
+
+// Add separate control type (bidirectional)
+pub struct AgentCommand {
+    pub command_type: String,           // "cancel", "pause", "adjust_config"
+    pub command_id: String,             // For acknowledgment tracking
+    pub data: serde_json::Value,
+}
+
+pub struct AgentAck {
+    pub command_id: String,
+    pub status: String,                 // "accepted", "rejected", "completed"
+    pub data: serde_json::Value,
+}
+```
+
+**Rationale**: Clean separation of concerns. Events remain idempotent and replayable. Commands are inherently non-idempotent (canceling twice shouldn't cancel twice).
+
+#### Option 2: Unified Message Type with Direction
+```rust
+pub struct AgentMessage {
+    pub direction: MessageDirection,     // Observation | Command | Ack
+    pub message_type: String,
+    pub correlation_id: Option<String>,  // Links commands to acks
+    pub data: serde_json::Value,
+}
+
+pub enum MessageDirection {
+    Observation,  // Agent → Consumer (current AgentUpdate)
+    Command,      // Consumer → Agent
+    Ack,          // Agent → Consumer (response to command)
+}
+```
+
+**Trade-offs**:
+- Option 1: Cleaner types, easier to reason about, more code
+- Option 2: Unified handling, but mixes concerns
+
+**Recommendation**: Start with Option 1. Add control plane only when needed (e.g., long-running agents that need cancellation).
+
+### Schema Evolution & Versioning
+
+**Current State**: Soft-typed JSON with implicit schema. Works for exploration but has risks.
+
+#### Schema Evolution Strategies
+
+**1. Additive-Only Changes (Safe)**
+```rust
+// v1: Original schema
+json!({ "id": 0, "result": "..." })
+
+// v2: Add optional field (backward compatible)
+json!({ "id": 0, "result": "...", "confidence": 0.95 })
+
+// Old consumers ignore "confidence" - no breakage
+```
+
+**2. Field Renaming (Breaking)**
+```rust
+// v1
+json!({ "tokens_used": 42 })
+
+// v2 - BREAKING! Old consumers won't find "tokens_used"
+json!({ "token_count": 42 })
+
+// Mitigation: Include both during transition
+json!({ "tokens_used": 42, "token_count": 42 })
+```
+
+**3. Semantic Changes (Subtle Breaking)**
+```rust
+// v1: tokens_used is input tokens only
+json!({ "tokens_used": 42 })
+
+// v2: tokens_used is now input + output tokens
+// Same field name, different meaning - dangerous!
+
+// Mitigation: New field name for new semantics
+json!({ "tokens_used": 42, "total_tokens": 150 })
+```
+
+#### Versioning Approaches
+
+**Option A: Version in Event Type**
+```rust
+// Explicit version in event_type
+"sub_query_completed.v2"
+
+// Consumer can handle multiple versions
+match update.event_type.as_str() {
+    "sub_query_completed" | "sub_query_completed.v1" => { /* old */ }
+    "sub_query_completed.v2" => { /* new */ }
+    _ => { /* unknown */ }
+}
+```
+
+**Option B: Schema Version Field**
+```rust
+pub struct AgentUpdate {
+    pub event_type: String,
+    pub schema_version: Option<u32>,  // None = v1, Some(2) = v2
+    pub data: serde_json::Value,
+}
+```
+
+**Option C: Content Negotiation**
+```rust
+// Producer advertises supported versions
+// Consumer requests preferred version
+// Similar to HTTP Accept headers
+```
+
+**Recommendation**: Use additive-only changes as long as possible. When breaking changes are unavoidable, use Option A (version in event_type) for simplicity.
+
+### Schema Validation
+
+**Current State**: No validation. Malformed events fail silently (return None from accessors, log warning).
+
+#### Validation Levels
+
+**Level 0: None (Current)**
+- Pros: Maximum flexibility, fast
+- Cons: Bugs hide until runtime, hard to debug
+
+**Level 1: Accessor Validation (Recommended Near-Term)**
+```rust
+impl AgentUpdate {
+    /// Validates and parses, returning detailed error
+    pub fn try_as_sub_query_completed(&self) -> Result<SubQueryResult, ValidationError> {
+        if self.event_type != EVENT_SUB_QUERY_COMPLETED {
+            return Err(ValidationError::WrongEventType {
+                expected: EVENT_SUB_QUERY_COMPLETED,
+                actual: self.event_type.clone(),
+            });
+        }
+        serde_json::from_value(self.data.clone())
+            .map_err(|e| ValidationError::SchemaMismatch {
+                event_type: self.event_type.clone(),
+                error: e.to_string(),
+            })
+    }
+}
+```
+
+**Level 2: JSON Schema Validation**
+```rust
+// Define schemas for each event type
+const SUB_QUERY_COMPLETED_SCHEMA: &str = r#"{
+    "type": "object",
+    "required": ["id", "result", "tokens_used"],
+    "properties": {
+        "id": { "type": "integer", "minimum": 0 },
+        "result": { "type": "string" },
+        "tokens_used": { "type": "integer", "minimum": 0 }
+    }
+}"#;
+
+impl AgentUpdate {
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        let schema = get_schema_for_event_type(&self.event_type)?;
+        jsonschema::validate(&schema, &self.data)?;
+        Ok(())
+    }
+}
+```
+
+**Level 3: Type Registry**
+```rust
+// Runtime type registry for dynamic validation
+pub struct EventRegistry {
+    schemas: HashMap<String, JsonSchema>,
+    validators: HashMap<String, Box<dyn Fn(&Value) -> Result<(), String>>>,
+}
+
+impl EventRegistry {
+    pub fn register(&mut self, event_type: &str, schema: JsonSchema) { /* ... */ }
+    pub fn validate(&self, update: &AgentUpdate) -> Result<(), ValidationError> { /* ... */ }
+}
+```
+
+#### Production Validation Strategy
+
+```rust
+// Environment-aware validation
+pub enum ValidationMode {
+    Off,              // Development: maximum flexibility
+    WarnOnly,         // Staging: log issues but don't fail
+    Strict,           // Production: fail on invalid events
+}
+
+impl AgentUpdate {
+    pub fn validate_with_mode(&self, mode: ValidationMode) -> Result<(), ValidationError> {
+        match mode {
+            ValidationMode::Off => Ok(()),
+            ValidationMode::WarnOnly => {
+                if let Err(e) = self.validate() {
+                    log::warn!("Event validation failed: {}", e);
+                }
+                Ok(())
+            }
+            ValidationMode::Strict => self.validate(),
+        }
+    }
+}
+```
+
+### Production Hardening Checklist
+
+When moving from exploration to production:
+
+| Area | Current | Production Requirement |
+|------|---------|----------------------|
+| **Validation** | None | Level 1 minimum, Level 2 for external APIs |
+| **Schema Versioning** | Implicit v1 | Explicit versions for breaking changes |
+| **Unknown Events** | log::warn + continue | Configurable: drop, queue, or fail |
+| **Error Recovery** | Basic retry | Circuit breakers, dead letter queues |
+| **Observability** | log crate | Structured logging, metrics, tracing |
+| **Testing** | Unit tests | Contract tests, fuzzing, chaos testing |
+| **Documentation** | Code comments | OpenAPI/AsyncAPI specs for event schemas |
+
+**Migration Path**:
+1. Add `try_as_*` methods alongside existing `as_*` methods
+2. Add optional `schema_version` field to AgentUpdate
+3. Build event registry with JSON schemas
+4. Add validation mode configuration
+5. Generate documentation from schemas
+
+**References:**
+- CloudEvents specification (event envelope patterns)
+- AsyncAPI (event-driven API documentation)
+- JSON Schema (validation)
+
 ---
 
-**Document Version**: 4.0 (Soft-typed AgentUpdate following Evergreen spec philosophy)
+**Document Version**: 6.0 (Control plane, schema evolution, validation roadmap)
 **Last Updated**: 2025-12-23
 **Status**: Ready for implementation
