@@ -177,7 +177,7 @@ impl DeepResearchAgent {
             // Phase 1: Decomposition (with timeout)
             yield AgentUpdate::decomposition_started();
             let decomp_timeout = remaining_time(start_time, config.total_timeout, "decomposition")?;
-            let sub_queries = tokio::time::timeout(
+            let (sub_queries, decomposition_tokens) = tokio::time::timeout(
                 decomp_timeout,
                 decompose(&query, &context, &config)
             )
@@ -229,6 +229,16 @@ impl DeepResearchAgent {
             let mut total_tokens = execution_result.total_tokens;
             let mut tokens_unavailable = execution_result.tokens_unavailable_count;
 
+            // Add decomposition tokens
+            match decomposition_tokens {
+                Some(tokens) => total_tokens = total_tokens.saturating_add(tokens),
+                None => {
+                    log::warn!("Token count unavailable for decomposition call");
+                    tokens_unavailable += 1;
+                }
+            }
+
+            // Add synthesis tokens
             match synthesis_tokens {
                 Some(tokens) => total_tokens = total_tokens.saturating_add(tokens),
                 None => {
@@ -274,11 +284,14 @@ struct ExecutionResult {
 }
 
 /// Decompose a query into sub-queries using the LLM
+///
+/// Returns a tuple of (sub_queries, tokens_used) where tokens_used is the
+/// token count from the decomposition LLM call, if available.
 async fn decompose(
     query: &str,
     context: &AgentContext,
     config: &ResearchConfig,
-) -> Result<Vec<String>, AgentError> {
+) -> Result<(Vec<String>, Option<u32>), AgentError> {
     let prompt =
         config
             .prompts
@@ -291,6 +304,9 @@ async fn decompose(
         .generate(request)
         .await
         .map_err(|e| AgentError::DecompositionFailed(e.to_string()))?;
+
+    // Extract token count before parsing
+    let tokens_used = response.tokens_used;
 
     // Parse JSON response
     let sub_queries: Vec<String> = parse_json_array(&response.text)
@@ -318,13 +334,14 @@ async fn decompose(
             sub_queries.len(),
             config.max_sub_queries
         );
-        return Ok(sub_queries
+        let truncated: Vec<String> = sub_queries
             .into_iter()
             .take(config.max_sub_queries)
-            .collect());
+            .collect();
+        return Ok((truncated, tokens_used));
     }
 
-    Ok(sub_queries)
+    Ok((sub_queries, tokens_used))
 }
 
 /// Parse a JSON array from LLM response, handling common formatting issues
