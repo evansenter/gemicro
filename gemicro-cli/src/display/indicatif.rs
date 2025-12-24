@@ -8,6 +8,15 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::collections::HashMap;
 use std::time::Duration;
 
+/// Spinner animation tick interval in milliseconds.
+const SPINNER_TICK_MS: u64 = 120;
+
+/// Maximum characters to display for sub-query text.
+const MAX_QUERY_DISPLAY_CHARS: usize = 55;
+
+/// Maximum characters to display for result previews.
+const MAX_PREVIEW_CHARS: usize = 40;
+
 /// Renderer using indicatif for progress bar display.
 pub struct IndicatifRenderer {
     multi: MultiProgress,
@@ -26,7 +35,7 @@ impl IndicatifRenderer {
                 .template("{spinner:.cyan} {msg}")
                 .expect("Invalid template"),
         );
-        phase_bar.enable_steady_tick(Duration::from_millis(120));
+        phase_bar.enable_steady_tick(Duration::from_millis(SPINNER_TICK_MS));
 
         Self {
             multi,
@@ -45,7 +54,7 @@ impl IndicatifRenderer {
                     .expect("Invalid template"),
             );
             pb.set_prefix(format!("{}", sq.id + 1));
-            pb.set_message(truncate(&sq.query, 55));
+            pb.set_message(truncate(&sq.query, MAX_QUERY_DISPLAY_CHARS));
             self.sub_query_bars.insert(sq.id, pb);
         }
     }
@@ -74,7 +83,9 @@ impl Renderer for IndicatifRenderer {
                 self.phase_bar
                     .finish_with_message(format!("✓ Decomposed into {} sub-queries", count));
 
-                // Create a new phase bar for execution (ensure old one is finished)
+                // Create a new phase bar for execution.
+                // Defensive check: finish_with_message above should mark it finished,
+                // but we guard against unexpected state to prevent orphaned spinners.
                 if !self.phase_bar.is_finished() {
                     self.phase_bar.finish_and_clear();
                 }
@@ -85,7 +96,7 @@ impl Renderer for IndicatifRenderer {
                         .expect("Invalid template"),
                 );
                 self.phase_bar
-                    .enable_steady_tick(Duration::from_millis(120));
+                    .enable_steady_tick(Duration::from_millis(SPINNER_TICK_MS));
                 self.phase_bar
                     .set_message(format!("⚡ Executing {} queries in parallel...", count));
 
@@ -104,7 +115,9 @@ impl Renderer for IndicatifRenderer {
                 self.phase_bar
                     .finish_with_message("✓ All sub-queries complete");
 
-                // Create a new phase bar for synthesis (ensure old one is finished)
+                // Create a new phase bar for synthesis.
+                // Defensive check: finish_with_message above should mark it finished,
+                // but we guard against unexpected state to prevent orphaned spinners.
                 if !self.phase_bar.is_finished() {
                     self.phase_bar.finish_and_clear();
                 }
@@ -115,7 +128,7 @@ impl Renderer for IndicatifRenderer {
                         .expect("Invalid template"),
                 );
                 self.phase_bar
-                    .enable_steady_tick(Duration::from_millis(120));
+                    .enable_steady_tick(Duration::from_millis(SPINNER_TICK_MS));
                 self.phase_bar.set_message("🧠 Synthesizing results...");
             }
 
@@ -144,7 +157,7 @@ impl Renderer for IndicatifRenderer {
             }
 
             SubQueryStatus::InProgress => {
-                pb.enable_steady_tick(Duration::from_millis(120));
+                pb.enable_steady_tick(Duration::from_millis(SPINNER_TICK_MS));
             }
 
             SubQueryStatus::Completed {
@@ -159,7 +172,7 @@ impl Renderer for IndicatifRenderer {
                 pb.finish_with_message(format!(
                     "✅ {} → \"{}\" ({} tokens)",
                     duration_str,
-                    truncate(result_preview, 40),
+                    truncate(result_preview, MAX_PREVIEW_CHARS),
                     tokens
                 ));
             }
@@ -173,7 +186,7 @@ impl Renderer for IndicatifRenderer {
                 pb.finish_with_message(format!(
                     "❌ {} → Failed: {}",
                     duration_str,
-                    truncate(error, 40)
+                    truncate(error, MAX_PREVIEW_CHARS)
                 ));
             }
         }

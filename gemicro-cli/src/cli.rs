@@ -92,3 +92,86 @@ impl Args {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper to create Args with default values for testing.
+    fn test_args() -> Args {
+        Args {
+            query: "test query".to_string(),
+            api_key: "test-key".to_string(),
+            min_sub_queries: 3,
+            max_sub_queries: 5,
+            timeout: 180,
+            continue_on_failure: true,
+            llm_timeout: 60,
+            max_tokens: 1024,
+            temperature: 0.7,
+            verbose: false,
+        }
+    }
+
+    #[test]
+    fn test_validate_valid_args() {
+        let args = test_args();
+        assert!(args.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_min_greater_than_max() {
+        let mut args = test_args();
+        args.min_sub_queries = 10;
+        args.max_sub_queries = 5;
+
+        let result = args.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("min-sub-queries"));
+    }
+
+    #[test]
+    fn test_validate_min_equals_max() {
+        let mut args = test_args();
+        args.min_sub_queries = 5;
+        args.max_sub_queries = 5;
+
+        assert!(args.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_temperature_too_low() {
+        let mut args = test_args();
+        args.temperature = -0.1;
+
+        let result = args.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("temperature"));
+    }
+
+    #[test]
+    fn test_validate_temperature_too_high() {
+        let mut args = test_args();
+        args.temperature = 1.5;
+
+        let result = args.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("temperature"));
+    }
+
+    #[test]
+    fn test_validate_temperature_boundary_zero() {
+        let mut args = test_args();
+        args.temperature = 0.0;
+
+        assert!(args.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_temperature_boundary_one() {
+        let mut args = test_args();
+        args.temperature = 1.0;
+
+        assert!(args.validate().is_ok());
+    }
+}
