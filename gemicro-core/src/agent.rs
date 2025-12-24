@@ -584,9 +584,11 @@ mod tests {
 
     #[test]
     fn test_agent_creation_invalid_config() {
-        let mut config = ResearchConfig::default();
-        config.min_sub_queries = 10;
-        config.max_sub_queries = 5; // Invalid: min > max
+        let config = ResearchConfig {
+            min_sub_queries: 10,
+            max_sub_queries: 5, // Invalid: min > max
+            ..Default::default()
+        };
 
         let agent = DeepResearchAgent::new(config);
         assert!(agent.is_err());
