@@ -9,7 +9,6 @@
 //! ```no_run
 //! use gemicro_core::{AgentContext, DeepResearchAgent, ResearchConfig, LlmClient, LlmConfig};
 //! use futures_util::StreamExt;
-//! use std::sync::Arc;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! let genai_client = rust_genai::Client::builder("api-key".to_string()).build();
@@ -45,17 +44,35 @@ use tokio::sync::mpsc;
 /// to avoid blocking on send operations.
 const PARALLEL_EXECUTION_CHANNEL_BUFFER: usize = 16;
 
-/// Check if execution has exceeded the timeout
-fn check_timeout(start: Instant, timeout: Duration, phase: &str) -> Result<(), AgentError> {
+/// Calculate remaining time from total timeout, returning error if already exceeded
+fn remaining_time(start: Instant, total_timeout: Duration, phase: &str) -> Result<Duration, AgentError> {
     let elapsed = start.elapsed();
-    if elapsed > timeout {
+    if elapsed >= total_timeout {
         Err(AgentError::Timeout {
             elapsed_ms: elapsed.as_millis() as u64,
-            timeout_ms: timeout.as_millis() as u64,
+            timeout_ms: total_timeout.as_millis() as u64,
             phase: phase.to_string(),
         })
     } else {
-        Ok(())
+        Ok(total_timeout - elapsed)
+    }
+}
+
+/// Convert a tokio timeout error to AgentError::Timeout
+fn timeout_error(start: Instant, total_timeout: Duration, phase: &str) -> AgentError {
+    AgentError::Timeout {
+        elapsed_ms: start.elapsed().as_millis() as u64,
+        timeout_ms: total_timeout.as_millis() as u64,
+        phase: phase.to_string(),
+    }
+}
+
+/// Truncate text for error messages to prevent huge output
+fn truncate_for_error(text: &str, max_len: usize) -> String {
+    if text.len() <= max_len {
+        text.to_string()
+    } else {
+        format!("{}... ({} chars total)", &text[..max_len], text.len())
     }
 }
 
@@ -155,28 +172,30 @@ impl DeepResearchAgent {
         try_stream! {
             let start_time = Instant::now();
 
-            // Phase 1: Decomposition
+            // Phase 1: Decomposition (with timeout)
             yield AgentUpdate::decomposition_started();
-            let sub_queries = decompose(&query, &context, &config).await?;
+            let decomp_timeout = remaining_time(start_time, config.total_timeout, "decomposition")?;
+            let sub_queries = tokio::time::timeout(
+                decomp_timeout,
+                decompose(&query, &context, &config)
+            )
+            .await
+            .map_err(|_| timeout_error(start_time, config.total_timeout, "decomposition"))??;
             yield AgentUpdate::decomposition_complete(sub_queries.clone());
 
-            // Check timeout after decomposition
-            check_timeout(start_time, config.total_timeout, "decomposition")?;
-
-            // Phase 2: Parallel Execution
-            // We need to yield sub_query_started events, then collect results
+            // Phase 2: Parallel Execution (with timeout)
+            // Yield sub_query_started events before execution
             for (id, q) in sub_queries.iter().enumerate() {
                 yield AgentUpdate::sub_query_started(id, q.clone());
             }
 
-            let execution_result = execute_parallel(
-                &sub_queries,
-                &context,
-                config.continue_on_partial_failure,
-            ).await;
-
-            // Check timeout after parallel execution
-            check_timeout(start_time, config.total_timeout, "parallel execution")?;
+            let exec_timeout = remaining_time(start_time, config.total_timeout, "parallel execution")?;
+            let execution_result = tokio::time::timeout(
+                exec_timeout,
+                execute_parallel(&sub_queries, &context, config.continue_on_partial_failure)
+            )
+            .await
+            .map_err(|_| timeout_error(start_time, config.total_timeout, "parallel execution"))?;
 
             // Yield completion/failure events as they arrived
             // Note: These arrive in non-deterministic order due to parallel execution
@@ -194,9 +213,15 @@ impl DeepResearchAgent {
                 Err(AgentError::AllSubQueriesFailed)?;
             }
 
-            // Phase 3: Synthesis
+            // Phase 3: Synthesis (with timeout)
             yield AgentUpdate::synthesis_started();
-            let (answer, synthesis_tokens) = synthesize(&query, &execution_result.results, &context).await?;
+            let synth_timeout = remaining_time(start_time, config.total_timeout, "synthesis")?;
+            let (answer, synthesis_tokens) = tokio::time::timeout(
+                synth_timeout,
+                synthesize(&query, &execution_result.results, &context)
+            )
+            .await
+            .map_err(|_| timeout_error(start_time, config.total_timeout, "synthesis"))??;
 
             // Calculate final metadata
             let mut total_tokens = execution_result.total_tokens;
@@ -337,13 +362,13 @@ fn parse_json_array(text: &str) -> Result<Vec<String>, String> {
             };
             let json_text = lines[start..end].join("\n");
             return serde_json::from_str::<Vec<String>>(&json_text)
-                .map_err(|e| format!("Invalid JSON: {}. Response was: {}", e, text));
+                .map_err(|e| format!("Invalid JSON: {}. Response was: {}", e, truncate_for_error(text, 200)));
         }
     }
 
     Err(format!(
         "Invalid JSON: expected array of strings. Response was: {}",
-        text
+        truncate_for_error(text, 200)
     ))
 }
 
@@ -383,7 +408,9 @@ async fn execute_parallel(
                 Err(e) => Err(e.to_string()),
             };
 
-            let _ = tx.send((id, result)).await;
+            if tx.send((id, result)).await.is_err() {
+                log::debug!("Receiver dropped, sub-query {} result discarded", id);
+            }
         });
     }
 
