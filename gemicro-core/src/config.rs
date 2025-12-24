@@ -38,6 +38,10 @@ pub struct ResearchPrompts {
     pub decomposition_template: String,
 
     /// System instruction for sub-query execution phase
+    ///
+    /// Note: Unlike decomposition and synthesis, sub-queries do not use a template.
+    /// The sub-question text is passed directly as the user prompt, while this
+    /// system instruction is shared across all parallel sub-query executions.
     pub sub_query_system: String,
 
     /// System instruction for synthesis phase
