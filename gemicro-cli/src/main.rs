@@ -54,17 +54,19 @@ async fn run_research(args: &cli::Args) -> Result<()> {
     let mut state = DisplayState::new();
     let mut renderer = IndicatifRenderer::new();
 
-    // Set up interrupt handling
+    // Set up interrupt handling with AtomicU8 for cross-thread visibility.
+    // Signal handler writes, main loop reads. Uses SeqCst for simplicity.
     // 0 = no interrupt, 1 = first interrupt (graceful), 2+ = force exit
     let interrupt_count = Arc::new(AtomicU8::new(0));
     let interrupt_count_clone = interrupt_count.clone();
 
     // Spawn signal handler task
-    tokio::spawn(async move {
+    let signal_task = tokio::spawn(async move {
         loop {
-            tokio::signal::ctrl_c()
-                .await
-                .expect("Failed to listen for Ctrl+C");
+            if tokio::signal::ctrl_c().await.is_err() {
+                log::error!("Failed to listen for Ctrl+C signal");
+                return;
+            }
 
             let count = interrupt_count_clone.fetch_add(1, Ordering::SeqCst) + 1;
             if count == 1 {
@@ -77,6 +79,9 @@ async fn run_research(args: &cli::Args) -> Result<()> {
         }
     });
 
+    // Helper to check for interrupts
+    let is_interrupted = || interrupt_count.load(Ordering::SeqCst) > 0;
+
     // Get stream
     let stream = agent.execute(&args.query, context);
     futures_util::pin_mut!(stream);
@@ -86,14 +91,20 @@ async fn run_research(args: &cli::Args) -> Result<()> {
 
     // Consume stream
     while let Some(result) = stream.next().await {
-        // Check if interrupted
-        if interrupt_count.load(Ordering::SeqCst) > 0 {
+        // Check if interrupted at start of each iteration
+        if is_interrupted() {
             interrupted = true;
             break;
         }
 
         match result {
             Ok(update) => {
+                // Check again before processing (reduces latency to respond to interrupt)
+                if is_interrupted() {
+                    interrupted = true;
+                    break;
+                }
+
                 let prev_phase = state.phase();
                 let updated_id = state.update(&update);
 
@@ -112,6 +123,7 @@ async fn run_research(args: &cli::Args) -> Result<()> {
                 }
             }
             Err(e) => {
+                signal_task.abort();
                 renderer.finish().ok();
                 return Err(format_agent_error(e));
             }
@@ -130,7 +142,14 @@ async fn run_research(args: &cli::Args) -> Result<()> {
             .context("Renderer interrupted state failed")?;
     }
 
+    // Cleanup
+    signal_task.abort();
     renderer.finish().context("Renderer cleanup failed")?;
+
+    // Exit with SIGINT code if interrupted (convention: 128 + signal number)
+    if interrupted {
+        std::process::exit(130);
+    }
 
     Ok(())
 }

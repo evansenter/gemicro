@@ -243,7 +243,7 @@ impl Renderer for IndicatifRenderer {
         // Show partial results header
         println!();
         println!("╔══════════════════════════════════════════════════════════════╗");
-        println!("║                    Partial Results                           ║");
+        println!("║                      Partial Results                         ║");
         println!("╚══════════════════════════════════════════════════════════════╝");
         println!();
 
