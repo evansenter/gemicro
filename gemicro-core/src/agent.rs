@@ -506,7 +506,10 @@ async fn execute_parallel(
         let cancellation_token = context.cancellation_token.clone();
 
         tokio::spawn(async move {
-            // Acquire semaphore permit if concurrency is limited
+            // Acquire semaphore permit if concurrency is limited.
+            // The permit is held in _permit and automatically released when
+            // the task exits (via Drop), ensuring proper cleanup on all paths
+            // including early returns from cancellation.
             let _permit = match &semaphore {
                 Some(sem) => Some(sem.acquire().await.expect("semaphore closed unexpectedly")),
                 None => None,
@@ -526,6 +529,16 @@ async fn execute_parallel(
                 }
                 Err(e) => Err(e.to_string()),
             };
+
+            // Check cancellation again before sending - avoids queuing results
+            // after cancellation was triggered during the LLM call
+            if cancellation_token.is_cancelled() {
+                log::debug!(
+                    "Sub-query {} completed but cancelled, discarding result",
+                    id
+                );
+                return;
+            }
 
             if tx.send((id, result)).await.is_err() {
                 log::debug!("Receiver dropped, sub-query {} result discarded", id);
@@ -547,48 +560,10 @@ async fn execute_parallel(
 
     loop {
         tokio::select! {
-            recv_result = rx.recv() => {
-                match recv_result {
-                    Some((id, result)) => {
-                        match result {
-                            Ok((text, tokens)) => {
-                                match tokens {
-                                    Some(t) => total_tokens = total_tokens.saturating_add(t),
-                                    None => {
-                                        log::warn!("Token count unavailable for sub-query {}", id);
-                                        tokens_unavailable_count += 1;
-                                    }
-                                }
-                                updates.push(AgentUpdate::sub_query_completed(
-                                    id,
-                                    text.clone(),
-                                    tokens.unwrap_or(0),
-                                ));
-                                results.push(text);
-                                succeeded += 1;
-                            }
-                            Err(error) => {
-                                updates.push(AgentUpdate::sub_query_failed(id, error));
-                                failed += 1;
+            // biased ensures cancellation is always checked first, providing
+            // deterministic responsiveness to cancel requests
+            biased;
 
-                                // Abort early if configured to fail fast
-                                if !config.continue_on_partial_failure {
-                                    log::warn!(
-                                        "Sub-query {} failed and continue_on_partial_failure=false, aborting",
-                                        id
-                                    );
-                                    aborted_early = true;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    None => {
-                        // Channel closed, all tasks completed
-                        break;
-                    }
-                }
-            }
             _ = context.cancellation_token.cancelled() => {
                 log::debug!("Parallel execution cancelled, collecting in-flight results");
 
@@ -638,6 +613,49 @@ async fn execute_parallel(
 
                 aborted_early = true;
                 break;
+            }
+
+            recv_result = rx.recv() => {
+                match recv_result {
+                    Some((id, result)) => {
+                        match result {
+                            Ok((text, tokens)) => {
+                                match tokens {
+                                    Some(t) => total_tokens = total_tokens.saturating_add(t),
+                                    None => {
+                                        log::warn!("Token count unavailable for sub-query {}", id);
+                                        tokens_unavailable_count += 1;
+                                    }
+                                }
+                                updates.push(AgentUpdate::sub_query_completed(
+                                    id,
+                                    text.clone(),
+                                    tokens.unwrap_or(0),
+                                ));
+                                results.push(text);
+                                succeeded += 1;
+                            }
+                            Err(error) => {
+                                updates.push(AgentUpdate::sub_query_failed(id, error));
+                                failed += 1;
+
+                                // Abort early if configured to fail fast
+                                if !config.continue_on_partial_failure {
+                                    log::warn!(
+                                        "Sub-query {} failed and continue_on_partial_failure=false, aborting",
+                                        id
+                                    );
+                                    aborted_early = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    None => {
+                        // Channel closed, all tasks completed
+                        break;
+                    }
+                }
             }
         }
     }

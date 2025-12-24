@@ -275,6 +275,8 @@ impl Renderer for IndicatifRenderer {
 
         println!();
         println!("💡 Tip: Run again with a higher --timeout to allow more time.");
+        println!();
+        println!("✓ Cancellation complete");
 
         Ok(())
     }
