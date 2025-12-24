@@ -229,6 +229,56 @@ impl Renderer for IndicatifRenderer {
         Ok(())
     }
 
+    fn on_interrupted(&mut self, state: &DisplayState) -> Result<()> {
+        // Finish all progress bars
+        self.phase_bar
+            .finish_with_message("⚠️  Research interrupted by user");
+
+        for pb in self.sub_query_bars.values() {
+            if !pb.is_finished() {
+                pb.finish_and_clear();
+            }
+        }
+
+        // Show partial results header
+        println!();
+        println!("╔══════════════════════════════════════════════════════════════╗");
+        println!("║                    Partial Results                           ║");
+        println!("╚══════════════════════════════════════════════════════════════╝");
+        println!();
+
+        // Show phase information
+        println!("Research was interrupted during: {:?}", state.phase());
+        println!();
+
+        // Show completed sub-queries if any
+        let completed: Vec<_> = state
+            .sub_queries()
+            .iter()
+            .filter(|sq| matches!(sq.status, SubQueryStatus::Completed { .. }))
+            .collect();
+
+        if !completed.is_empty() {
+            println!(
+                "Completed sub-queries ({}/{}):",
+                completed.len(),
+                state.sub_queries().len()
+            );
+            for sq in completed {
+                if let SubQueryStatus::Completed { result_preview, .. } = &sq.status {
+                    println!("  [{}] {}", sq.id + 1, truncate(result_preview, 60));
+                }
+            }
+        } else {
+            println!("No sub-queries completed before interruption.");
+        }
+
+        println!();
+        println!("💡 Tip: Run again with a higher --timeout to allow more time.");
+
+        Ok(())
+    }
+
     fn finish(&mut self) -> Result<()> {
         // Clean up any remaining progress bars
         for (_, pb) in self.sub_query_bars.drain() {

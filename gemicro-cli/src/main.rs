@@ -9,6 +9,8 @@ use clap::Parser;
 use display::{DisplayState, IndicatifRenderer, Phase, Renderer};
 use futures_util::StreamExt;
 use gemicro_core::{AgentContext, AgentError, DeepResearchAgent, LlmClient};
+use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -52,12 +54,44 @@ async fn run_research(args: &cli::Args) -> Result<()> {
     let mut state = DisplayState::new();
     let mut renderer = IndicatifRenderer::new();
 
+    // Set up interrupt handling
+    // 0 = no interrupt, 1 = first interrupt (graceful), 2+ = force exit
+    let interrupt_count = Arc::new(AtomicU8::new(0));
+    let interrupt_count_clone = interrupt_count.clone();
+
+    // Spawn signal handler task
+    tokio::spawn(async move {
+        loop {
+            tokio::signal::ctrl_c()
+                .await
+                .expect("Failed to listen for Ctrl+C");
+
+            let count = interrupt_count_clone.fetch_add(1, Ordering::SeqCst) + 1;
+            if count == 1 {
+                eprintln!("\n⚠️  Interrupt received - showing partial results...");
+                eprintln!("   (Press Ctrl+C again to exit immediately)\n");
+            } else {
+                eprintln!("\n❌ Force exit requested");
+                std::process::exit(130); // Standard exit code for SIGINT
+            }
+        }
+    });
+
     // Get stream
     let stream = agent.execute(&args.query, context);
     futures_util::pin_mut!(stream);
 
+    // Track if we were interrupted
+    let mut interrupted = false;
+
     // Consume stream
     while let Some(result) = stream.next().await {
+        // Check if interrupted
+        if interrupt_count.load(Ordering::SeqCst) > 0 {
+            interrupted = true;
+            break;
+        }
+
         match result {
             Ok(update) => {
                 let prev_phase = state.phase();
@@ -84,11 +118,16 @@ async fn run_research(args: &cli::Args) -> Result<()> {
         }
     }
 
-    // Render final result
+    // Render final result or partial results
     if state.phase() == Phase::Complete {
         renderer
             .on_final_result(&state)
             .context("Renderer final result failed")?;
+    } else if interrupted {
+        // Show partial results if we were interrupted
+        renderer
+            .on_interrupted(&state)
+            .context("Renderer interrupted state failed")?;
     }
 
     renderer.finish().context("Renderer cleanup failed")?;

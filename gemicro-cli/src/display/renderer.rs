@@ -27,6 +27,11 @@ pub trait Renderer {
     /// Query `state.final_result()` to get the answer and metadata.
     fn on_final_result(&mut self, state: &DisplayState) -> Result<()>;
 
+    /// Called when the research is interrupted by the user (Ctrl+C).
+    ///
+    /// Displays any partial results that are available.
+    fn on_interrupted(&mut self, state: &DisplayState) -> Result<()>;
+
     /// Called when the stream ends to clean up resources.
     fn finish(&mut self) -> Result<()>;
 }
