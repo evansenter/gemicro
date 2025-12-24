@@ -68,11 +68,13 @@ fn timeout_error(start: Instant, total_timeout: Duration, phase: &str) -> AgentE
 }
 
 /// Truncate text for error messages to prevent huge output
-fn truncate_for_error(text: &str, max_len: usize) -> String {
-    if text.len() <= max_len {
+fn truncate_for_error(text: &str, max_chars: usize) -> String {
+    let char_count = text.chars().count();
+    if char_count <= max_chars {
         text.to_string()
     } else {
-        format!("{}... ({} chars total)", &text[..max_len], text.len())
+        let truncated: String = text.chars().take(max_chars).collect();
+        format!("{}... ({} chars total)", truncated, char_count)
     }
 }
 
