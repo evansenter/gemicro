@@ -179,12 +179,17 @@ impl Renderer for IndicatifRenderer {
                     String::new()
                 };
 
-                pb.finish_with_message(format!(
-                    "✅ {} → \"{}\"{}",
+                // Use println through MultiProgress to avoid duplicate output,
+                // then clear the spinner bar
+                let msg = format!(
+                    "   [{}] ✅ {} → \"{}\"{}",
+                    id + 1,
                     duration_str,
                     truncate(result_preview, MAX_PREVIEW_CHARS),
                     token_info
-                ));
+                );
+                self.multi.println(&msg)?;
+                pb.finish_and_clear();
             }
 
             SubQueryStatus::Failed { error } => {
@@ -193,11 +198,14 @@ impl Renderer for IndicatifRenderer {
                     .map(format_duration)
                     .unwrap_or_else(|| "?".to_string());
 
-                pb.finish_with_message(format!(
-                    "❌ {} → Failed: {}",
+                let msg = format!(
+                    "   [{}] ❌ {} → Failed: {}",
+                    id + 1,
                     duration_str,
                     truncate(error, MAX_PREVIEW_CHARS)
-                ));
+                );
+                self.multi.println(&msg)?;
+                pb.finish_and_clear();
             }
         }
 
