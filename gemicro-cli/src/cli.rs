@@ -68,6 +68,14 @@ impl Args {
             return Err("Query is required (or use --interactive for REPL mode)".to_string());
         }
 
+        // Warn if both interactive and query are provided (query will be ignored)
+        if self.interactive && self.query.is_some() {
+            eprintln!(
+                "⚠️  Warning: Query argument is ignored in interactive mode. \
+                 Use single-query mode (without --interactive) to run a query."
+            );
+        }
+
         // Bounds validation
         if self.min_sub_queries == 0 {
             return Err("min-sub-queries must be greater than 0".to_string());

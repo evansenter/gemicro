@@ -53,9 +53,21 @@ impl Session {
     /// Check if the binary has been modified since session started
     pub fn is_stale(&self) -> bool {
         if let (Some(path), Some(original_mtime)) = (&self.binary_path, &self.binary_mtime) {
-            if let Ok(metadata) = std::fs::metadata(path) {
-                if let Ok(current_mtime) = metadata.modified() {
-                    return current_mtime > *original_mtime;
+            match std::fs::metadata(path) {
+                Ok(metadata) => match metadata.modified() {
+                    Ok(current_mtime) => {
+                        let stale = current_mtime > *original_mtime;
+                        if stale {
+                            log::debug!("Binary is stale: {:?}", path);
+                        }
+                        return stale;
+                    }
+                    Err(e) => {
+                        log::debug!("Failed to get mtime for {:?}: {}", path, e);
+                    }
+                },
+                Err(e) => {
+                    log::debug!("Failed to get metadata for {:?}: {}", path, e);
                 }
             }
         }
