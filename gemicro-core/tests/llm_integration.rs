@@ -95,18 +95,7 @@ async fn test_generate_with_system_instruction() {
     }
 }
 
-// NOTE: Streaming tests are currently skipped due to a bug in rust-genai's
-// streaming implementation. The create_stream() method returns 0 chunks even
-// though the non-streaming create() method works fine. This appears to be
-// because the SSE event handler only yields when event.interaction is Some,
-// but the API returns status update events without interaction data.
-//
-// See: rust-genai/genai-client/src/interactions.rs lines 62-69
-//
-// TODO: Re-enable these tests once the rust-genai streaming bug is fixed.
-
 #[tokio::test]
-#[ignore = "rust-genai streaming bug: create_stream() returns 0 chunks"]
 async fn test_generate_stream_simple_prompt() {
     let Some(api_key) = get_api_key() else {
         eprintln!("Skipping test: GEMINI_API_KEY not set");
@@ -155,7 +144,6 @@ async fn test_generate_stream_simple_prompt() {
 }
 
 #[tokio::test]
-#[ignore = "rust-genai streaming bug: create_stream() returns 0 chunks"]
 async fn test_generate_stream_with_system_instruction() {
     let Some(api_key) = get_api_key() else {
         eprintln!("Skipping test: GEMINI_API_KEY not set");

@@ -259,15 +259,20 @@ impl LlmClient {
                     .map_err(|_| LlmError::Timeout(timeout_duration.as_millis() as u64))?;
 
                 match chunk {
-                    Some(Ok(response)) => {
-                        match response.text() {
-                            Some(text) => {
-                                yield LlmStreamChunk {
-                                    text: text.to_string(),
-                                };
+                    Some(Ok(stream_chunk)) => {
+                        use rust_genai::StreamChunk;
+                        match stream_chunk {
+                            StreamChunk::Delta(delta) => {
+                                if let Some(text) = delta.text() {
+                                    yield LlmStreamChunk {
+                                        text: text.to_string(),
+                                    };
+                                }
+                                // Skip deltas with no text (e.g., thought deltas)
                             }
-                            None => {
-                                log::warn!("Skipping stream chunk with no text content");
+                            StreamChunk::Complete(_response) => {
+                                // Final response - stream will end after this
+                                // We could extract usage metadata here if needed
                             }
                         }
                     }
