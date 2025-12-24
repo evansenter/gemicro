@@ -4,7 +4,6 @@
 
 use super::commands::Command;
 use super::registry::AgentRegistry;
-use crate::cli::OutputConfig;
 use crate::display::{DisplayState, IndicatifRenderer, Phase, Renderer};
 use crate::format::truncate;
 use anyhow::{Context, Result};
@@ -15,6 +14,9 @@ use rustyline::DefaultEditor;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::SystemTime;
+
+/// Maximum characters for history preview strings.
+const HISTORY_PREVIEW_CHARS: usize = 256;
 
 /// REPL session state
 pub struct Session {
@@ -32,14 +34,11 @@ pub struct Session {
 
     /// Last known mtime of the binary
     binary_mtime: Option<SystemTime>,
-
-    /// Output configuration for truncation limits
-    output_config: OutputConfig,
 }
 
 impl Session {
-    /// Create a new session with the given output configuration
-    pub fn new(llm: LlmClient, output_config: OutputConfig) -> Self {
+    /// Create a new session.
+    pub fn new(llm: LlmClient) -> Self {
         let binary_path = std::env::current_exe().ok();
         let binary_mtime = binary_path
             .as_ref()
@@ -52,7 +51,6 @@ impl Session {
             llm: Arc::new(llm),
             binary_path,
             binary_mtime,
-            output_config,
         }
     }
 
@@ -109,7 +107,7 @@ impl Session {
 
         // Initialize state and renderer
         let mut state = DisplayState::new();
-        let mut renderer = IndicatifRenderer::new(self.output_config);
+        let mut renderer = IndicatifRenderer::new();
         let mut events = Vec::new();
 
         // Execute and stream
@@ -212,10 +210,7 @@ impl Session {
                                         entry.query
                                     );
                                     if let Some(result) = entry.final_result() {
-                                        let preview = truncate(
-                                            result,
-                                            self.output_config.history_preview_chars,
-                                        );
+                                        let preview = truncate(result, HISTORY_PREVIEW_CHARS);
                                         println!("    A: {}", preview);
                                     }
                                 }
@@ -296,7 +291,7 @@ mod tests {
         // A fresh session should not be stale
         let genai_client = rust_genai::Client::builder("test-key".to_string()).build();
         let llm = LlmClient::new(genai_client, LlmConfig::default());
-        let session = Session::new(llm, OutputConfig::default());
+        let session = Session::new(llm);
 
         // Fresh session should not be stale
         assert!(!session.is_stale());

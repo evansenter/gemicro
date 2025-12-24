@@ -1,60 +1,8 @@
 //! Command-line argument parsing.
 
-use clap::{Parser, ValueEnum};
+use clap::Parser;
 use gemicro_core::{LlmConfig, ResearchConfig};
 use std::time::Duration;
-
-/// Output verbosity mode for controlling truncation of displayed text.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
-pub enum OutputMode {
-    /// Compact output with shorter previews (20/30 chars)
-    Compact,
-    /// Normal output with balanced previews (40/55 chars) \[default\]
-    #[default]
-    Normal,
-    /// Verbose output with longer previews (80/100 chars)
-    Verbose,
-}
-
-/// Configuration for output truncation limits.
-#[derive(Debug, Clone, Copy)]
-pub struct OutputConfig {
-    /// Maximum characters for sub-query text display
-    pub query_display_chars: usize,
-    /// Maximum characters for result previews
-    pub preview_chars: usize,
-    /// Maximum characters for history previews
-    pub history_preview_chars: usize,
-}
-
-impl OutputConfig {
-    /// Create an OutputConfig from an OutputMode.
-    pub fn from_mode(mode: OutputMode) -> Self {
-        match mode {
-            OutputMode::Compact => Self {
-                query_display_chars: 30,
-                preview_chars: 20,
-                history_preview_chars: 50,
-            },
-            OutputMode::Normal => Self {
-                query_display_chars: 55,
-                preview_chars: 40,
-                history_preview_chars: 100,
-            },
-            OutputMode::Verbose => Self {
-                query_display_chars: 100,
-                preview_chars: 80,
-                history_preview_chars: 200,
-            },
-        }
-    }
-}
-
-impl Default for OutputConfig {
-    fn default() -> Self {
-        Self::from_mode(OutputMode::Normal)
-    }
-}
 
 /// AI agent exploration platform
 #[derive(Parser, Debug)]
@@ -68,10 +16,6 @@ pub struct Args {
     /// Interactive REPL mode
     #[arg(short, long)]
     pub interactive: bool,
-
-    /// Output verbosity mode (compact, normal, verbose)
-    #[arg(long, value_enum, default_value_t = OutputMode::Normal)]
-    pub output_mode: OutputMode,
 
     /// Gemini API key (can also use GEMINI_API_KEY env var)
     #[arg(long, env = "GEMINI_API_KEY")]
@@ -193,11 +137,6 @@ impl Args {
             ..Default::default()
         }
     }
-
-    /// Build OutputConfig from CLI arguments.
-    pub fn output_config(&self) -> OutputConfig {
-        OutputConfig::from_mode(self.output_mode)
-    }
 }
 
 #[cfg(test)]
@@ -209,7 +148,6 @@ mod tests {
         Args {
             query: Some("test query".to_string()),
             interactive: false,
-            output_mode: OutputMode::Normal,
             api_key: "test-key".to_string(),
             min_sub_queries: 3,
             max_sub_queries: 5,
@@ -397,44 +335,5 @@ mod tests {
         args.interactive = true;
 
         assert!(args.validate().is_ok());
-    }
-
-    #[test]
-    fn test_output_config_compact() {
-        let config = OutputConfig::from_mode(OutputMode::Compact);
-        assert_eq!(config.query_display_chars, 30);
-        assert_eq!(config.preview_chars, 20);
-        assert_eq!(config.history_preview_chars, 50);
-    }
-
-    #[test]
-    fn test_output_config_normal() {
-        let config = OutputConfig::from_mode(OutputMode::Normal);
-        assert_eq!(config.query_display_chars, 55);
-        assert_eq!(config.preview_chars, 40);
-        assert_eq!(config.history_preview_chars, 100);
-    }
-
-    #[test]
-    fn test_output_config_verbose() {
-        let config = OutputConfig::from_mode(OutputMode::Verbose);
-        assert_eq!(config.query_display_chars, 100);
-        assert_eq!(config.preview_chars, 80);
-        assert_eq!(config.history_preview_chars, 200);
-    }
-
-    #[test]
-    fn test_output_config_default() {
-        let config = OutputConfig::default();
-        let normal = OutputConfig::from_mode(OutputMode::Normal);
-        assert_eq!(config.query_display_chars, normal.query_display_chars);
-        assert_eq!(config.preview_chars, normal.preview_chars);
-    }
-
-    #[test]
-    fn test_args_output_config() {
-        let args = test_args();
-        let config = args.output_config();
-        assert_eq!(config.query_display_chars, 55); // Normal mode default
     }
 }
