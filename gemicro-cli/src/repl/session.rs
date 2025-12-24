@@ -301,19 +301,9 @@ mod tests {
         assert!(!session.is_stale());
     }
 
-    #[test]
-    fn test_history_preview_chars_constant() {
-        // HISTORY_PREVIEW_CHARS should be large enough for meaningful summaries
-        // but not so large it overwhelms the /history output
-        assert!(
-            HISTORY_PREVIEW_CHARS >= 100,
-            "HISTORY_PREVIEW_CHARS too small for useful summaries"
-        );
-        assert!(
-            HISTORY_PREVIEW_CHARS <= 500,
-            "HISTORY_PREVIEW_CHARS too large for history display"
-        );
-    }
+    // Compile-time validation of constants
+    const _: () = assert!(HISTORY_PREVIEW_CHARS >= 100, "too small");
+    const _: () = assert!(HISTORY_PREVIEW_CHARS <= 500, "too large");
 
     #[test]
     fn test_history_truncation() {

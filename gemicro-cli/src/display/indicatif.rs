@@ -312,27 +312,15 @@ impl Renderer for IndicatifRenderer {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_preview_chars_constant() {
-        // PREVIEW_CHARS should be large enough for meaningful previews
-        // but not so large it overwhelms the terminal
-        assert!(
-            PREVIEW_CHARS >= 100,
-            "PREVIEW_CHARS too small for useful previews"
-        );
-        assert!(
-            PREVIEW_CHARS <= 500,
-            "PREVIEW_CHARS too large for terminal display"
-        );
-    }
+    // Compile-time validation of constants
+    const _: () = assert!(PREVIEW_CHARS >= 100, "PREVIEW_CHARS too small");
+    const _: () = assert!(PREVIEW_CHARS <= 500, "PREVIEW_CHARS too large");
+    const _: () = assert!(INTERRUPTED_CONTEXT_MULTIPLIER > 1.0);
+    const _: () = assert!(INTERRUPTED_CONTEXT_MULTIPLIER <= 2.0);
 
     #[test]
-    fn test_interrupted_context_multiplier() {
-        // Interrupted results should show more context than normal
-        assert!(INTERRUPTED_CONTEXT_MULTIPLIER > 1.0);
-        assert!(INTERRUPTED_CONTEXT_MULTIPLIER <= 2.0);
-
-        // Verify the calculated value
+    fn test_interrupted_context_calculation() {
+        // Verify the calculated value for interrupted results
         let chars = (PREVIEW_CHARS as f32 * INTERRUPTED_CONTEXT_MULTIPLIER) as usize;
         assert!(chars > PREVIEW_CHARS);
         assert_eq!(chars, 384); // 256 * 1.5
