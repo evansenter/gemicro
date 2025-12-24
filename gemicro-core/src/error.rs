@@ -53,6 +53,10 @@ pub enum AgentError {
         phase: String,
     },
 
+    /// Agent execution was cancelled
+    #[error("Execution cancelled")]
+    Cancelled,
+
     /// Other agent-specific error
     #[error("{0}")]
     Other(String),

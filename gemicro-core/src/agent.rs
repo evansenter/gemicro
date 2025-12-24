@@ -38,6 +38,7 @@ use futures_util::stream::Stream;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, Semaphore};
+use tokio_util::sync::CancellationToken;
 
 /// Buffer size for the mpsc channel used in parallel sub-query execution.
 /// Set larger than `max_concurrent_sub_queries` (default: 5) to avoid blocking senders.
@@ -86,21 +87,72 @@ fn truncate_for_error(text: &str, max_chars: usize) -> String {
 ///
 /// Following [Evergreen spec](https://github.com/google-deepmind/evergreen-spec) philosophy:
 /// Contains ONLY cross-agent resources. Agent-specific config goes to constructors, not here.
+///
+/// # Cancellation Support
+///
+/// The `cancellation_token` field enables graceful shutdown. When cancelled:
+/// - Spawned sub-query tasks exit early
+/// - The collection loop stops
+/// - The stream yields `AgentError::Cancelled`
+///
+/// # Example
+///
+/// ```no_run
+/// use gemicro_core::{AgentContext, LlmClient, LlmConfig};
+/// use tokio_util::sync::CancellationToken;
+///
+/// # fn example() {
+/// let token = CancellationToken::new();
+/// let genai_client = rust_genai::Client::builder("key".to_string()).build();
+/// let llm = LlmClient::new(genai_client, LlmConfig::default());
+/// let context = AgentContext::new_with_cancellation(llm, token.clone());
+///
+/// // In another task: token.cancel() to gracefully stop execution
+/// # }
+/// ```
 #[derive(Clone)]
 pub struct AgentContext {
     /// LLM client (Arc-wrapped for cloning across parallel tasks)
     pub llm: Arc<LlmClient>,
+    /// Cancellation token for graceful shutdown
+    pub cancellation_token: CancellationToken,
 }
 
 impl AgentContext {
     /// Create a new agent context from an LlmClient
+    ///
+    /// Uses a new cancellation token that is never cancelled.
     pub fn new(llm: LlmClient) -> Self {
-        Self { llm: Arc::new(llm) }
+        Self::new_with_cancellation(llm, CancellationToken::new())
+    }
+
+    /// Create a new agent context with a specific cancellation token
+    ///
+    /// Use this when you want to control cancellation from outside,
+    /// such as on Ctrl+C in a CLI application.
+    pub fn new_with_cancellation(llm: LlmClient, cancellation_token: CancellationToken) -> Self {
+        Self {
+            llm: Arc::new(llm),
+            cancellation_token,
+        }
     }
 
     /// Create from an existing Arc (useful when sharing across agents)
+    ///
+    /// Uses a new cancellation token that is never cancelled.
     pub fn from_arc(llm: Arc<LlmClient>) -> Self {
-        Self { llm }
+        Self::from_arc_with_cancellation(llm, CancellationToken::new())
+    }
+
+    /// Create from an existing Arc with a specific cancellation token
+    pub fn from_arc_with_cancellation(
+        llm: Arc<LlmClient>,
+        cancellation_token: CancellationToken,
+    ) -> Self {
+        Self {
+            llm,
+            cancellation_token,
+        }
     }
 }
 
@@ -174,30 +226,39 @@ impl DeepResearchAgent {
         try_stream! {
             let start_time = Instant::now();
 
-            // Phase 1: Decomposition (with timeout)
+            // Phase 1: Decomposition (with timeout and cancellation)
             yield AgentUpdate::decomposition_started();
             let decomp_timeout = remaining_time(start_time, config.total_timeout, "decomposition")?;
-            let (sub_queries, decomposition_tokens) = tokio::time::timeout(
-                decomp_timeout,
-                decompose(&query, &context, &config)
-            )
-            .await
-            .map_err(|_| timeout_error(start_time, config.total_timeout, "decomposition"))??;
+            let (sub_queries, decomposition_tokens) = tokio::select! {
+                result = tokio::time::timeout(decomp_timeout, decompose(&query, &context, &config)) => {
+                    result
+                        .map_err(|_| timeout_error(start_time, config.total_timeout, "decomposition"))
+                        .and_then(|inner| inner)
+                }
+                _ = context.cancellation_token.cancelled() => {
+                    Err(AgentError::Cancelled)
+                }
+            }?;
             yield AgentUpdate::decomposition_complete(sub_queries.clone());
 
-            // Phase 2: Parallel Execution (with timeout)
+            // Phase 2: Parallel Execution (with timeout and cancellation)
             // Yield sub_query_started events before execution
             for (id, q) in sub_queries.iter().enumerate() {
                 yield AgentUpdate::sub_query_started(id, q.clone());
             }
 
             let exec_timeout = remaining_time(start_time, config.total_timeout, "parallel execution")?;
-            let execution_result = tokio::time::timeout(
-                exec_timeout,
-                execute_parallel(&sub_queries, &context, &config)
-            )
-            .await
-            .map_err(|_| timeout_error(start_time, config.total_timeout, "parallel execution"))?;
+            let execution_result = tokio::select! {
+                result = tokio::time::timeout(exec_timeout, execute_parallel(&sub_queries, &context, &config)) => {
+                    result
+                        .map(Ok)
+                        .map_err(|_| timeout_error(start_time, config.total_timeout, "parallel execution"))
+                        .and_then(|inner| inner)
+                }
+                _ = context.cancellation_token.cancelled() => {
+                    Err(AgentError::Cancelled)
+                }
+            }?;
 
             // Yield completion/failure events as they arrived
             // Note: These arrive in non-deterministic order due to parallel execution
@@ -215,15 +276,19 @@ impl DeepResearchAgent {
                 Err(AgentError::AllSubQueriesFailed)?;
             }
 
-            // Phase 3: Synthesis (with timeout)
+            // Phase 3: Synthesis (with timeout and cancellation)
             yield AgentUpdate::synthesis_started();
             let synth_timeout = remaining_time(start_time, config.total_timeout, "synthesis")?;
-            let (answer, synthesis_tokens) = tokio::time::timeout(
-                synth_timeout,
-                synthesize(&query, &execution_result.results, &context, &config)
-            )
-            .await
-            .map_err(|_| timeout_error(start_time, config.total_timeout, "synthesis"))??;
+            let (answer, synthesis_tokens) = tokio::select! {
+                result = tokio::time::timeout(synth_timeout, synthesize(&query, &execution_result.results, &context, &config)) => {
+                    result
+                        .map_err(|_| timeout_error(start_time, config.total_timeout, "synthesis"))
+                        .and_then(|inner| inner)
+                }
+                _ = context.cancellation_token.cancelled() => {
+                    Err(AgentError::Cancelled)
+                }
+            }?;
 
             // Calculate final metadata
             let mut total_tokens = execution_result.total_tokens;
@@ -393,12 +458,13 @@ fn parse_json_array(text: &str) -> Result<Vec<String>, String> {
 /// # Arguments
 ///
 /// * `sub_queries` - The sub-queries to execute
-/// * `context` - Agent context with LLM client
+/// * `context` - Agent context with LLM client and cancellation token
 /// * `config` - Research configuration (for prompts, continue_on_partial_failure, and concurrency limit)
 ///
 /// # Returns
 ///
 /// Results with updates in non-deterministic order (depends on which queries complete first).
+/// If cancelled, returns partial results collected so far with `aborted_early = true`.
 async fn execute_parallel(
     sub_queries: &[String],
     context: &AgentContext,
@@ -422,6 +488,7 @@ async fn execute_parallel(
         let query = query.clone();
         let sub_query_system = config.prompts.sub_query_system.clone();
         let semaphore = semaphore.clone();
+        let cancellation_token = context.cancellation_token.clone();
 
         tokio::spawn(async move {
             // Acquire semaphore permit if concurrency is limited
@@ -432,9 +499,18 @@ async fn execute_parallel(
 
             let request = LlmRequest::with_system(&query, &sub_query_system);
 
-            let result = match llm.generate(request).await {
-                Ok(response) => Ok((response.text, response.tokens_used)),
-                Err(e) => Err(e.to_string()),
+            // Execute LLM call with cancellation support
+            let result = tokio::select! {
+                res = llm.generate(request) => {
+                    match res {
+                        Ok(response) => Ok((response.text, response.tokens_used)),
+                        Err(e) => Err(e.to_string()),
+                    }
+                }
+                _ = cancellation_token.cancelled() => {
+                    log::debug!("Sub-query {} cancelled", id);
+                    return; // Exit early, don't send result
+                }
             };
 
             if tx.send((id, result)).await.is_err() {
@@ -455,37 +531,54 @@ async fn execute_parallel(
     let mut tokens_unavailable_count = 0usize;
     let mut aborted_early = false;
 
-    while let Some((id, result)) = rx.recv().await {
-        match result {
-            Ok((text, tokens)) => {
-                match tokens {
-                    Some(t) => total_tokens = total_tokens.saturating_add(t),
+    loop {
+        tokio::select! {
+            recv_result = rx.recv() => {
+                match recv_result {
+                    Some((id, result)) => {
+                        match result {
+                            Ok((text, tokens)) => {
+                                match tokens {
+                                    Some(t) => total_tokens = total_tokens.saturating_add(t),
+                                    None => {
+                                        log::warn!("Token count unavailable for sub-query {}", id);
+                                        tokens_unavailable_count += 1;
+                                    }
+                                }
+                                updates.push(AgentUpdate::sub_query_completed(
+                                    id,
+                                    text.clone(),
+                                    tokens.unwrap_or(0),
+                                ));
+                                results.push(text);
+                                succeeded += 1;
+                            }
+                            Err(error) => {
+                                updates.push(AgentUpdate::sub_query_failed(id, error));
+                                failed += 1;
+
+                                // Abort early if configured to fail fast
+                                if !config.continue_on_partial_failure {
+                                    log::warn!(
+                                        "Sub-query {} failed and continue_on_partial_failure=false, aborting",
+                                        id
+                                    );
+                                    aborted_early = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
                     None => {
-                        log::warn!("Token count unavailable for sub-query {}", id);
-                        tokens_unavailable_count += 1;
+                        // Channel closed, all tasks completed
+                        break;
                     }
                 }
-                updates.push(AgentUpdate::sub_query_completed(
-                    id,
-                    text.clone(),
-                    tokens.unwrap_or(0),
-                ));
-                results.push(text);
-                succeeded += 1;
             }
-            Err(error) => {
-                updates.push(AgentUpdate::sub_query_failed(id, error));
-                failed += 1;
-
-                // Abort early if configured to fail fast
-                if !config.continue_on_partial_failure {
-                    log::warn!(
-                        "Sub-query {} failed and continue_on_partial_failure=false, aborting",
-                        id
-                    );
-                    aborted_early = true;
-                    break;
-                }
+            _ = context.cancellation_token.cancelled() => {
+                log::debug!("Parallel execution cancelled, stopping collection");
+                aborted_early = true;
+                break;
             }
         }
     }
