@@ -173,6 +173,16 @@ pub struct ResearchConfig {
     /// Default: 60 seconds
     pub total_timeout: Duration,
 
+    /// Enable Google Search grounding for sub-queries
+    ///
+    /// When enabled, sub-queries can search the web for real-time information.
+    /// This is useful for queries about current events, recent releases, or live data.
+    ///
+    /// Note: Grounded requests may have different pricing.
+    ///
+    /// Default: false
+    pub use_google_search: bool,
+
     /// Prompts for the research agent
     ///
     /// Default: Built-in prompts optimized for Gemini
@@ -222,6 +232,7 @@ impl Default for ResearchConfig {
             max_concurrent_sub_queries: 5,
             continue_on_partial_failure: true,
             total_timeout: Duration::from_secs(60),
+            use_google_search: false,
             prompts: ResearchPrompts::default(),
         }
     }

@@ -49,6 +49,15 @@ pub struct LlmRequest {
 
     /// Optional system instruction
     pub system_instruction: Option<String>,
+
+    /// Enable Google Search grounding for real-time web data
+    ///
+    /// When enabled, the model can search the web and ground its responses
+    /// in real-time information. This is useful for queries about current
+    /// events, recent releases, or live data.
+    ///
+    /// Note: Grounded requests may have different pricing.
+    pub use_google_search: bool,
 }
 
 /// Response from the LLM (buffered mode)
@@ -83,6 +92,7 @@ impl LlmRequest {
         Self {
             prompt: prompt.into(),
             system_instruction: None,
+            use_google_search: false,
         }
     }
 
@@ -91,7 +101,17 @@ impl LlmRequest {
         Self {
             prompt: prompt.into(),
             system_instruction: Some(system.into()),
+            use_google_search: false,
         }
+    }
+
+    /// Enable Google Search grounding for this request
+    ///
+    /// When enabled, the model can search the web to ground its responses
+    /// in real-time information.
+    pub fn with_google_search(mut self) -> Self {
+        self.use_google_search = true;
+        self
     }
 }
 
@@ -485,6 +505,10 @@ impl LlmClient {
             interaction = interaction.with_system_instruction(system);
         }
 
+        if request.use_google_search {
+            interaction = interaction.with_google_search();
+        }
+
         interaction
     }
 
@@ -522,6 +546,7 @@ mod tests {
         let req = LlmRequest::new("Test prompt");
         assert_eq!(req.prompt, "Test prompt");
         assert!(req.system_instruction.is_none());
+        assert!(!req.use_google_search);
     }
 
     #[test]
@@ -532,6 +557,25 @@ mod tests {
             req.system_instruction,
             Some("System instruction".to_string())
         );
+        assert!(!req.use_google_search);
+    }
+
+    #[test]
+    fn test_llm_request_with_google_search() {
+        let req = LlmRequest::new("Test prompt").with_google_search();
+        assert_eq!(req.prompt, "Test prompt");
+        assert!(req.use_google_search);
+    }
+
+    #[test]
+    fn test_llm_request_with_system_and_google_search() {
+        let req = LlmRequest::with_system("User prompt", "System instruction").with_google_search();
+        assert_eq!(req.prompt, "User prompt");
+        assert_eq!(
+            req.system_instruction,
+            Some("System instruction".to_string())
+        );
+        assert!(req.use_google_search);
     }
 
     #[test]
