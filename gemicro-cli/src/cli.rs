@@ -46,7 +46,7 @@ pub struct Args {
     pub llm_timeout: u64,
 
     /// Maximum tokens per LLM request
-    #[arg(long, default_value = "1024")]
+    #[arg(long, default_value = "16384")]
     pub max_tokens: u32,
 
     /// Temperature for LLM generation (0.0-1.0)
@@ -155,7 +155,7 @@ mod tests {
             timeout: 180,
             continue_on_failure: true,
             llm_timeout: 60,
-            max_tokens: 1024,
+            max_tokens: 16384,
             temperature: 0.7,
             verbose: false,
         }

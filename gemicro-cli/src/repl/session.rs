@@ -15,7 +15,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::SystemTime;
 
-/// Maximum characters for history preview strings.
+/// Maximum characters for answer previews in the `/history` command.
+///
+/// When users run `/history` in the REPL, this controls how much of each
+/// previous answer is shown. Full answers are always available in the
+/// conversation context sent to the LLM for follow-up queries.
 const HISTORY_PREVIEW_CHARS: usize = 256;
 
 /// REPL session state

@@ -11,7 +11,15 @@ use std::time::Duration;
 /// Spinner animation tick interval in milliseconds.
 const SPINNER_TICK_MS: u64 = 120;
 
-/// Maximum characters for preview strings (sub-query results, errors, etc.)
+/// Maximum characters for preview strings displayed during execution.
+///
+/// Used for truncating:
+/// - Sub-query text in spinner progress bars
+/// - Result previews when sub-queries complete (e.g., `[1] ✅ 2.5s → "The answer..."`)
+/// - Error messages when sub-queries fail
+/// - Partial results shown on interrupt
+///
+/// This does NOT affect the final synthesized answer, which is always shown in full.
 const PREVIEW_CHARS: usize = 256;
 
 /// Renderer using indicatif for progress bar display.
