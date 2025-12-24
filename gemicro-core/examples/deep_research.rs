@@ -103,12 +103,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         sub_queries = queries.clone();
                         println!();
                         println!("┌─────────────────────────────────────────────────────────────┐");
-                        println!("│ 📋 RESEARCH PLAN ({} sub-queries)                            │", sub_queries.len());
+                        println!(
+                            "│ 📋 RESEARCH PLAN ({} sub-queries)                            │",
+                            sub_queries.len()
+                        );
                         println!("├─────────────────────────────────────────────────────────────┤");
                         for (i, q) in sub_queries.iter().enumerate() {
                             // Wrap long queries
                             let display = truncate(q, 55);
-                            println!("│ {}. {}{}│",
+                            println!(
+                                "│ {}. {}{}│",
                                 i + 1,
                                 display,
                                 " ".repeat(56 - display.chars().count())
@@ -123,7 +127,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 EVENT_SUB_QUERY_STARTED => {
                     if let Some(id) = update.data.get("id").and_then(|v| v.as_u64()) {
                         sub_query_start_times.insert(id as usize, Instant::now());
-                        let query_text = sub_queries.get(id as usize)
+                        let query_text = sub_queries
+                            .get(id as usize)
                             .map(|q| truncate(q, 50))
                             .unwrap_or_else(|| "...".to_string());
                         println!("   ⏳ [{}] {}", id + 1, query_text);
@@ -139,7 +144,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let duration_str = format!("{:.1}s", duration.as_secs_f64());
                         let preview = first_sentence(&result.result);
 
-                        println!("   ✅ [{}] {} → \"{}\"",
+                        println!(
+                            "   ✅ [{}] {} → \"{}\"",
                             result.id + 1,
                             duration_str,
                             preview
@@ -155,11 +161,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             .map(|start| start.elapsed())
                             .unwrap_or_default();
 
-                        let err = update.data.get("error")
+                        let err = update
+                            .data
+                            .get("error")
                             .and_then(|v| v.as_str())
                             .unwrap_or("Unknown error");
 
-                        println!("   ❌ [{}] {:.1}s → Failed: {}",
+                        println!(
+                            "   ❌ [{}] {:.1}s → Failed: {}",
                             id + 1,
                             duration.as_secs_f64(),
                             truncate(err, 50)
@@ -179,24 +188,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         findings.sort_by_key(|(id, _, _)| *id);
 
                         for (id, result, duration) in &findings {
-                            let query_text = sub_queries.get(*id)
+                            let query_text = sub_queries
+                                .get(*id)
                                 .map(|q| truncate(q, 40))
                                 .unwrap_or_else(|| "Query".to_string());
 
                             // Show first meaningful line of the result
-                            let first_line = result.lines()
+                            let first_line = result
+                                .lines()
                                 .find(|line| !line.trim().is_empty() && line.len() > 10)
                                 .unwrap_or("(result available)");
                             let preview = truncate(first_line, 55);
 
-                            println!("│                                                             │");
-                            println!("│ {}. {} ({:.1}s){}│",
+                            println!(
+                                "│                                                             │"
+                            );
+                            println!(
+                                "│ {}. {} ({:.1}s){}│",
                                 id + 1,
                                 query_text,
                                 duration.as_secs_f64(),
                                 " ".repeat(55 - query_text.chars().count() - 7)
                             );
-                            println!("│    → {}{}│",
+                            println!(
+                                "│    → {}{}│",
                                 preview,
                                 " ".repeat(55 - preview.chars().count())
                             );
@@ -206,16 +221,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         println!();
                     }
 
-                    println!("🧠 Synthesizing {} findings into comprehensive answer...", findings.len());
+                    println!(
+                        "🧠 Synthesizing {} findings into comprehensive answer...",
+                        findings.len()
+                    );
                 }
                 EVENT_FINAL_RESULT => {
                     if let Some(result) = update.as_final_result() {
                         let total_duration = overall_start.elapsed();
 
                         println!();
-                        println!("╔══════════════════════════════════════════════════════════════╗");
-                        println!("║                     SYNTHESIZED ANSWER                       ║");
-                        println!("╚══════════════════════════════════════════════════════════════╝");
+                        println!(
+                            "╔══════════════════════════════════════════════════════════════╗"
+                        );
+                        println!(
+                            "║                     SYNTHESIZED ANSWER                       ║"
+                        );
+                        println!(
+                            "╚══════════════════════════════════════════════════════════════╝"
+                        );
                         println!();
                         println!("{}", result.answer);
                         println!();
@@ -225,20 +249,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             + result.metadata.sub_queries_failed;
 
                         // Calculate parallel efficiency
-                        let sequential_time: f64 = findings.iter()
-                            .map(|(_, _, d)| d.as_secs_f64())
-                            .sum();
+                        let sequential_time: f64 =
+                            findings.iter().map(|(_, _, d)| d.as_secs_f64()).sum();
                         let parallel_time = total_duration.as_secs_f64();
-                        let speedup = if parallel_time > 0.0 { sequential_time / parallel_time } else { 1.0 };
+                        let speedup = if parallel_time > 0.0 {
+                            sequential_time / parallel_time
+                        } else {
+                            1.0
+                        };
 
                         println!("📊 Performance:");
                         println!("   Total time: {:.1}s", parallel_time);
-                        println!("   Sub-queries: {}/{} succeeded",
-                            result.metadata.sub_queries_succeeded,
-                            total_queries
+                        println!(
+                            "   Sub-queries: {}/{} succeeded",
+                            result.metadata.sub_queries_succeeded, total_queries
                         );
                         if speedup > 1.1 {
-                            println!("   Parallel speedup: {:.1}x (saved {:.1}s)",
+                            println!(
+                                "   Parallel speedup: {:.1}x (saved {:.1}s)",
                                 speedup,
                                 sequential_time - parallel_time
                             );

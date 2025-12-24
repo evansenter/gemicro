@@ -33,7 +33,10 @@ async fn test_deep_research_agent_full_flow() {
 
     let agent = DeepResearchAgent::new(config).expect("Should create agent");
 
-    let stream = agent.execute("What are the main benefits of the Rust programming language?", context);
+    let stream = agent.execute(
+        "What are the main benefits of the Rust programming language?",
+        context,
+    );
     futures_util::pin_mut!(stream);
 
     // Track event order
@@ -118,7 +121,10 @@ async fn test_deep_research_agent_full_flow() {
     assert!(sub_query_count <= 3, "Should have at most 3 sub-queries");
 
     // Verify at least one sub-query succeeded
-    assert!(sub_query_results > 0, "At least one sub-query should succeed");
+    assert!(
+        sub_query_results > 0,
+        "At least one sub-query should succeed"
+    );
 
     // Verify final answer is not empty
     assert!(!final_answer.is_empty(), "Final answer should not be empty");
@@ -156,9 +162,7 @@ async fn test_agent_event_ordering() {
     }
 
     // Verify strict ordering of phases
-    let decomp_start = events
-        .iter()
-        .position(|e| e == EVENT_DECOMPOSITION_STARTED);
+    let decomp_start = events.iter().position(|e| e == EVENT_DECOMPOSITION_STARTED);
     let decomp_complete = events
         .iter()
         .position(|e| e == EVENT_DECOMPOSITION_COMPLETE);
@@ -179,8 +183,14 @@ async fn test_agent_event_ordering() {
     let ss = synth_start.unwrap();
     let fr = final_result.unwrap();
 
-    assert!(ds < dc, "decomposition_started should come before decomposition_complete");
-    assert!(dc < ss, "decomposition_complete should come before synthesis_started");
+    assert!(
+        ds < dc,
+        "decomposition_started should come before decomposition_complete"
+    );
+    assert!(
+        dc < ss,
+        "decomposition_complete should come before synthesis_started"
+    );
     assert!(ss < fr, "synthesis_started should come before final_result");
 
     // Verify sub_query_started events come after decomposition_complete

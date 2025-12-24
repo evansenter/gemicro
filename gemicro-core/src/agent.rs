@@ -45,7 +45,11 @@ use tokio::sync::mpsc;
 const PARALLEL_EXECUTION_CHANNEL_BUFFER: usize = 16;
 
 /// Calculate remaining time from total timeout, returning error if already exceeded
-fn remaining_time(start: Instant, total_timeout: Duration, phase: &str) -> Result<Duration, AgentError> {
+fn remaining_time(
+    start: Instant,
+    total_timeout: Duration,
+    phase: &str,
+) -> Result<Duration, AgentError> {
     let elapsed = start.elapsed();
     if elapsed >= total_timeout {
         Err(AgentError::Timeout {
@@ -91,9 +95,7 @@ pub struct AgentContext {
 impl AgentContext {
     /// Create a new agent context from an LlmClient
     pub fn new(llm: LlmClient) -> Self {
-        Self {
-            llm: Arc::new(llm),
-        }
+        Self { llm: Arc::new(llm) }
     }
 
     /// Create from an existing Arc (useful when sharing across agents)
@@ -125,9 +127,7 @@ impl DeepResearchAgent {
     ///
     /// Returns `AgentError::InvalidConfig` if the configuration is invalid.
     pub fn new(config: ResearchConfig) -> Result<Self, AgentError> {
-        config
-            .validate()
-            .map_err(|e| AgentError::InvalidConfig(e))?;
+        config.validate().map_err(AgentError::InvalidConfig)?;
         Ok(Self { config })
     }
 
@@ -363,8 +363,13 @@ fn parse_json_array(text: &str) -> Result<Vec<String>, String> {
                 lines.len()
             };
             let json_text = lines[start..end].join("\n");
-            return serde_json::from_str::<Vec<String>>(&json_text)
-                .map_err(|e| format!("Invalid JSON: {}. Response was: {}", e, truncate_for_error(text, 200)));
+            return serde_json::from_str::<Vec<String>>(&json_text).map_err(|e| {
+                format!(
+                    "Invalid JSON: {}. Response was: {}",
+                    e,
+                    truncate_for_error(text, 200)
+                )
+            });
         }
     }
 
@@ -390,8 +395,9 @@ async fn execute_parallel(
     context: &AgentContext,
     continue_on_partial_failure: bool,
 ) -> ExecutionResult {
-    let (tx, mut rx) =
-        mpsc::channel::<(usize, Result<(String, Option<u32>), String>)>(PARALLEL_EXECUTION_CHANNEL_BUFFER);
+    let (tx, mut rx) = mpsc::channel::<(usize, Result<(String, Option<u32>), String>)>(
+        PARALLEL_EXECUTION_CHANNEL_BUFFER,
+    );
 
     // Spawn all sub-query tasks
     for (id, query) in sub_queries.iter().enumerate() {
