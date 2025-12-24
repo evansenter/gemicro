@@ -25,6 +25,10 @@ pub struct Args {
     #[arg(long, default_value = "5")]
     pub max_sub_queries: usize,
 
+    /// Maximum concurrent sub-query executions (0 = unlimited)
+    #[arg(long, default_value = "5")]
+    pub max_concurrent: usize,
+
     /// Total timeout in seconds
     #[arg(long, default_value = "180")]
     pub timeout: u64,
@@ -110,6 +114,7 @@ impl Args {
         ResearchConfig {
             min_sub_queries: self.min_sub_queries,
             max_sub_queries: self.max_sub_queries,
+            max_concurrent_sub_queries: self.max_concurrent,
             continue_on_partial_failure: self.continue_on_failure,
             total_timeout: Duration::from_secs(self.timeout),
             ..Default::default()
@@ -128,6 +133,7 @@ mod tests {
             api_key: "test-key".to_string(),
             min_sub_queries: 3,
             max_sub_queries: 5,
+            max_concurrent: 5,
             timeout: 180,
             continue_on_failure: true,
             llm_timeout: 60,
