@@ -300,4 +300,37 @@ mod tests {
         // Fresh session should not be stale
         assert!(!session.is_stale());
     }
+
+    #[test]
+    fn test_history_preview_chars_constant() {
+        // HISTORY_PREVIEW_CHARS should be large enough for meaningful summaries
+        // but not so large it overwhelms the /history output
+        assert!(
+            HISTORY_PREVIEW_CHARS >= 100,
+            "HISTORY_PREVIEW_CHARS too small for useful summaries"
+        );
+        assert!(
+            HISTORY_PREVIEW_CHARS <= 500,
+            "HISTORY_PREVIEW_CHARS too large for history display"
+        );
+    }
+
+    #[test]
+    fn test_history_truncation() {
+        let long_answer = "a".repeat(500);
+        let truncated = truncate(&long_answer, HISTORY_PREVIEW_CHARS);
+
+        // Should be truncated to HISTORY_PREVIEW_CHARS (including "...")
+        assert!(truncated.chars().count() <= HISTORY_PREVIEW_CHARS);
+        assert!(truncated.ends_with("..."));
+    }
+
+    #[test]
+    fn test_short_history_not_truncated() {
+        let short_answer = "The answer is 42";
+        let result = truncate(short_answer, HISTORY_PREVIEW_CHARS);
+
+        // Short answers should pass through unchanged
+        assert_eq!(result, short_answer);
+    }
 }

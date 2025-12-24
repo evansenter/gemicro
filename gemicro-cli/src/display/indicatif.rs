@@ -17,10 +17,15 @@ const SPINNER_TICK_MS: u64 = 120;
 /// - Sub-query text in spinner progress bars
 /// - Result previews when sub-queries complete (e.g., `[1] ✅ 2.5s → "The answer..."`)
 /// - Error messages when sub-queries fail
-/// - Partial results shown on interrupt
 ///
 /// This does NOT affect the final synthesized answer, which is always shown in full.
 const PREVIEW_CHARS: usize = 256;
+
+/// Multiplier for showing extra context when execution is interrupted.
+///
+/// When the user presses Ctrl+C, we show partial results with 50% more context
+/// than normal previews, since these may be the only results the user sees.
+const INTERRUPTED_CONTEXT_MULTIPLIER: f32 = 1.5;
 
 /// Renderer using indicatif for progress bar display.
 pub struct IndicatifRenderer {
@@ -271,8 +276,7 @@ impl Renderer for IndicatifRenderer {
             );
             for sq in completed {
                 if let SubQueryStatus::Completed { result_preview, .. } = &sq.status {
-                    // Use PREVIEW_CHARS * 1.5 for interrupted results to show more context
-                    let chars = (PREVIEW_CHARS * 3) / 2;
+                    let chars = (PREVIEW_CHARS as f32 * INTERRUPTED_CONTEXT_MULTIPLIER) as usize;
                     println!("  [{}] {}", sq.id + 1, truncate(result_preview, chars));
                 }
             }
@@ -299,5 +303,55 @@ impl Renderer for IndicatifRenderer {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_preview_chars_constant() {
+        // PREVIEW_CHARS should be large enough for meaningful previews
+        // but not so large it overwhelms the terminal
+        assert!(
+            PREVIEW_CHARS >= 100,
+            "PREVIEW_CHARS too small for useful previews"
+        );
+        assert!(
+            PREVIEW_CHARS <= 500,
+            "PREVIEW_CHARS too large for terminal display"
+        );
+    }
+
+    #[test]
+    fn test_interrupted_context_multiplier() {
+        // Interrupted results should show more context than normal
+        assert!(INTERRUPTED_CONTEXT_MULTIPLIER > 1.0);
+        assert!(INTERRUPTED_CONTEXT_MULTIPLIER <= 2.0);
+
+        // Verify the calculated value
+        let chars = (PREVIEW_CHARS as f32 * INTERRUPTED_CONTEXT_MULTIPLIER) as usize;
+        assert!(chars > PREVIEW_CHARS);
+        assert_eq!(chars, 384); // 256 * 1.5
+    }
+
+    #[test]
+    fn test_truncate_at_preview_chars() {
+        let long_text = "a".repeat(500);
+        let truncated = truncate(&long_text, PREVIEW_CHARS);
+
+        // Should be truncated to PREVIEW_CHARS (including "...")
+        assert!(truncated.chars().count() <= PREVIEW_CHARS);
+        assert!(truncated.ends_with("..."));
+    }
+
+    #[test]
+    fn test_short_text_not_truncated() {
+        let short_text = "This is a short result";
+        let result = truncate(short_text, PREVIEW_CHARS);
+
+        // Short text should pass through unchanged
+        assert_eq!(result, short_text);
     }
 }
