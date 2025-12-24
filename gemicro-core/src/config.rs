@@ -6,6 +6,98 @@ use std::time::Duration;
 /// Hardcoded to gemini-3-flash-preview as per project requirements.
 pub const MODEL: &str = "gemini-3-flash-preview";
 
+/// Placeholder constants for template validation
+mod placeholders {
+    /// Required placeholders for decomposition template
+    pub const DECOMPOSITION: &[&str] = &["{min}", "{max}", "{query}"];
+
+    /// Required placeholders for synthesis template
+    pub const SYNTHESIS: &[&str] = &["{query}", "{findings}"];
+}
+
+/// Extracts all placeholders from a template string
+///
+/// Returns placeholders in the format `{name}`. Handles malformed
+/// templates gracefully (unclosed braces are ignored, nested braces
+/// restart the search from the inner brace with a warning logged).
+///
+/// # Note
+///
+/// This function does not support brace escaping. If you need literal braces
+/// in your template, they will be treated as placeholder delimiters. There is
+/// currently no escape sequence to include literal `{` or `}` characters.
+fn extract_placeholders(template: &str) -> Vec<String> {
+    use std::collections::HashSet;
+
+    let mut placeholders = Vec::new();
+    let mut seen = HashSet::new();
+    let mut chars = template.char_indices().peekable();
+
+    while let Some((start, ch)) = chars.next() {
+        if ch == '{' {
+            // Find closing brace, but restart if we hit another opening brace
+            let mut current_start = start;
+            let mut end = None;
+
+            for (i, c) in chars.by_ref() {
+                if c == '{' {
+                    // Restart from this new opening brace
+                    log::warn!(
+                        "Nested opening brace detected at position {} in template (restarting from inner brace)",
+                        i
+                    );
+                    current_start = i;
+                } else if c == '}' {
+                    end = Some(i);
+                    break;
+                }
+            }
+
+            if let Some(end_idx) = end {
+                let placeholder = &template[current_start..=end_idx];
+                if seen.insert(placeholder.to_string()) {
+                    placeholders.push(placeholder.to_string());
+                }
+            }
+        }
+    }
+
+    placeholders
+}
+
+/// Validates that a template contains required placeholders
+///
+/// Returns a list of missing placeholders. Logs warnings for unrecognized placeholders.
+fn validate_template_placeholders(
+    template: &str,
+    required: &[&str],
+    template_name: &str,
+) -> Vec<String> {
+    let mut missing = Vec::new();
+
+    // Check for required placeholders
+    for placeholder in required {
+        if !template.contains(placeholder) {
+            missing.push((*placeholder).to_string());
+        }
+    }
+
+    // Warn about unrecognized placeholders
+    let found_placeholders = extract_placeholders(template);
+    for found in &found_placeholders {
+        if !required.contains(&found.as_str()) {
+            log::warn!(
+                "{} contains unrecognized placeholder '{}' (expected: {})",
+                template_name,
+                found,
+                required.join(", ")
+            );
+        }
+    }
+
+    missing
+}
+
 /// Prompts used by the Deep Research agent
 ///
 /// Contains system instructions and user templates for the three phases:
@@ -15,6 +107,13 @@ pub const MODEL: &str = "gemini-3-flash-preview";
 ///
 /// - `decomposition_template`: `{min}`, `{max}`, `{query}`
 /// - `synthesis_template`: `{query}`, `{findings}`
+///
+/// # Note on Brace Escaping
+///
+/// Template placeholders do **not** support brace escaping. If your template
+/// contains literal `{` or `}` characters, they will be interpreted as
+/// placeholder delimiters. There is currently no escape sequence to include
+/// literal braces in templates.
 ///
 /// # Example
 ///
@@ -76,59 +175,69 @@ impl ResearchPrompts {
             .replace("{query}", query)
     }
 
-    /// Validate that all prompts are non-empty and contain required placeholders
+    /// Validate that all prompts are non-empty and templates contain required placeholders
     ///
     /// Returns an error if:
     /// - Any prompt string is empty or whitespace-only
     /// - `decomposition_template` is missing `{min}`, `{max}`, or `{query}`
     /// - `synthesis_template` is missing `{query}` or `{findings}`
+    ///
+    /// Collects all validation errors and returns them joined by "; ".
+    /// Logs warnings for unrecognized placeholders in templates.
     pub fn validate(&self) -> Result<(), AgentError> {
+        let mut errors = Vec::new();
+
+        // Validate non-empty prompts
         if self.decomposition_system.trim().is_empty() {
-            return Err(AgentError::InvalidConfig(
-                "decomposition_system cannot be empty".to_string(),
-            ));
+            errors.push("decomposition_system cannot be empty".to_string());
         }
         if self.decomposition_template.trim().is_empty() {
-            return Err(AgentError::InvalidConfig(
-                "decomposition_template cannot be empty".to_string(),
-            ));
+            errors.push("decomposition_template cannot be empty".to_string());
         }
         if self.sub_query_system.trim().is_empty() {
-            return Err(AgentError::InvalidConfig(
-                "sub_query_system cannot be empty".to_string(),
-            ));
+            errors.push("sub_query_system cannot be empty".to_string());
         }
         if self.synthesis_system.trim().is_empty() {
-            return Err(AgentError::InvalidConfig(
-                "synthesis_system cannot be empty".to_string(),
-            ));
+            errors.push("synthesis_system cannot be empty".to_string());
         }
         if self.synthesis_template.trim().is_empty() {
-            return Err(AgentError::InvalidConfig(
-                "synthesis_template cannot be empty".to_string(),
-            ));
+            errors.push("synthesis_template cannot be empty".to_string());
         }
 
-        // Validate required placeholders in decomposition_template
-        if !self.decomposition_template.contains("{min}")
-            || !self.decomposition_template.contains("{max}")
-            || !self.decomposition_template.contains("{query}")
-        {
-            return Err(AgentError::InvalidConfig(
-                "decomposition_template must contain {min}, {max}, and {query}".to_string(),
-            ));
+        // Validate placeholder presence (only if template is non-empty to avoid redundant errors)
+        if !self.decomposition_template.trim().is_empty() {
+            let missing = validate_template_placeholders(
+                &self.decomposition_template,
+                placeholders::DECOMPOSITION,
+                "decomposition_template",
+            );
+            if !missing.is_empty() {
+                errors.push(format!(
+                    "decomposition_template missing required placeholders: {}",
+                    missing.join(", ")
+                ));
+            }
         }
 
-        // Validate required placeholders in synthesis_template
-        if !self.synthesis_template.contains("{query}")
-            || !self.synthesis_template.contains("{findings}")
-        {
-            return Err(AgentError::InvalidConfig(
-                "synthesis_template must contain {query} and {findings}".to_string(),
-            ));
+        if !self.synthesis_template.trim().is_empty() {
+            let missing = validate_template_placeholders(
+                &self.synthesis_template,
+                placeholders::SYNTHESIS,
+                "synthesis_template",
+            );
+            if !missing.is_empty() {
+                errors.push(format!(
+                    "synthesis_template missing required placeholders: {}",
+                    missing.join(", ")
+                ));
+            }
         }
 
-        Ok(())
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(AgentError::InvalidConfig(errors.join("; ")))
+        }
     }
 }
 
@@ -233,36 +342,41 @@ impl ResearchConfig {
     /// - `max_sub_queries` is 0
     /// - `min_sub_queries > max_sub_queries`
     /// - `total_timeout` is 0
-    /// - Any prompt is empty
+    /// - Any prompt is empty or missing required placeholders
+    ///
+    /// Collects all validation errors and returns them joined by "; ".
     pub fn validate(&self) -> Result<(), AgentError> {
+        let mut errors = Vec::new();
+
         if self.min_sub_queries == 0 {
-            return Err(AgentError::InvalidConfig(
-                "min_sub_queries must be greater than 0".to_string(),
-            ));
+            errors.push("min_sub_queries must be greater than 0".to_string());
         }
 
         if self.max_sub_queries == 0 {
-            return Err(AgentError::InvalidConfig(
-                "max_sub_queries must be greater than 0".to_string(),
-            ));
+            errors.push("max_sub_queries must be greater than 0".to_string());
         }
 
         if self.min_sub_queries > self.max_sub_queries {
-            return Err(AgentError::InvalidConfig(format!(
+            errors.push(format!(
                 "min_sub_queries ({}) cannot be greater than max_sub_queries ({})",
                 self.min_sub_queries, self.max_sub_queries
-            )));
-        }
-
-        if self.total_timeout.as_secs() == 0 {
-            return Err(AgentError::InvalidConfig(
-                "total_timeout must be greater than 0".to_string(),
             ));
         }
 
-        self.prompts.validate()?;
+        if self.total_timeout.as_secs() == 0 {
+            errors.push("total_timeout must be greater than 0".to_string());
+        }
 
-        Ok(())
+        // Validate prompts and collect their errors
+        if let Err(AgentError::InvalidConfig(prompt_errors)) = self.prompts.validate() {
+            errors.push(prompt_errors);
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(AgentError::InvalidConfig(errors.join("; ")))
+        }
     }
 }
 
@@ -629,6 +743,136 @@ mod tests {
     }
 
     // Placeholder validation tests
+
+    #[test]
+    fn test_extract_placeholders() {
+        let placeholders = super::extract_placeholders("Hello {foo} and {bar}!");
+        assert_eq!(placeholders.len(), 2);
+        assert!(placeholders.contains(&"{foo}".to_string()));
+        assert!(placeholders.contains(&"{bar}".to_string()));
+    }
+
+    #[test]
+    fn test_extract_placeholders_deduplicates() {
+        let placeholders = super::extract_placeholders("{foo} and {foo} again");
+        assert_eq!(placeholders.len(), 1);
+        assert_eq!(placeholders[0], "{foo}");
+    }
+
+    #[test]
+    fn test_extract_placeholders_handles_unclosed_braces() {
+        let placeholders = super::extract_placeholders("Hello {foo and {bar}");
+        // Should only extract {bar} since {foo is not closed properly
+        assert_eq!(placeholders.len(), 1);
+        assert_eq!(placeholders[0], "{bar}");
+    }
+
+    #[test]
+    fn test_extract_placeholders_empty_template() {
+        let placeholders = super::extract_placeholders("");
+        assert!(placeholders.is_empty());
+    }
+
+    #[test]
+    fn test_extract_placeholders_no_placeholders() {
+        let placeholders = super::extract_placeholders("Just plain text");
+        assert!(placeholders.is_empty());
+    }
+
+    #[test]
+    fn test_validate_missing_decomposition_placeholders() {
+        let prompts = ResearchPrompts {
+            decomposition_template: "Query: {query}".to_string(), // Missing {min}, {max}
+            ..Default::default()
+        };
+        let result = prompts.validate();
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("decomposition_template"));
+        assert!(err.contains("{min}"));
+        assert!(err.contains("{max}"));
+    }
+
+    #[test]
+    fn test_validate_missing_synthesis_placeholders() {
+        let prompts = ResearchPrompts {
+            synthesis_template: "Answer: here".to_string(), // Missing {query}, {findings}
+            ..Default::default()
+        };
+        let result = prompts.validate();
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("synthesis_template"));
+        assert!(err.contains("{query}"));
+        assert!(err.contains("{findings}"));
+    }
+
+    #[test]
+    fn test_validate_collects_all_prompt_errors() {
+        let prompts = ResearchPrompts {
+            decomposition_system: "".to_string(),
+            decomposition_template: "Query: {query}".to_string(), // Missing {min}, {max}
+            synthesis_template: "Answer".to_string(),             // Missing {query}, {findings}
+            ..Default::default()
+        };
+        let result = prompts.validate();
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        // Should contain ALL errors, not just the first
+        assert!(err.contains("decomposition_system"));
+        assert!(err.contains("decomposition_template"));
+        assert!(err.contains("synthesis_template"));
+    }
+
+    #[test]
+    fn test_research_config_collects_all_errors() {
+        let config = ResearchConfig {
+            min_sub_queries: 0,
+            max_sub_queries: 0,
+            total_timeout: Duration::from_secs(0),
+            prompts: ResearchPrompts {
+                decomposition_template: "Bad template".to_string(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let result = config.validate();
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        // Should contain all config errors AND prompt errors
+        assert!(err.contains("min_sub_queries"));
+        assert!(err.contains("max_sub_queries"));
+        assert!(err.contains("total_timeout"));
+        assert!(err.contains("decomposition_template"));
+    }
+
+    #[test]
+    fn test_validate_partial_decomposition_placeholders() {
+        // Has {query} but missing {min} and {max}
+        let prompts = ResearchPrompts {
+            decomposition_template: "Research this: {query}".to_string(),
+            ..Default::default()
+        };
+        let result = prompts.validate();
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("{min}"));
+        assert!(err.contains("{max}"));
+        assert!(!err.contains("{query}")); // {query} is present, shouldn't be in error
+    }
+
+    #[test]
+    fn test_validate_unrecognized_placeholder_does_not_error() {
+        // Has all required placeholders plus an extra {custom} one
+        // Should pass validation (warning is logged but doesn't cause error)
+        let prompts = ResearchPrompts {
+            decomposition_template:
+                "Decompose into {min}-{max} questions: {query}\n\nCustom: {custom}".to_string(),
+            ..Default::default()
+        };
+        // Should pass - unrecognized placeholders only trigger warnings, not errors
+        assert!(prompts.validate().is_ok());
+    }
 
     #[test]
     fn test_research_prompts_validation_missing_min_placeholder() {
