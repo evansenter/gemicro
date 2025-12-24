@@ -565,4 +565,26 @@ mod tests {
         assert!(!config.prompts.synthesis_system.is_empty());
         assert!(!config.prompts.synthesis_template.is_empty());
     }
+
+    #[test]
+    fn test_render_decomposition_with_placeholder_in_query() {
+        let prompts = ResearchPrompts::default();
+        let rendered = prompts.render_decomposition(3, 5, "Compare {min} and {max} in Rust");
+
+        // User's literal {min} and {max} should be preserved, not replaced
+        assert!(rendered.contains("Compare {min} and {max} in Rust"));
+        // Template placeholders should be replaced
+        assert!(rendered.contains("3-5"));
+    }
+
+    #[test]
+    fn test_render_synthesis_with_placeholder_in_query() {
+        let prompts = ResearchPrompts::default();
+        let rendered = prompts.render_synthesis("What about {findings}?", "Finding 1");
+
+        // User's literal {findings} should be preserved
+        assert!(rendered.contains("What about {findings}?"));
+        // Template placeholder should be replaced with actual findings
+        assert!(rendered.contains("Finding 1"));
+    }
 }
