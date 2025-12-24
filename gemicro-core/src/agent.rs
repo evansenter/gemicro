@@ -194,7 +194,7 @@ impl DeepResearchAgent {
             let exec_timeout = remaining_time(start_time, config.total_timeout, "parallel execution")?;
             let execution_result = tokio::time::timeout(
                 exec_timeout,
-                execute_parallel(&sub_queries, &context, &config)
+                execute_parallel(&sub_queries, &context, config.continue_on_partial_failure)
             )
             .await
             .map_err(|_| timeout_error(start_time, config.total_timeout, "parallel execution"))?;
@@ -220,7 +220,7 @@ impl DeepResearchAgent {
             let synth_timeout = remaining_time(start_time, config.total_timeout, "synthesis")?;
             let (answer, synthesis_tokens) = tokio::time::timeout(
                 synth_timeout,
-                synthesize(&query, &execution_result.results, &context, &config)
+                synthesize(&query, &execution_result.results, &context)
             )
             .await
             .map_err(|_| timeout_error(start_time, config.total_timeout, "synthesis"))??;
@@ -279,12 +279,20 @@ async fn decompose(
     context: &AgentContext,
     config: &ResearchConfig,
 ) -> Result<Vec<String>, AgentError> {
-    let prompt =
-        config
-            .prompts
-            .render_decomposition(config.min_sub_queries, config.max_sub_queries, query);
+    let prompt = format!(
+        r#"Decompose this research query into {}-{} focused, independent sub-questions.
 
-    let request = LlmRequest::with_system(prompt, &config.prompts.decomposition_system);
+Query: {}
+
+Return ONLY a JSON array of strings, no other text. Example:
+["What is X?", "How does Y work?", "What are the benefits of Z?"]"#,
+        config.min_sub_queries, config.max_sub_queries, query
+    );
+
+    let request = LlmRequest::with_system(
+        prompt,
+        "You are a research query decomposition expert. Return only valid JSON arrays of strings.",
+    );
 
     let response = context
         .llm
@@ -377,7 +385,7 @@ fn parse_json_array(text: &str) -> Result<Vec<String>, String> {
 ///
 /// * `sub_queries` - The sub-queries to execute
 /// * `context` - Agent context with LLM client
-/// * `config` - Research configuration (for prompts and continue_on_partial_failure)
+/// * `continue_on_partial_failure` - If false, abort on first failure
 ///
 /// # Returns
 ///
@@ -385,7 +393,7 @@ fn parse_json_array(text: &str) -> Result<Vec<String>, String> {
 async fn execute_parallel(
     sub_queries: &[String],
     context: &AgentContext,
-    config: &ResearchConfig,
+    continue_on_partial_failure: bool,
 ) -> ExecutionResult {
     let (tx, mut rx) = mpsc::channel::<(usize, Result<(String, Option<u32>), String>)>(
         PARALLEL_EXECUTION_CHANNEL_BUFFER,
@@ -396,10 +404,12 @@ async fn execute_parallel(
         let tx = tx.clone();
         let llm = context.llm.clone();
         let query = query.clone();
-        let sub_query_system = config.prompts.sub_query_system.clone();
 
         tokio::spawn(async move {
-            let request = LlmRequest::with_system(&query, &sub_query_system);
+            let request = LlmRequest::with_system(
+                &query,
+                "You are a research assistant. Provide a focused, informative answer.",
+            );
 
             let result = match llm.generate(request).await {
                 Ok(response) => Ok((response.text, response.tokens_used)),
@@ -447,7 +457,7 @@ async fn execute_parallel(
                 failed += 1;
 
                 // Abort early if configured to fail fast
-                if !config.continue_on_partial_failure {
+                if !continue_on_partial_failure {
                     log::warn!(
                         "Sub-query {} failed and continue_on_partial_failure=false, aborting",
                         id
@@ -475,7 +485,6 @@ async fn synthesize(
     original_query: &str,
     results: &[String],
     context: &AgentContext,
-    config: &ResearchConfig,
 ) -> Result<(String, Option<u32>), AgentError> {
     let findings = results
         .iter()
@@ -484,9 +493,22 @@ async fn synthesize(
         .collect::<Vec<_>>()
         .join("\n\n---\n\n");
 
-    let prompt = config.prompts.render_synthesis(original_query, &findings);
+    let prompt = format!(
+        r#"Synthesize these research findings into a comprehensive answer.
 
-    let request = LlmRequest::with_system(prompt, &config.prompts.synthesis_system);
+Original question: {}
+
+Research findings:
+{}
+
+Provide a clear, well-organized answer that integrates all findings. Do not mention the research process or sub-questions."#,
+        original_query, findings
+    );
+
+    let request = LlmRequest::with_system(
+        prompt,
+        "You are a research synthesis expert. Provide comprehensive, coherent answers.",
+    );
 
     let response = context
         .llm

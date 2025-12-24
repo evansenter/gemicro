@@ -29,7 +29,6 @@ async fn test_deep_research_agent_full_flow() {
         max_sub_queries: 3,
         continue_on_partial_failure: true,
         total_timeout: Duration::from_secs(120),
-        ..Default::default()
     };
 
     let agent = DeepResearchAgent::new(config).expect("Should create agent");
@@ -149,7 +148,6 @@ async fn test_agent_event_ordering() {
         max_sub_queries: 2,
         continue_on_partial_failure: true,
         total_timeout: Duration::from_secs(120),
-        ..Default::default()
     };
 
     let agent = DeepResearchAgent::new(config).unwrap();
