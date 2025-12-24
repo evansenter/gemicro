@@ -9,7 +9,7 @@ use std::time::Duration;
 pub enum OutputMode {
     /// Compact output with shorter previews (20/30 chars)
     Compact,
-    /// Normal output with balanced previews (40/55 chars) [default]
+    /// Normal output with balanced previews (40/55 chars) \[default\]
     #[default]
     Normal,
     /// Verbose output with longer previews (80/100 chars)
