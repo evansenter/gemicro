@@ -4,7 +4,6 @@
 //! Run with: cargo test -p gemicro-cli -- --include-ignored
 
 use std::process::Command;
-use std::time::Duration;
 
 /// Helper to run the CLI binary with arguments.
 fn run_cli(args: &[&str]) -> std::process::Output {
