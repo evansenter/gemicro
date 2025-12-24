@@ -53,7 +53,7 @@ async fn run_interactive(args: &cli::Args) -> Result<()> {
     let genai_client = rust_genai::Client::builder(args.api_key.clone()).build();
     let llm = LlmClient::new(genai_client, args.llm_config());
 
-    let mut session = Session::new(llm);
+    let mut session = Session::new(llm, args.plain);
 
     // Register available agents
     let research_config = args.research_config();
@@ -79,7 +79,7 @@ async fn run_research(args: &cli::Args, query: &str) -> Result<()> {
 
     // Initialize state and renderer
     let mut state = DisplayState::new();
-    let mut renderer = IndicatifRenderer::new();
+    let mut renderer = IndicatifRenderer::new(args.plain);
 
     // Set up interrupt handling with AtomicU8 for cross-thread visibility.
     // Signal handler writes, main loop reads. Uses SeqCst for simplicity.

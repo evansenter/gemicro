@@ -38,11 +38,16 @@ pub struct Session {
 
     /// Last known mtime of the binary
     binary_mtime: Option<SystemTime>,
+
+    /// Whether to use plain text output (no markdown rendering)
+    plain: bool,
 }
 
 impl Session {
     /// Create a new session.
-    pub fn new(llm: LlmClient) -> Self {
+    ///
+    /// If `plain` is true, markdown rendering will be disabled for output.
+    pub fn new(llm: LlmClient, plain: bool) -> Self {
         let binary_path = std::env::current_exe().ok();
         let binary_mtime = binary_path
             .as_ref()
@@ -55,6 +60,7 @@ impl Session {
             llm: Arc::new(llm),
             binary_path,
             binary_mtime,
+            plain,
         }
     }
 
@@ -111,7 +117,7 @@ impl Session {
 
         // Initialize state and renderer
         let mut state = DisplayState::new();
-        let mut renderer = IndicatifRenderer::new();
+        let mut renderer = IndicatifRenderer::new(self.plain);
         let mut events = Vec::new();
 
         // Execute and stream
@@ -295,7 +301,7 @@ mod tests {
         // A fresh session should not be stale
         let genai_client = rust_genai::Client::builder("test-key".to_string()).build();
         let llm = LlmClient::new(genai_client, LlmConfig::default());
-        let session = Session::new(llm);
+        let session = Session::new(llm, false);
 
         // Fresh session should not be stale
         assert!(!session.is_stale());
