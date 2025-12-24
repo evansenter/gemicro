@@ -904,9 +904,9 @@ mod tests {
         // Unicode characters (emoji = multiple bytes but 1 char)
         let text = "Hello 🌍 World";
         let result = truncate_for_error(text, 8);
-        // Should be "Hello 🌍 " (8 chars)
-        assert!(result.contains("..."));
-        assert!(result.contains("13 chars total")); // "Hello 🌍 World" is 13 chars
+        // Should truncate by character count, not byte count
+        // "Hello 🌍 " is exactly 8 characters (H-e-l-l-o-space-🌍-space)
+        assert_eq!(result, "Hello 🌍 ... (13 chars total)");
     }
 
     #[test]
@@ -936,6 +936,13 @@ mod tests {
         let input = r#"[["nested"], ["arrays"]]"#;
         let result = parse_json_array(input);
         assert!(result.is_err());
+        // Verify error message is informative
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("Invalid") || err.contains("expected"),
+            "Error should indicate invalid format: {}",
+            err
+        );
     }
 
     #[test]
@@ -943,6 +950,13 @@ mod tests {
         let input = r#"["string", 123, true]"#;
         let result = parse_json_array(input);
         assert!(result.is_err());
+        // Verify error message helps user understand the problem
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("Invalid") || err.contains("expected"),
+            "Error should indicate invalid format: {}",
+            err
+        );
     }
 
     #[test]
@@ -950,6 +964,13 @@ mod tests {
         let input = r#"["string", null]"#;
         let result = parse_json_array(input);
         assert!(result.is_err());
+        // Verify error message is helpful
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("Invalid") || err.contains("expected"),
+            "Error should indicate invalid format: {}",
+            err
+        );
     }
 
     #[test]
