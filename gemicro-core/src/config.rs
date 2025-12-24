@@ -75,7 +75,12 @@ impl ResearchPrompts {
             .replace("{query}", query)
     }
 
-    /// Validate that all prompts are non-empty
+    /// Validate that all prompts are non-empty and contain required placeholders
+    ///
+    /// Returns an error if:
+    /// - Any prompt string is empty or whitespace-only
+    /// - `decomposition_template` is missing `{min}`, `{max}`, or `{query}`
+    /// - `synthesis_template` is missing `{query}` or `{findings}`
     pub fn validate(&self) -> Result<(), String> {
         if self.decomposition_system.trim().is_empty() {
             return Err("decomposition_system cannot be empty".to_string());
@@ -92,6 +97,24 @@ impl ResearchPrompts {
         if self.synthesis_template.trim().is_empty() {
             return Err("synthesis_template cannot be empty".to_string());
         }
+
+        // Validate required placeholders in decomposition_template
+        if !self.decomposition_template.contains("{min}")
+            || !self.decomposition_template.contains("{max}")
+            || !self.decomposition_template.contains("{query}")
+        {
+            return Err(
+                "decomposition_template must contain {min}, {max}, and {query}".to_string(),
+            );
+        }
+
+        // Validate required placeholders in synthesis_template
+        if !self.synthesis_template.contains("{query}")
+            || !self.synthesis_template.contains("{findings}")
+        {
+            return Err("synthesis_template must contain {query} and {findings}".to_string());
+        }
+
         Ok(())
     }
 }
@@ -523,5 +546,70 @@ mod tests {
         assert!(!config.prompts.sub_query_system.is_empty());
         assert!(!config.prompts.synthesis_system.is_empty());
         assert!(!config.prompts.synthesis_template.is_empty());
+    }
+
+    #[test]
+    fn test_research_prompts_validation_missing_min_placeholder() {
+        let prompts = ResearchPrompts {
+            decomposition_template: "Query: {query}, max: {max}".to_string(),
+            ..Default::default()
+        };
+        let result = prompts.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("{min}"));
+    }
+
+    #[test]
+    fn test_research_prompts_validation_missing_max_placeholder() {
+        let prompts = ResearchPrompts {
+            decomposition_template: "Query: {query}, min: {min}".to_string(),
+            ..Default::default()
+        };
+        let result = prompts.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("{max}"));
+    }
+
+    #[test]
+    fn test_research_prompts_validation_missing_query_in_decomposition() {
+        let prompts = ResearchPrompts {
+            decomposition_template: "Range: {min}-{max}".to_string(),
+            ..Default::default()
+        };
+        let result = prompts.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("{query}"));
+    }
+
+    #[test]
+    fn test_research_prompts_validation_missing_findings_placeholder() {
+        let prompts = ResearchPrompts {
+            synthesis_template: "Question: {query}".to_string(),
+            ..Default::default()
+        };
+        let result = prompts.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("{findings}"));
+    }
+
+    #[test]
+    fn test_research_prompts_validation_missing_query_in_synthesis() {
+        let prompts = ResearchPrompts {
+            synthesis_template: "Findings: {findings}".to_string(),
+            ..Default::default()
+        };
+        let result = prompts.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("{query}"));
+    }
+
+    #[test]
+    fn test_research_prompts_validation_valid_custom_templates() {
+        let prompts = ResearchPrompts {
+            decomposition_template: "{min} to {max}: {query}".to_string(),
+            synthesis_template: "{query} -> {findings}".to_string(),
+            ..Default::default()
+        };
+        assert!(prompts.validate().is_ok());
     }
 }
