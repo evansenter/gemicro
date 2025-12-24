@@ -6,7 +6,46 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Gemicro is a CLI agent exploration platform for experimenting with AI agent implementation patterns, powered by the Gemini API via the rust-genai library.
 
-**Key Architecture**: Two-crate workspace (gemicro-core library + gemicro-cli binary, coming soon)
+**Key Architecture**: Two-crate workspace (gemicro-core library + gemicro-cli binary, coming in Phase 4)
+
+**Current Status**: Phase 3 complete (Streaming Deep Research Agent). See IMPLEMENTATION_PLAN.md for details.
+
+## Build Commands
+
+```bash
+# Build entire workspace
+cargo build --workspace
+
+# Run tests (unit + doc tests)
+cargo test --workspace
+
+# Run ALL tests including LLM integration tests (requires GEMINI_API_KEY)
+cargo test --workspace -- --include-ignored
+
+# Run a single test
+cargo test test_name
+
+# Run tests in a specific module
+cargo test agent::tests
+
+# Linting
+cargo clippy --workspace -- -D warnings
+
+# Format check
+cargo fmt --all -- --check
+
+# Build docs
+cargo doc --workspace --no-deps
+
+# Run the deep research example
+cargo run -p gemicro-core --example deep_research
+```
+
+## Environment Setup
+
+```bash
+export GEMINI_API_KEY="your-api-key"  # Required for integration tests and examples
+```
 
 ## Core Design Philosophy: Evergreen-Inspired Soft-Typing
 
@@ -160,21 +199,34 @@ gemicro/
 │   │   ├── update.rs             # Soft-typed AgentUpdate
 │   │   ├── error.rs              # Error types (#[non_exhaustive])
 │   │   ├── config.rs             # Cross-agent config only
-│   │   ├── llm.rs                # LLM client (Phase 2)
-│   │   └── agent.rs              # Agent trait (Phase 3)
+│   │   ├── llm.rs                # LLM client (buffered + streaming)
+│   │   └── agent.rs              # DeepResearchAgent implementation
+│   ├── tests/
+│   │   ├── llm_integration.rs    # LLM integration tests (#[ignore])
+│   │   ├── agent_integration.rs  # Agent integration tests (#[ignore])
+│   │   └── common/mod.rs         # Shared test helpers
+│   └── examples/
+│       └── deep_research.rs      # Full agent example with progress display
 │
-└── gemicro-cli/                  # CLI binary (Phase 4)
-    └── src/
-        ├── main.rs               # Entry point
-        ├── cli.rs                # Argument parsing
-        └── display.rs            # Stream consumer with indicatif
+└── gemicro-cli/                  # CLI binary (coming in Phase 4)
 ```
+
+## Key Architectural Decisions
+
+1. **Streaming-first**: `DeepResearchAgent::execute()` returns `impl Stream<Item = Result<AgentUpdate, AgentError>>` for real-time observability
+
+2. **Parallel execution with mpsc**: Sub-queries spawn via `tokio::spawn`, results stream through `mpsc::channel` as they complete (non-deterministic order)
+
+3. **Timeout enforcement**: Uses `tokio::time::timeout` wrapping each phase (decompose, execute, synthesize) with remaining time calculation
+
+4. **Graceful partial failure**: `continue_on_partial_failure` config controls whether to abort on first error or continue with partial results
 
 ## Testing Philosophy
 
-- **Unit tests**: Every module has comprehensive tests
-- **Doc tests**: Public API examples must compile
-- **Integration tests**: Coming in Phase 2+ with actual LLM calls
+- **Unit tests**: In-module `#[cfg(test)]` blocks for fast feedback
+- **Doc tests**: Public API examples must compile (`cargo test --doc`)
+- **Integration tests**: Marked `#[ignore]`, require `GEMINI_API_KEY`, run with `--include-ignored`
+- **Shared test helpers**: `tests/common/mod.rs` provides `setup_test_context()`
 
 ## Common Patterns
 
@@ -258,6 +310,17 @@ The `.claude/settings.local.json` file defines permissions for Claude Code autom
 - **`git stash:*`**: Includes destructive operations (`git stash drop`, `git stash clear`) that permanently delete stashed changes. Use with awareness.
 - Wildcard patterns (`:*`) allow any arguments to the command.
 - These are local settings and should be reviewed per-developer based on workflow needs.
+
+## Known Limitations & Tracked Issues
+
+See [GitHub Issues](https://github.com/evansenter/gemicro/issues) for the full list. Key items:
+
+| Issue | Summary |
+|-------|---------|
+| #7 | Token stats unavailable (blocked on rust-genai#24) |
+| #11 | Prompts are hardcoded; modularization needed for hillclimbing |
+| #14 | No concurrency limit for parallel sub-queries |
+| #17 | Decomposition LLM call tokens not tracked |
 
 ## Questions?
 
