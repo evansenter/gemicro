@@ -66,18 +66,20 @@ impl ResearchPrompts {
 
     /// Validate that all prompts are non-empty
     pub fn validate(&self) -> Result<(), String> {
-        let fields = [
-            ("decomposition_system", &self.decomposition_system),
-            ("decomposition_template", &self.decomposition_template),
-            ("sub_query_system", &self.sub_query_system),
-            ("synthesis_system", &self.synthesis_system),
-            ("synthesis_template", &self.synthesis_template),
-        ];
-
-        for (name, value) in fields {
-            if value.trim().is_empty() {
-                return Err(format!("{} cannot be empty", name));
-            }
+        if self.decomposition_system.trim().is_empty() {
+            return Err("decomposition_system cannot be empty".to_string());
+        }
+        if self.decomposition_template.trim().is_empty() {
+            return Err("decomposition_template cannot be empty".to_string());
+        }
+        if self.sub_query_system.trim().is_empty() {
+            return Err("sub_query_system cannot be empty".to_string());
+        }
+        if self.synthesis_system.trim().is_empty() {
+            return Err("synthesis_system cannot be empty".to_string());
+        }
+        if self.synthesis_template.trim().is_empty() {
+            return Err("synthesis_template cannot be empty".to_string());
         }
         Ok(())
     }
