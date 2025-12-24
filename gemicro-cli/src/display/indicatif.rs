@@ -2,7 +2,7 @@
 
 use super::renderer::Renderer;
 use super::state::{DisplayState, Phase, SubQueryStatus};
-use crate::format::{format_duration, print_final_result, truncate};
+use crate::format::{format_duration, print_final_result, truncate, FinalResultInfo};
 use anyhow::Result;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::collections::HashMap;
@@ -32,11 +32,15 @@ pub struct IndicatifRenderer {
     multi: MultiProgress,
     phase_bar: ProgressBar,
     sub_query_bars: HashMap<usize, ProgressBar>,
+    /// Whether to use plain text output (no markdown rendering).
+    plain: bool,
 }
 
 impl IndicatifRenderer {
     /// Create a new IndicatifRenderer.
-    pub fn new() -> Self {
+    ///
+    /// If `plain` is true, markdown rendering will be disabled for final output.
+    pub fn new(plain: bool) -> Self {
         let multi = MultiProgress::new();
         let phase_bar = multi.add(ProgressBar::new_spinner());
 
@@ -51,6 +55,7 @@ impl IndicatifRenderer {
             multi,
             phase_bar,
             sub_query_bars: HashMap::new(),
+            plain,
         }
     }
 
@@ -75,7 +80,7 @@ impl IndicatifRenderer {
 
 impl Default for IndicatifRenderer {
     fn default() -> Self {
-        Self::new()
+        Self::new(false)
     }
 }
 
@@ -225,15 +230,16 @@ impl Renderer for IndicatifRenderer {
 
     fn on_final_result(&mut self, state: &DisplayState) -> Result<()> {
         if let Some(result) = state.final_result() {
-            print_final_result(
-                &result.answer,
-                state.elapsed(),
-                state.sequential_time(),
-                result.sub_queries_succeeded,
-                result.sub_queries_failed,
-                result.total_tokens,
-                result.tokens_unavailable_count > 0,
-            );
+            print_final_result(&FinalResultInfo {
+                answer: &result.answer,
+                duration: state.elapsed(),
+                sequential_time: state.sequential_time(),
+                sub_queries_succeeded: result.sub_queries_succeeded,
+                sub_queries_failed: result.sub_queries_failed,
+                total_tokens: result.total_tokens,
+                tokens_unavailable: result.tokens_unavailable_count > 0,
+                plain: self.plain,
+            });
         }
 
         Ok(())

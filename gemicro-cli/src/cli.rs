@@ -56,6 +56,10 @@ pub struct Args {
     /// Enable verbose logging
     #[arg(short, long)]
     pub verbose: bool,
+
+    /// Disable markdown rendering (plain text output)
+    #[arg(long)]
+    pub plain: bool,
 }
 
 impl Args {
@@ -158,6 +162,7 @@ mod tests {
             max_tokens: 16384,
             temperature: 0.7,
             verbose: false,
+            plain: false,
         }
     }
 
