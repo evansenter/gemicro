@@ -8,7 +8,7 @@
 //! ## Architecture
 //!
 //! - **Streaming-first**: Agents return async streams of updates for real-time observability
-//! - **Soft-typed events**: `AgentUpdate` uses flexible JSON following Evergreen spec philosophy
+//! - **Soft-typed events**: `AgentUpdate` uses flexible JSON following [Evergreen spec](https://github.com/google-deepmind/evergreen-spec) philosophy
 //! - **Platform-agnostic**: Zero platform-specific dependencies for iOS compatibility
 //!
 //! ## Example

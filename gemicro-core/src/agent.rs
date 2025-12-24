@@ -78,8 +78,8 @@ fn truncate_for_error(text: &str, max_len: usize) -> String {
 
 /// Shared resources for agent execution
 ///
-/// Following Evergreen philosophy: Contains ONLY cross-agent resources.
-/// Agent-specific config goes to constructors, not here.
+/// Following [Evergreen spec](https://github.com/google-deepmind/evergreen-spec) philosophy:
+/// Contains ONLY cross-agent resources. Agent-specific config goes to constructors, not here.
 #[derive(Clone)]
 pub struct AgentContext {
     /// LLM client (Arc-wrapped for cloning across parallel tasks)
