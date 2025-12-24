@@ -55,10 +55,34 @@ impl Args {
     ///
     /// Returns an error if arguments are invalid.
     pub fn validate(&self) -> Result<(), String> {
+        // Bounds validation
+        if self.min_sub_queries == 0 {
+            return Err("min-sub-queries must be greater than 0".to_string());
+        }
+        if self.max_sub_queries == 0 {
+            return Err("max-sub-queries must be greater than 0".to_string());
+        }
+        if self.timeout == 0 {
+            return Err("timeout must be greater than 0".to_string());
+        }
+        if self.llm_timeout == 0 {
+            return Err("llm-timeout must be greater than 0".to_string());
+        }
+        if self.max_tokens == 0 {
+            return Err("max-tokens must be greater than 0".to_string());
+        }
+
+        // Relational validation
         if self.min_sub_queries > self.max_sub_queries {
             return Err(format!(
                 "min-sub-queries ({}) cannot be greater than max-sub-queries ({})",
                 self.min_sub_queries, self.max_sub_queries
+            ));
+        }
+        if self.llm_timeout >= self.timeout {
+            return Err(format!(
+                "llm-timeout ({}) must be less than total timeout ({})",
+                self.llm_timeout, self.timeout
             ));
         }
         if !(0.0..=1.0).contains(&self.temperature) {
@@ -171,6 +195,91 @@ mod tests {
     fn test_validate_temperature_boundary_one() {
         let mut args = test_args();
         args.temperature = 1.0;
+
+        assert!(args.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_min_sub_queries_zero() {
+        let mut args = test_args();
+        args.min_sub_queries = 0;
+
+        let result = args.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("min-sub-queries"));
+    }
+
+    #[test]
+    fn test_validate_max_sub_queries_zero() {
+        let mut args = test_args();
+        args.max_sub_queries = 0;
+        args.min_sub_queries = 0; // Also set min to 0 to avoid triggering that check first
+
+        let result = args.validate();
+        assert!(result.is_err());
+        // Will fail on min first since it's checked first
+        assert!(result.unwrap_err().contains("sub-queries"));
+    }
+
+    #[test]
+    fn test_validate_timeout_zero() {
+        let mut args = test_args();
+        args.timeout = 0;
+
+        let result = args.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("timeout"));
+    }
+
+    #[test]
+    fn test_validate_llm_timeout_zero() {
+        let mut args = test_args();
+        args.llm_timeout = 0;
+
+        let result = args.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("llm-timeout"));
+    }
+
+    #[test]
+    fn test_validate_max_tokens_zero() {
+        let mut args = test_args();
+        args.max_tokens = 0;
+
+        let result = args.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("max-tokens"));
+    }
+
+    #[test]
+    fn test_validate_llm_timeout_exceeds_total() {
+        let mut args = test_args();
+        args.llm_timeout = 200;
+        args.timeout = 180;
+
+        let result = args.validate();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("llm-timeout"));
+        assert!(err.contains("less than"));
+    }
+
+    #[test]
+    fn test_validate_llm_timeout_equals_total() {
+        let mut args = test_args();
+        args.llm_timeout = 180;
+        args.timeout = 180;
+
+        let result = args.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("llm-timeout"));
+    }
+
+    #[test]
+    fn test_validate_llm_timeout_valid() {
+        let mut args = test_args();
+        args.llm_timeout = 60;
+        args.timeout = 180;
 
         assert!(args.validate().is_ok());
     }
