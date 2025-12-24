@@ -587,4 +587,19 @@ mod tests {
         // Template placeholder should be replaced with actual findings
         assert!(rendered.contains("Finding 1"));
     }
+
+    #[test]
+    fn test_render_synthesis_findings_containing_query_placeholder() {
+        let prompts = ResearchPrompts::default();
+        // Findings text contains literal "{query}" - this gets replaced because
+        // {findings} is substituted first, then {query} is replaced globally
+        let rendered =
+            prompts.render_synthesis("What is Rust?", "Research says: {query} is important");
+
+        // The literal {query} in findings IS replaced (this is expected behavior
+        // since we do global replacement after findings substitution)
+        assert!(rendered.contains("Research says: What is Rust? is important"));
+        // Original query is also in its proper location
+        assert!(rendered.contains("Original question: What is Rust?"));
+    }
 }
