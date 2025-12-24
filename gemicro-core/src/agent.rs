@@ -108,12 +108,22 @@ impl DeepResearchAgent {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```no_run
+    /// use gemicro_core::{AgentContext, DeepResearchAgent, ResearchConfig, LlmClient, LlmConfig};
+    /// use futures_util::StreamExt;
+    ///
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let genai_client = rust_genai::Client::builder("api-key".to_string()).build();
+    /// let context = AgentContext::new(LlmClient::new(genai_client, LlmConfig::default()));
+    /// let agent = DeepResearchAgent::new(ResearchConfig::default())?;
+    ///
     /// let stream = agent.execute("What is Rust?", context);
     /// futures_util::pin_mut!(stream);
     /// while let Some(update) = stream.next().await {
     ///     println!("{:?}", update?);
     /// }
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn execute(
         &self,
