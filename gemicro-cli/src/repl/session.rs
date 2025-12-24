@@ -5,6 +5,7 @@
 use super::commands::Command;
 use super::registry::AgentRegistry;
 use crate::display::{DisplayState, IndicatifRenderer, Phase, Renderer};
+use crate::format::truncate;
 use anyhow::{Context, Result};
 use futures_util::StreamExt;
 use gemicro_core::{AgentContext, AgentError, ConversationHistory, HistoryEntry, LlmClient};
@@ -13,6 +14,13 @@ use rustyline::DefaultEditor;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::SystemTime;
+
+/// Maximum characters for answer previews in the `/history` command.
+///
+/// When users run `/history` in the REPL, this controls how much of each
+/// previous answer is shown. Full answers are always available in the
+/// conversation context sent to the LLM for follow-up queries.
+const HISTORY_PREVIEW_CHARS: usize = 256;
 
 /// REPL session state
 pub struct Session {
@@ -33,7 +41,7 @@ pub struct Session {
 }
 
 impl Session {
-    /// Create a new session
+    /// Create a new session.
     pub fn new(llm: LlmClient) -> Self {
         let binary_path = std::env::current_exe().ok();
         let binary_mtime = binary_path
@@ -206,9 +214,8 @@ impl Session {
                                         entry.query
                                     );
                                     if let Some(result) = entry.final_result() {
-                                        let preview: String = result.chars().take(100).collect();
-                                        let ellipsis = if result.len() > 100 { "..." } else { "" };
-                                        println!("    A: {}{}", preview, ellipsis);
+                                        let preview = truncate(result, HISTORY_PREVIEW_CHARS);
+                                        println!("    A: {}", preview);
                                     }
                                 }
                             }
@@ -292,5 +299,28 @@ mod tests {
 
         // Fresh session should not be stale
         assert!(!session.is_stale());
+    }
+
+    // Compile-time validation of constants
+    const _: () = assert!(HISTORY_PREVIEW_CHARS >= 100, "too small");
+    const _: () = assert!(HISTORY_PREVIEW_CHARS <= 500, "too large");
+
+    #[test]
+    fn test_history_truncation() {
+        let long_answer = "a".repeat(500);
+        let truncated = truncate(&long_answer, HISTORY_PREVIEW_CHARS);
+
+        // Should be truncated to HISTORY_PREVIEW_CHARS (including "...")
+        assert!(truncated.chars().count() <= HISTORY_PREVIEW_CHARS);
+        assert!(truncated.ends_with("..."));
+    }
+
+    #[test]
+    fn test_short_history_not_truncated() {
+        let short_answer = "The answer is 42";
+        let result = truncate(short_answer, HISTORY_PREVIEW_CHARS);
+
+        // Short answers should pass through unchanged
+        assert_eq!(result, short_answer);
     }
 }

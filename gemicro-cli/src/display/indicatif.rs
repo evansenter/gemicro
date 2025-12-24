@@ -11,11 +11,21 @@ use std::time::Duration;
 /// Spinner animation tick interval in milliseconds.
 const SPINNER_TICK_MS: u64 = 120;
 
-/// Maximum characters to display for sub-query text.
-const MAX_QUERY_DISPLAY_CHARS: usize = 55;
+/// Maximum characters for preview strings displayed during execution.
+///
+/// Used for truncating:
+/// - Sub-query text in spinner progress bars
+/// - Result previews when sub-queries complete (e.g., `[1] ✅ 2.5s → "The answer..."`)
+/// - Error messages when sub-queries fail
+///
+/// This does NOT affect the final synthesized answer, which is always shown in full.
+const PREVIEW_CHARS: usize = 256;
 
-/// Maximum characters to display for result previews.
-const MAX_PREVIEW_CHARS: usize = 40;
+/// Multiplier for showing extra context when execution is interrupted.
+///
+/// When the user presses Ctrl+C, we show partial results with 50% more context
+/// than normal previews, since these may be the only results the user sees.
+const INTERRUPTED_CONTEXT_MULTIPLIER: f32 = 1.5;
 
 /// Renderer using indicatif for progress bar display.
 pub struct IndicatifRenderer {
@@ -56,7 +66,7 @@ impl IndicatifRenderer {
             let prefix = format!("{}", sq.id + 1);
             log::debug!("Creating sub-query bar: id={}, prefix={}", sq.id, prefix);
             pb.set_prefix(prefix);
-            pb.set_message(truncate(&sq.query, MAX_QUERY_DISPLAY_CHARS));
+            pb.set_message(truncate(&sq.query, PREVIEW_CHARS));
             self.sub_query_bars.insert(sq.id, pb);
         }
         log::debug!("Created {} sub-query bars", self.sub_query_bars.len());
@@ -185,7 +195,7 @@ impl Renderer for IndicatifRenderer {
                         "   [{}] ✅ {} → \"{}\"{}",
                         id + 1,
                         duration_str,
-                        truncate(result_preview, MAX_PREVIEW_CHARS),
+                        truncate(result_preview, PREVIEW_CHARS),
                         token_info
                     );
                 });
@@ -203,7 +213,7 @@ impl Renderer for IndicatifRenderer {
                         "   [{}] ❌ {} → Failed: {}",
                         id + 1,
                         duration_str,
-                        truncate(error, MAX_PREVIEW_CHARS)
+                        truncate(error, PREVIEW_CHARS)
                     );
                 });
                 pb.finish_and_clear();
@@ -266,7 +276,8 @@ impl Renderer for IndicatifRenderer {
             );
             for sq in completed {
                 if let SubQueryStatus::Completed { result_preview, .. } = &sq.status {
-                    println!("  [{}] {}", sq.id + 1, truncate(result_preview, 60));
+                    let chars = (PREVIEW_CHARS as f32 * INTERRUPTED_CONTEXT_MULTIPLIER) as usize;
+                    println!("  [{}] {}", sq.id + 1, truncate(result_preview, chars));
                 }
             }
         } else {
@@ -294,5 +305,43 @@ impl Renderer for IndicatifRenderer {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Compile-time validation of constants
+    const _: () = assert!(PREVIEW_CHARS >= 100, "PREVIEW_CHARS too small");
+    const _: () = assert!(PREVIEW_CHARS <= 500, "PREVIEW_CHARS too large");
+    const _: () = assert!(INTERRUPTED_CONTEXT_MULTIPLIER > 1.0);
+    const _: () = assert!(INTERRUPTED_CONTEXT_MULTIPLIER <= 2.0);
+
+    #[test]
+    fn test_interrupted_context_calculation() {
+        // Verify the calculated value for interrupted results
+        let chars = (PREVIEW_CHARS as f32 * INTERRUPTED_CONTEXT_MULTIPLIER) as usize;
+        assert!(chars > PREVIEW_CHARS);
+        assert_eq!(chars, 384); // 256 * 1.5
+    }
+
+    #[test]
+    fn test_truncate_at_preview_chars() {
+        let long_text = "a".repeat(500);
+        let truncated = truncate(&long_text, PREVIEW_CHARS);
+
+        // Should be truncated to PREVIEW_CHARS (including "...")
+        assert!(truncated.chars().count() <= PREVIEW_CHARS);
+        assert!(truncated.ends_with("..."));
+    }
+
+    #[test]
+    fn test_short_text_not_truncated() {
+        let short_text = "This is a short result";
+        let result = truncate(short_text, PREVIEW_CHARS);
+
+        // Short text should pass through unchanged
+        assert_eq!(result, short_text);
     }
 }
