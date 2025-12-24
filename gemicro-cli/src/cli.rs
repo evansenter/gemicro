@@ -60,6 +60,14 @@ pub struct Args {
     /// Use plain text output instead of markdown rendering
     #[arg(long)]
     pub plain: bool,
+
+    /// Enable Google Search grounding for real-time web data
+    ///
+    /// When enabled, sub-queries can search the web to ground responses
+    /// in real-time information. Useful for current events, recent releases,
+    /// or live data. Note: May have different pricing.
+    #[arg(long)]
+    pub google_search: bool,
 }
 
 impl Args {
@@ -138,6 +146,7 @@ impl Args {
             max_concurrent_sub_queries: self.max_concurrent,
             continue_on_partial_failure: self.continue_on_failure,
             total_timeout: Duration::from_secs(self.timeout),
+            use_google_search: self.google_search,
             ..Default::default()
         }
     }
@@ -163,6 +172,7 @@ mod tests {
             temperature: 0.7,
             verbose: false,
             plain: false,
+            google_search: false,
         }
     }
 

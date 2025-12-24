@@ -571,6 +571,7 @@ async fn execute_parallel(
         let sub_query_system = config.prompts.sub_query_system.clone();
         let semaphore = semaphore.clone();
         let cancellation_token = context.cancellation_token.clone();
+        let use_google_search = config.use_google_search;
 
         tokio::spawn(async move {
             // Acquire semaphore permit if concurrency is limited.
@@ -582,7 +583,10 @@ async fn execute_parallel(
                 None => None,
             };
 
-            let request = LlmRequest::with_system(&query, &sub_query_system);
+            let mut request = LlmRequest::with_system(&query, &sub_query_system);
+            if use_google_search {
+                request = request.with_google_search();
+            }
 
             // Execute LLM call with cancellation support
             let result = match llm
