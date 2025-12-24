@@ -225,3 +225,43 @@ async fn test_generate_stream_empty_prompt_error() {
         panic!("Expected error for empty prompt");
     }
 }
+
+#[tokio::test]
+async fn test_google_search_grounding() {
+    let Some(api_key) = get_api_key() else {
+        eprintln!("Skipping test: GEMINI_API_KEY not set");
+        return;
+    };
+
+    let client = create_test_client(&api_key);
+
+    // Use a query that benefits from real-time web data
+    let request = LlmRequest::new("What is today's date?").with_google_search();
+
+    let response = client.generate(request).await;
+
+    match response {
+        Ok(resp) => {
+            println!("Grounded response: {}", resp.text);
+            println!("Tokens used: {:?}", resp.tokens_used);
+
+            // Basic assertions - response should not be empty
+            assert!(!resp.text.is_empty(), "Response text should not be empty");
+
+            // The grounded response should contain date-related content
+            // (we can't check for exact date since it may vary)
+            assert!(
+                resp.text.to_lowercase().contains("2024")
+                    || resp.text.to_lowercase().contains("2025")
+                    || resp.text.to_lowercase().contains("december")
+                    || resp.text.to_lowercase().contains("january")
+                    || resp.text.to_lowercase().contains("today"),
+                "Grounded response should contain date-related content, got: {}",
+                resp.text
+            );
+        }
+        Err(e) => {
+            panic!("Google Search grounding request failed: {:?}", e);
+        }
+    }
+}

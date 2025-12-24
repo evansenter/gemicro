@@ -31,6 +31,13 @@ async fn main() -> Result<()> {
         env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
     }
 
+    // Log if Google Search grounding is enabled
+    if args.google_search {
+        log::info!(
+            "Google Search grounding enabled - sub-queries will search the web for real-time data"
+        );
+    }
+
     if args.interactive {
         run_interactive(&args).await
     } else {
