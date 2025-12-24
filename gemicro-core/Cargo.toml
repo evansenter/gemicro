@@ -10,6 +10,7 @@ path = "examples/deep_research.rs"
 [dependencies]
 rust-genai = { workspace = true }
 tokio = { workspace = true }
+tokio-util = { workspace = true }
 async-trait = { workspace = true }
 async-stream = { workspace = true }
 thiserror = { workspace = true }

@@ -53,6 +53,10 @@ pub enum AgentError {
         phase: String,
     },
 
+    /// Agent execution was cancelled
+    #[error("Execution cancelled")]
+    Cancelled,
+
     /// Other agent-specific error
     #[error("{0}")]
     Other(String),
@@ -85,6 +89,10 @@ pub enum LlmError {
     /// Rate limit exceeded
     #[error("Rate limit exceeded: {0}")]
     RateLimit(String),
+
+    /// Request was cancelled
+    #[error("Request cancelled")]
+    Cancelled,
 
     /// Other LLM error
     #[error("{0}")]

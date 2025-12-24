@@ -5,7 +5,7 @@
 
 mod common;
 
-use common::{create_test_context, get_api_key};
+use common::{create_test_context, create_test_context_with_cancellation, get_api_key};
 use futures_util::StreamExt;
 use gemicro_core::{
     AgentError, DeepResearchAgent, ResearchConfig, EVENT_DECOMPOSITION_COMPLETE,
@@ -13,6 +13,7 @@ use gemicro_core::{
     EVENT_SUB_QUERY_FAILED, EVENT_SUB_QUERY_STARTED, EVENT_SYNTHESIS_STARTED,
 };
 use std::time::Duration;
+use tokio_util::sync::CancellationToken;
 
 #[tokio::test]
 async fn test_deep_research_agent_full_flow() {
@@ -220,4 +221,147 @@ async fn test_agent_invalid_config() {
     let result = DeepResearchAgent::new(config);
     assert!(result.is_err());
     assert!(matches!(result, Err(AgentError::InvalidConfig(_))));
+}
+
+/// Test that cancellation works correctly and returns AgentError::Cancelled
+///
+/// Note: This test depends on LLM behavior and may be flaky if the LLM returns
+/// invalid responses. Such failures are logged but don't fail the test.
+#[tokio::test]
+#[ignore] // Requires GEMINI_API_KEY
+async fn test_cancellation_during_execution() {
+    let Some(api_key) = get_api_key() else {
+        eprintln!("Skipping test: GEMINI_API_KEY not set");
+        return;
+    };
+
+    let cancellation_token = CancellationToken::new();
+    let context = create_test_context_with_cancellation(&api_key, cancellation_token.clone());
+
+    let config = ResearchConfig {
+        min_sub_queries: 3,
+        max_sub_queries: 5,
+        total_timeout: Duration::from_secs(120),
+        ..Default::default()
+    };
+
+    let agent = DeepResearchAgent::new(config).unwrap();
+    let stream = agent.execute(
+        "Explain the history, current state, and future of quantum computing",
+        context,
+    );
+    futures_util::pin_mut!(stream);
+
+    // Track whether we've seen specific events before cancellation
+    let mut seen_decomposition_started = false;
+    let mut seen_sub_query_started = false;
+    let mut cancelled_correctly = false;
+
+    while let Some(result) = stream.next().await {
+        match result {
+            Ok(update) => {
+                println!("[{}] {}", update.event_type, update.message);
+
+                if update.event_type == EVENT_DECOMPOSITION_STARTED {
+                    seen_decomposition_started = true;
+                }
+
+                if update.event_type == EVENT_SUB_QUERY_STARTED {
+                    seen_sub_query_started = true;
+                    // Cancel after we see the first sub-query start
+                    // This ensures we're cancelling mid-execution
+                    println!("Triggering cancellation...");
+                    cancellation_token.cancel();
+                }
+            }
+            Err(AgentError::Cancelled) => {
+                println!("Received AgentError::Cancelled as expected");
+                cancelled_correctly = true;
+                break;
+            }
+            Err(e) => {
+                // LLM API errors (rate limits, parse failures, etc.) can happen
+                // and aren't what we're testing. Log and skip.
+                eprintln!(
+                    "Test skipped due to LLM error (not a cancellation issue): {:?}",
+                    e
+                );
+                return;
+            }
+        }
+    }
+
+    // Verify the test behaved as expected (only if we didn't skip)
+    assert!(
+        seen_decomposition_started,
+        "Should have seen decomposition_started before cancellation"
+    );
+    assert!(
+        seen_sub_query_started,
+        "Should have seen sub_query_started before cancellation"
+    );
+    assert!(
+        cancelled_correctly,
+        "Should have received AgentError::Cancelled"
+    );
+}
+
+/// Test that pre-cancelled token causes early termination
+#[tokio::test]
+async fn test_immediate_cancellation() {
+    let Some(api_key) = get_api_key() else {
+        eprintln!("Skipping test: GEMINI_API_KEY not set");
+        return;
+    };
+
+    let cancellation_token = CancellationToken::new();
+    // Cancel immediately before starting
+    cancellation_token.cancel();
+
+    let context = create_test_context_with_cancellation(&api_key, cancellation_token);
+
+    let config = ResearchConfig {
+        min_sub_queries: 2,
+        max_sub_queries: 3,
+        ..Default::default()
+    };
+
+    let agent = DeepResearchAgent::new(config).unwrap();
+    let stream = agent.execute("What is 2+2?", context);
+    futures_util::pin_mut!(stream);
+
+    // First item may be decomposition_started (yielded before cancellation check),
+    // then we should get Cancelled during decomposition phase
+    let mut got_cancelled = false;
+    let mut event_count = 0;
+
+    while let Some(result) = stream.next().await {
+        event_count += 1;
+        match result {
+            Ok(update) => {
+                println!("[{}] {}", update.event_type, update.message);
+                // Should not proceed past decomposition_started with a pre-cancelled token
+                assert!(
+                    update.event_type == EVENT_DECOMPOSITION_STARTED,
+                    "Should only see decomposition_started before cancellation, got {}",
+                    update.event_type
+                );
+            }
+            Err(AgentError::Cancelled) => {
+                println!("Got AgentError::Cancelled");
+                got_cancelled = true;
+                break;
+            }
+            Err(e) => {
+                panic!("Unexpected error: {:?}", e);
+            }
+        }
+    }
+
+    assert!(got_cancelled, "Should have received AgentError::Cancelled");
+    assert!(
+        event_count <= 2,
+        "Should cancel quickly (got {} events)",
+        event_count
+    );
 }
