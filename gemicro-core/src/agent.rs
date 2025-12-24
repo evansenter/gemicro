@@ -456,6 +456,42 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_json_array_empty() {
+        let input = "[]";
+        let result = parse_json_array(input).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_parse_json_array_with_whitespace() {
+        let input = r#"  [  "Question 1?"  ,  "Question 2?"  ]  "#;
+        let result = parse_json_array(input).unwrap();
+        assert_eq!(result, vec!["Question 1?", "Question 2?"]);
+    }
+
+    #[test]
+    fn test_parse_json_array_single_item() {
+        let input = r#"["Only one question?"]"#;
+        let result = parse_json_array(input).unwrap();
+        assert_eq!(result, vec!["Only one question?"]);
+    }
+
+    #[test]
+    fn test_parse_json_array_wrong_type() {
+        // Array of numbers instead of strings
+        let input = "[1, 2, 3]";
+        let result = parse_json_array(input);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_json_array_object_instead() {
+        let input = r#"{"question": "What?"}"#;
+        let result = parse_json_array(input);
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn test_agent_creation_valid_config() {
         let config = ResearchConfig::default();
         let agent = DeepResearchAgent::new(config);
