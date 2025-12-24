@@ -260,7 +260,7 @@ impl DeepResearchAgent {
     ///
     /// Returns `AgentError::InvalidConfig` if the configuration is invalid.
     pub fn new(config: ResearchConfig) -> Result<Self, AgentError> {
-        config.validate().map_err(AgentError::InvalidConfig)?;
+        config.validate()?;
         Ok(Self { config })
     }
 

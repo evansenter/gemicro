@@ -1,3 +1,4 @@
+use crate::error::AgentError;
 use std::time::Duration;
 
 /// The Gemini model to use for all LLM operations
@@ -76,21 +77,31 @@ impl ResearchPrompts {
     }
 
     /// Validate that all prompts are non-empty
-    pub fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), AgentError> {
         if self.decomposition_system.trim().is_empty() {
-            return Err("decomposition_system cannot be empty".to_string());
+            return Err(AgentError::InvalidConfig(
+                "decomposition_system cannot be empty".to_string(),
+            ));
         }
         if self.decomposition_template.trim().is_empty() {
-            return Err("decomposition_template cannot be empty".to_string());
+            return Err(AgentError::InvalidConfig(
+                "decomposition_template cannot be empty".to_string(),
+            ));
         }
         if self.sub_query_system.trim().is_empty() {
-            return Err("sub_query_system cannot be empty".to_string());
+            return Err(AgentError::InvalidConfig(
+                "sub_query_system cannot be empty".to_string(),
+            ));
         }
         if self.synthesis_system.trim().is_empty() {
-            return Err("synthesis_system cannot be empty".to_string());
+            return Err(AgentError::InvalidConfig(
+                "synthesis_system cannot be empty".to_string(),
+            ));
         }
         if self.synthesis_template.trim().is_empty() {
-            return Err("synthesis_template cannot be empty".to_string());
+            return Err(AgentError::InvalidConfig(
+                "synthesis_template cannot be empty".to_string(),
+            ));
         }
         Ok(())
     }
@@ -198,24 +209,30 @@ impl ResearchConfig {
     /// - `min_sub_queries > max_sub_queries`
     /// - `total_timeout` is 0
     /// - Any prompt is empty
-    pub fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), AgentError> {
         if self.min_sub_queries == 0 {
-            return Err("min_sub_queries must be greater than 0".to_string());
-        }
-
-        if self.max_sub_queries == 0 {
-            return Err("max_sub_queries must be greater than 0".to_string());
-        }
-
-        if self.min_sub_queries > self.max_sub_queries {
-            return Err(format!(
-                "min_sub_queries ({}) cannot be greater than max_sub_queries ({})",
-                self.min_sub_queries, self.max_sub_queries
+            return Err(AgentError::InvalidConfig(
+                "min_sub_queries must be greater than 0".to_string(),
             ));
         }
 
+        if self.max_sub_queries == 0 {
+            return Err(AgentError::InvalidConfig(
+                "max_sub_queries must be greater than 0".to_string(),
+            ));
+        }
+
+        if self.min_sub_queries > self.max_sub_queries {
+            return Err(AgentError::InvalidConfig(format!(
+                "min_sub_queries ({}) cannot be greater than max_sub_queries ({})",
+                self.min_sub_queries, self.max_sub_queries
+            )));
+        }
+
         if self.total_timeout.as_secs() == 0 {
-            return Err("total_timeout must be greater than 0".to_string());
+            return Err(AgentError::InvalidConfig(
+                "total_timeout must be greater than 0".to_string(),
+            ));
         }
 
         self.prompts.validate()?;
@@ -390,7 +407,10 @@ mod tests {
 
         let result = config.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("cannot be greater than"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("cannot be greater than"));
     }
 
     #[test]
@@ -404,6 +424,7 @@ mod tests {
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
+            .to_string()
             .contains("max_sub_queries must be greater than 0"));
     }
 
@@ -418,6 +439,7 @@ mod tests {
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
+            .to_string()
             .contains("min_sub_queries must be greater than 0"));
     }
 
@@ -430,7 +452,10 @@ mod tests {
 
         let result = config.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("must be greater than 0"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("must be greater than 0"));
     }
 
     // ResearchPrompts tests
@@ -480,6 +505,7 @@ mod tests {
         assert!(prompts
             .validate()
             .unwrap_err()
+            .to_string()
             .contains("decomposition_system"));
     }
 
@@ -490,7 +516,11 @@ mod tests {
             ..Default::default()
         };
         assert!(prompts.validate().is_err());
-        assert!(prompts.validate().unwrap_err().contains("sub_query_system"));
+        assert!(prompts
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("sub_query_system"));
     }
 
     #[test]
@@ -505,7 +535,7 @@ mod tests {
 
         let result = config.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("synthesis_system"));
+        assert!(result.unwrap_err().to_string().contains("synthesis_system"));
     }
 
     #[test]
