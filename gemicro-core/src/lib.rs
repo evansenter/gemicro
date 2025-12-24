@@ -39,13 +39,15 @@
 pub mod agent;
 pub mod config;
 pub mod error;
+pub mod history;
 pub mod llm;
 pub mod update;
 
 // Re-export public API
-pub use agent::{AgentContext, DeepResearchAgent};
+pub use agent::{Agent, AgentContext, AgentStream, DeepResearchAgent};
 pub use config::{GemicroConfig, LlmConfig, ResearchConfig, ResearchPrompts, MODEL};
 pub use error::{AgentError, GemicroError, LlmError};
+pub use history::{ConversationHistory, HistoryEntry};
 pub use llm::{LlmClient, LlmRequest, LlmResponse, LlmStreamChunk};
 pub use update::{
     AgentUpdate, FinalResult, ResultMetadata, SubQueryResult, EVENT_DECOMPOSITION_COMPLETE,
