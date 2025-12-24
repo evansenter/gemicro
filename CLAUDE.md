@@ -6,9 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Gemicro is a CLI agent exploration platform for experimenting with AI agent implementation patterns, powered by the Gemini API via the rust-genai library.
 
-**Key Architecture**: Two-crate workspace (gemicro-core library + gemicro-cli binary, coming in Phase 4)
+**Key Architecture**: Two-crate workspace (gemicro-core library + gemicro-cli binary)
 
-**Current Status**: Phase 3 complete (Streaming Deep Research Agent). See IMPLEMENTATION_PLAN.md for details.
+**Current Status**: Core implementation complete. Remaining work tracked in [GitHub Issues](https://github.com/evansenter/gemicro/issues).
 
 ## Build Commands
 
@@ -190,7 +190,6 @@ trait Agent {
 gemicro/
 ├── Cargo.toml                    # Workspace manifest
 ├── CLAUDE.md                     # This file
-├── IMPLEMENTATION_PLAN.md        # Detailed implementation roadmap
 ├── README.md                     # Public documentation
 │
 ├── gemicro-core/                 # Platform-agnostic library
@@ -208,7 +207,7 @@ gemicro/
 │   └── examples/
 │       └── deep_research.rs      # Full agent example with progress display
 │
-└── gemicro-cli/                  # CLI binary (coming in Phase 4)
+└── gemicro-cli/                  # CLI binary
 ```
 
 ## Key Architectural Decisions
@@ -313,15 +312,4 @@ The `.claude/settings.local.json` file defines permissions for Claude Code autom
 
 ## Known Limitations & Tracked Issues
 
-See [GitHub Issues](https://github.com/evansenter/gemicro/issues) for the full list. Key items:
-
-| Issue | Summary |
-|-------|---------|
-| #7 | Token stats unavailable (blocked on rust-genai#24) |
-| #11 | Prompts are hardcoded; modularization needed for hillclimbing |
-| #14 | No concurrency limit for parallel sub-queries |
-| #17 | Decomposition LLM call tokens not tracked |
-
-## Questions?
-
-See IMPLEMENTATION_PLAN.md for detailed phase-by-phase implementation details.
+See [GitHub Issues](https://github.com/evansenter/gemicro/issues) for the full list.
