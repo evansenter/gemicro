@@ -12,6 +12,7 @@ path = "src/main.rs"
 gemicro-core = { path = "../gemicro-core" }
 rust-genai = { workspace = true }
 tokio = { workspace = true }
+tokio-util = { workspace = true }
 futures-util = { workspace = true }
 
 # CLI

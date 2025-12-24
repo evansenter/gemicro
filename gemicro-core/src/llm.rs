@@ -30,6 +30,7 @@ use crate::config::{LlmConfig, MODEL};
 use crate::error::LlmError;
 use futures_util::stream::{Stream, StreamExt};
 use rust_genai::GenerationConfig;
+use tokio_util::sync::CancellationToken;
 
 /// LLM client wrapping rust-genai with timeout and configuration
 pub struct LlmClient {
@@ -158,6 +159,83 @@ impl LlmClient {
             .unwrap_or_else(|| LlmError::Other("Retry loop exited unexpectedly".to_string())))
     }
 
+    /// Generate a complete response with cancellation support
+    ///
+    /// Like `generate()`, but also checks the cancellation token before each
+    /// attempt and during retry delays. Returns `LlmError::Cancelled` if the
+    /// token is cancelled.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use gemicro_core::{LlmClient, LlmRequest, LlmConfig};
+    /// # use tokio_util::sync::CancellationToken;
+    /// # async fn example() -> Result<(), gemicro_core::LlmError> {
+    /// # let genai_client = rust_genai::Client::builder("key".to_string()).build();
+    /// let client = LlmClient::new(genai_client, LlmConfig::default());
+    /// let token = CancellationToken::new();
+    /// let request = LlmRequest::new("Explain quantum computing");
+    ///
+    /// // In another task: token.cancel() to abort
+    /// let response = client.generate_with_cancellation(request, &token).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn generate_with_cancellation(
+        &self,
+        request: LlmRequest,
+        cancellation_token: &CancellationToken,
+    ) -> Result<LlmResponse, LlmError> {
+        self.validate_request(&request)?;
+
+        // Check cancellation before starting
+        if cancellation_token.is_cancelled() {
+            return Err(LlmError::Cancelled);
+        }
+
+        let mut last_error = None;
+
+        for attempt in 0..=self.config.max_retries {
+            // Check cancellation before each attempt
+            if cancellation_token.is_cancelled() {
+                return Err(LlmError::Cancelled);
+            }
+
+            // Race the LLM call against cancellation
+            let result = tokio::select! {
+                res = self.generate_once(&request) => res,
+                _ = cancellation_token.cancelled() => {
+                    return Err(LlmError::Cancelled);
+                }
+            };
+
+            match result {
+                Ok(response) => return Ok(response),
+                Err(e) if Self::is_retryable(&e) && attempt < self.config.max_retries => {
+                    log::warn!(
+                        "LLM request failed (attempt {}/{}): {}, retrying...",
+                        attempt + 1,
+                        self.config.max_retries + 1,
+                        e
+                    );
+                    last_error = Some(e);
+
+                    // Race retry delay against cancellation
+                    tokio::select! {
+                        _ = tokio::time::sleep(self.config.retry_delay(attempt)) => {}
+                        _ = cancellation_token.cancelled() => {
+                            return Err(LlmError::Cancelled);
+                        }
+                    }
+                }
+                Err(e) => return Err(e),
+            }
+        }
+
+        Err(last_error
+            .unwrap_or_else(|| LlmError::Other("Retry loop exited unexpectedly".to_string())))
+    }
+
     /// Execute a single generate request (no retries)
     async fn generate_once(&self, request: &LlmRequest) -> Result<LlmResponse, LlmError> {
         let interaction = self.build_interaction(request);
@@ -197,6 +275,7 @@ impl LlmClient {
             LlmError::InvalidRequest(_) => false,
             LlmError::ResponseProcessing(_) => false,
             LlmError::NoContent => false,
+            LlmError::Cancelled => false,
             LlmError::Other(_) => false,
         }
     }
@@ -283,6 +362,97 @@ impl LlmClient {
                 }
             }
             // Stream ends naturally - no artificial final marker needed
+        }
+    }
+
+    /// Generate a streaming response with cancellation support
+    ///
+    /// Like `generate_stream()`, but also checks the cancellation token at each
+    /// chunk. Returns `LlmError::Cancelled` if the token is cancelled.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use gemicro_core::{LlmClient, LlmRequest, LlmConfig};
+    /// # use futures_util::stream::StreamExt;
+    /// # use tokio_util::sync::CancellationToken;
+    /// # async fn example() -> Result<(), gemicro_core::LlmError> {
+    /// # let genai_client = rust_genai::Client::builder("key".to_string()).build();
+    /// let client = LlmClient::new(genai_client, LlmConfig::default());
+    /// let token = CancellationToken::new();
+    /// let request = LlmRequest::new("Count to 10");
+    ///
+    /// let stream = client.generate_stream_with_cancellation(request, token.clone());
+    /// futures_util::pin_mut!(stream);
+    /// // In another task: token.cancel() to abort
+    /// while let Some(chunk) = stream.next().await {
+    ///     let chunk = chunk?;
+    ///     print!("{}", chunk.text);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn generate_stream_with_cancellation(
+        &self,
+        request: LlmRequest,
+        cancellation_token: CancellationToken,
+    ) -> impl Stream<Item = Result<LlmStreamChunk, LlmError>> + Send + '_ {
+        let timeout_duration = self.config.timeout;
+
+        async_stream::try_stream! {
+            // Check cancellation before starting
+            if cancellation_token.is_cancelled() {
+                Err(LlmError::Cancelled)?;
+            }
+
+            self.validate_request(&request)?;
+
+            let interaction = self.build_interaction(&request);
+
+            // Get the stream (not async - returns immediately)
+            let stream = interaction.create_stream();
+            futures_util::pin_mut!(stream);
+
+            // Process chunks with per-chunk timeout and cancellation
+            loop {
+                // Check cancellation at each iteration
+                if cancellation_token.is_cancelled() {
+                    Err(LlmError::Cancelled)?;
+                }
+
+                // Race chunk read against timeout and cancellation
+                let chunk = tokio::select! {
+                    result = tokio::time::timeout(timeout_duration, stream.next()) => {
+                        result.map_err(|_| LlmError::Timeout(timeout_duration.as_millis() as u64))
+                    }
+                    _ = cancellation_token.cancelled() => {
+                        Err(LlmError::Cancelled)
+                    }
+                }?;
+
+                match chunk {
+                    Some(Ok(stream_chunk)) => {
+                        use rust_genai::StreamChunk;
+                        match stream_chunk {
+                            StreamChunk::Delta(delta) => {
+                                if let Some(text) = delta.text() {
+                                    yield LlmStreamChunk {
+                                        text: text.to_string(),
+                                    };
+                                }
+                                // Skip deltas with no text (e.g., thought deltas)
+                            }
+                            StreamChunk::Complete(_response) => {
+                                // Final response - stream will end after this
+                            }
+                        }
+                    }
+                    Some(Err(e)) => {
+                        Err(LlmError::from(e))?;
+                    }
+                    None => break,
+                }
+            }
         }
     }
 
@@ -431,6 +601,11 @@ mod tests {
         assert!(!LlmClient::is_retryable(&LlmError::Other(
             "Unknown error".to_string()
         )));
+    }
+
+    #[test]
+    fn test_is_not_retryable_cancelled() {
+        assert!(!LlmClient::is_retryable(&LlmError::Cancelled));
     }
 
     #[test]

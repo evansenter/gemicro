@@ -13,6 +13,7 @@ use gemicro_core::{AgentContext, AgentError, DeepResearchAgent, LlmClient};
 use repl::Session;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
+use tokio_util::sync::CancellationToken;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -64,10 +65,13 @@ async fn run_interactive(args: &cli::Args) -> Result<()> {
 }
 
 async fn run_research(args: &cli::Args, query: &str) -> Result<()> {
-    // Create LLM client and context
+    // Create cancellation token for cooperative shutdown
+    let cancellation_token = CancellationToken::new();
+
+    // Create LLM client and context with cancellation support
     let genai_client = rust_genai::Client::builder(args.api_key.clone()).build();
     let llm = LlmClient::new(genai_client, args.llm_config());
-    let context = AgentContext::new(llm);
+    let context = AgentContext::new_with_cancellation(llm, cancellation_token.clone());
 
     // Create agent
     let agent = DeepResearchAgent::new(args.research_config())
@@ -82,6 +86,7 @@ async fn run_research(args: &cli::Args, query: &str) -> Result<()> {
     // 0 = no interrupt, 1 = first interrupt (graceful), 2+ = force exit
     let interrupt_count = Arc::new(AtomicU8::new(0));
     let interrupt_count_clone = interrupt_count.clone();
+    let cancellation_token_clone = cancellation_token.clone();
 
     // Spawn signal handler task
     let signal_task = tokio::spawn(async move {
@@ -93,8 +98,10 @@ async fn run_research(args: &cli::Args, query: &str) -> Result<()> {
 
             let count = interrupt_count_clone.fetch_add(1, Ordering::SeqCst) + 1;
             if count == 1 {
-                eprintln!("\n⚠️  Interrupt received - showing partial results...");
+                eprintln!("\n⚠️  Interrupt received - cancelling in-flight requests...");
                 eprintln!("   (Press Ctrl+C again to exit immediately)\n");
+                // Cancel all in-flight tasks cooperatively
+                cancellation_token_clone.cancel();
             } else {
                 eprintln!("\n❌ Force exit requested");
                 std::process::exit(130); // Standard exit code for SIGINT
@@ -144,6 +151,11 @@ async fn run_research(args: &cli::Args, query: &str) -> Result<()> {
                         .on_sub_query_update(&state, id)
                         .context("Renderer sub-query update failed")?;
                 }
+            }
+            Err(AgentError::Cancelled) => {
+                // Cancellation is not an error - treat as interrupt
+                interrupted = true;
+                break;
             }
             Err(e) => {
                 signal_task.abort();
