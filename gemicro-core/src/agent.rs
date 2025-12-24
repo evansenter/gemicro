@@ -868,4 +868,135 @@ mod tests {
         // Just verify it compiles - we can't easily test without a real client
         let _context_fn = |llm: LlmClient| AgentContext::new(llm);
     }
+
+    // Edge case tests for error paths
+
+    #[test]
+    fn test_truncate_for_error_short_text() {
+        let text = "short";
+        let result = truncate_for_error(text, 100);
+        assert_eq!(result, "short");
+    }
+
+    #[test]
+    fn test_truncate_for_error_exact_length() {
+        let text = "12345";
+        let result = truncate_for_error(text, 5);
+        assert_eq!(result, "12345");
+    }
+
+    #[test]
+    fn test_truncate_for_error_over_limit() {
+        let text = "1234567890";
+        let result = truncate_for_error(text, 5);
+        assert_eq!(result, "12345... (10 chars total)");
+    }
+
+    #[test]
+    fn test_truncate_for_error_empty_string() {
+        let text = "";
+        let result = truncate_for_error(text, 10);
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn test_truncate_for_error_unicode() {
+        // Unicode characters (emoji = multiple bytes but 1 char)
+        let text = "Hello 🌍 World";
+        let result = truncate_for_error(text, 8);
+        // Should be "Hello 🌍 " (8 chars)
+        assert!(result.contains("..."));
+        assert!(result.contains("13 chars total")); // "Hello 🌍 World" is 13 chars
+    }
+
+    #[test]
+    fn test_truncate_for_error_zero_max() {
+        let text = "hello";
+        let result = truncate_for_error(text, 0);
+        assert_eq!(result, "... (5 chars total)");
+    }
+
+    #[test]
+    fn test_parse_json_array_unicode_strings() {
+        let input = r#"["你好", "世界", "🌍"]"#;
+        let result = parse_json_array(input).unwrap();
+        assert_eq!(result, vec!["你好", "世界", "🌍"]);
+    }
+
+    #[test]
+    fn test_parse_json_array_special_characters() {
+        let input = r#"["What's the \"meaning\"?", "A\nB\tC"]"#;
+        let result = parse_json_array(input).unwrap();
+        assert_eq!(result[0], "What's the \"meaning\"?");
+        assert_eq!(result[1], "A\nB\tC");
+    }
+
+    #[test]
+    fn test_parse_json_array_nested_array_fails() {
+        let input = r#"[["nested"], ["arrays"]]"#;
+        let result = parse_json_array(input);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_json_array_mixed_types_fails() {
+        let input = r#"["string", 123, true]"#;
+        let result = parse_json_array(input);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_json_array_null_in_array_fails() {
+        let input = r#"["string", null]"#;
+        let result = parse_json_array(input);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_json_array_large_array() {
+        let items: Vec<String> = (0..100).map(|i| format!("item_{}", i)).collect();
+        let input = serde_json::to_string(&items).unwrap();
+        let result = parse_json_array(&input).unwrap();
+        assert_eq!(result.len(), 100);
+        assert_eq!(result[0], "item_0");
+        assert_eq!(result[99], "item_99");
+    }
+
+    #[test]
+    fn test_error_decomposition_failed_display() {
+        let error = AgentError::DecompositionFailed("No results".to_string());
+        let display = error.to_string();
+        assert!(display.contains("decompose"));
+        assert!(display.contains("No results"));
+    }
+
+    #[test]
+    fn test_error_parse_failed_display() {
+        let error = AgentError::ParseFailed("Invalid JSON".to_string());
+        let display = error.to_string();
+        assert!(display.contains("parse"));
+        assert!(display.contains("Invalid JSON"));
+    }
+
+    #[test]
+    fn test_error_synthesis_failed_display() {
+        let error = AgentError::SynthesisFailed("Empty response".to_string());
+        let display = error.to_string();
+        assert!(display.contains("synthesize"));
+        assert!(display.contains("Empty response"));
+    }
+
+    #[test]
+    fn test_error_all_sub_queries_failed_display() {
+        let error = AgentError::AllSubQueriesFailed;
+        let display = error.to_string();
+        assert!(display.contains("All sub-queries failed"));
+    }
+
+    #[test]
+    fn test_error_cancelled_display() {
+        let error = AgentError::Cancelled;
+        let display = error.to_string();
+        assert!(display.contains("cancelled"));
+    }
 }
