@@ -33,6 +33,9 @@ pub fn format_duration(duration: Duration) -> String {
     let secs = duration.as_secs_f64();
     if secs < 1.0 {
         format!("{}ms", duration.as_millis())
+    } else if secs < 10.0 {
+        // Show 2 decimal places for times under 10s to differentiate similar times
+        format!("{:.2}s", secs)
     } else {
         format!("{:.1}s", secs)
     }
@@ -147,7 +150,12 @@ mod tests {
     }
 
     #[test]
-    fn test_format_duration_seconds() {
-        assert_eq!(format_duration(Duration::from_secs_f64(2.5)), "2.5s");
+    fn test_format_duration_seconds_under_10() {
+        assert_eq!(format_duration(Duration::from_secs_f64(2.5)), "2.50s");
+    }
+
+    #[test]
+    fn test_format_duration_seconds_over_10() {
+        assert_eq!(format_duration(Duration::from_secs_f64(12.5)), "12.5s");
     }
 }
