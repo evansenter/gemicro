@@ -1051,6 +1051,249 @@ impl Renderer for RatatuiRenderer {
 
 ---
 
+### Phase 6: Interactive REPL Mode (Future)
+
+**Goal**: Multi-turn conversational interface similar to Claude Code
+
+**Overview**: Transform gemicro from a single-query tool into an interactive research assistant that maintains conversation context across multiple queries.
+
+**Architecture:**
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Interactive Session                       │
+├─────────────────────────────────────────────────────────────┤
+│  User Input → CommandParser → Agent/Command Handler          │
+│       ↓                              ↓                       │
+│  ConversationHistory ←──────── AgentUpdate Stream            │
+│       ↓                                                      │
+│  ContextCompressor (when history exceeds threshold)          │
+│       ↓                                                      │
+│  REPLRenderer (rustyline + indicatif hybrid)                │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Tasks:**
+
+1. **Add REPL entry mode**
+   - `/Users/evansenter/Documents/projects/gemicro/gemicro-cli/src/repl/mod.rs`
+   - `gemicro --interactive` or `gemicro -i` flag to enter REPL mode
+   - `gemicro` with no query argument also enters REPL mode
+   - Single-query mode preserved: `gemicro "query"` runs once and exits
+
+2. **Implement command parser**
+   - `/Users/evansenter/Documents/projects/gemicro/gemicro-cli/src/repl/commands.rs`
+   - Built-in commands: `/quit`, `/exit`, `/clear`, `/history`, `/help`, `/config`
+   - Anything not starting with `/` is treated as a research query
+   - Tab completion for commands
+
+   ```rust
+   pub enum ReplCommand {
+       Query(String),           // Run Deep Research
+       Quit,                    // Exit REPL
+       Clear,                   // Clear conversation history
+       History,                 // Show previous queries/results
+       Help,                    // Show available commands
+       Config(ConfigChange),    // Adjust settings (temperature, max_queries, etc.)
+   }
+   ```
+
+3. **Implement conversation history**
+   - `/Users/evansenter/Documents/projects/gemicro/gemicro-core/src/history.rs`
+   - Track queries and synthesized answers
+   - Provide context to subsequent queries
+   - Configurable history depth
+
+   ```rust
+   pub struct ConversationHistory {
+       entries: Vec<HistoryEntry>,
+       max_entries: usize,
+       total_tokens: u32,
+   }
+
+   pub struct HistoryEntry {
+       query: String,
+       answer: String,
+       timestamp: SystemTime,
+       tokens_used: u32,
+   }
+
+   impl ConversationHistory {
+       pub fn add(&mut self, entry: HistoryEntry);
+       pub fn to_context_prompt(&self) -> String;
+       pub fn clear(&mut self);
+   }
+   ```
+
+4. **Implement context compression**
+   - `/Users/evansenter/Documents/projects/gemicro/gemicro-core/src/compression.rs`
+   - Trigger when history exceeds token threshold
+   - Preserve recent entries verbatim, summarize older ones
+   - Pluggable compression strategies via trait
+
+   ```rust
+   pub trait ContextCompressor: Send + Sync {
+       /// Compress conversation history to fit within token budget
+       async fn compress(
+           &self,
+           history: &ConversationHistory,
+           token_budget: u32,
+           llm: &LlmClient,
+       ) -> Result<CompressedContext, CompressionError>;
+   }
+
+   pub struct SummarizationCompressor {
+       preserve_recent: usize,  // Keep last N entries verbatim
+   }
+
+   impl ContextCompressor for SummarizationCompressor {
+       // Summarize older entries using LLM
+   }
+   ```
+
+5. **Implement REPL renderer**
+   - `/Users/evansenter/Documents/projects/gemicro/gemicro-cli/src/repl/renderer.rs`
+   - Use `rustyline` for input with history and line editing
+   - Integrate with existing `indicatif` progress display
+   - Show prompt with session info: `gemicro [3 queries, 2.4k tokens]> `
+
+   ```rust
+   pub struct ReplRenderer {
+       editor: rustyline::Editor<ReplHelper>,
+       progress_renderer: IndicatifRenderer,
+   }
+
+   impl ReplRenderer {
+       pub fn prompt(&mut self) -> Result<String, ReplError>;
+       pub fn show_result(&self, result: &str);
+       pub fn show_error(&self, error: &str);
+   }
+   ```
+
+6. **Implement session state**
+   - `/Users/evansenter/Documents/projects/gemicro/gemicro-cli/src/repl/session.rs`
+   - Manage REPL lifecycle
+   - Handle Ctrl+C (cancel current query, not exit)
+   - Handle Ctrl+D (exit)
+
+   ```rust
+   pub struct ReplSession {
+       history: ConversationHistory,
+       compressor: Box<dyn ContextCompressor>,
+       config: SessionConfig,
+       renderer: ReplRenderer,
+   }
+
+   impl ReplSession {
+       pub async fn run(&mut self, context: AgentContext) -> Result<()> {
+           loop {
+               match self.renderer.prompt()? {
+                   input if input.starts_with('/') => {
+                       self.handle_command(input)?;
+                   }
+                   query => {
+                       self.run_research(&query, &context).await?;
+                   }
+               }
+           }
+       }
+   }
+   ```
+
+7. **Context-aware research prompts**
+   - Modify DeepResearchAgent to accept optional conversation context
+   - Previous findings inform decomposition and synthesis
+   - Avoid re-researching already-covered topics
+
+   ```rust
+   impl DeepResearchAgent {
+       pub fn execute_with_context(
+           &self,
+           query: &str,
+           context: AgentContext,
+           history: Option<&ConversationHistory>,
+       ) -> impl Stream<Item = Result<AgentUpdate, AgentError>> + Send;
+   }
+   ```
+
+**New Dependencies:**
+- `rustyline` - Line editing and input history
+- `dirs` - For storing history file in user's home directory
+
+**File Structure Addition:**
+```
+gemicro-cli/
+└── src/
+    └── repl/
+        ├── mod.rs        # Module exports, ReplSession
+        ├── commands.rs   # Command parsing
+        ├── renderer.rs   # REPL-specific rendering
+        └── session.rs    # Session state management
+
+gemicro-core/
+└── src/
+    ├── history.rs        # ConversationHistory
+    └── compression.rs    # ContextCompressor trait + implementations
+```
+
+**User Experience:**
+
+```
+$ gemicro -i
+
+╔══════════════════════════════════════════════════════════════╗
+║                    gemicro Interactive Mode                   ║
+╚══════════════════════════════════════════════════════════════╝
+
+Type a research query or /help for commands. Ctrl+D to exit.
+
+gemicro> What are the main approaches to quantum error correction?
+
+🔍 Decomposing query...
+✓ Decomposed into 4 sub-queries
+⚡ Executing 4 queries in parallel...
+   [1] ✅ 2.3s → "Surface codes are the leading approach..."
+   [2] ✅ 1.9s → "Topological codes leverage anyonic..."
+   [3] ✅ 2.1s → "Concatenated codes combine multiple..."
+   [4] ✅ 2.5s → "Hardware-efficient codes are designed..."
+🧠 Synthesizing results...
+✓ Synthesis complete
+
+The main approaches to quantum error correction include:
+[... synthesized answer ...]
+
+gemicro [1 query, 1.2k tokens]> How do surface codes compare to topological codes?
+
+🔍 Decomposing query (with context from previous research)...
+[... continues with context-aware research ...]
+
+gemicro [2 queries, 2.8k tokens]> /history
+
+Previous queries:
+  1. What are the main approaches to quantum error correction?
+  2. How do surface codes compare to topological codes?
+
+gemicro [2 queries, 2.8k tokens]> /clear
+History cleared.
+
+gemicro> /quit
+Goodbye!
+```
+
+**Validation**: Integration tests with mock LLM, manual testing of REPL flow
+
+**Acceptance Criteria:**
+- ☐ REPL mode starts with `-i` flag or no query argument
+- ☐ Commands work: `/quit`, `/clear`, `/history`, `/help`
+- ☐ Line editing and history recall work (arrow keys, Ctrl+R)
+- ☐ Ctrl+C cancels current query without exiting
+- ☐ Ctrl+D exits cleanly
+- ☐ Conversation context improves subsequent queries
+- ☐ Context compression triggers when history exceeds threshold
+- ☐ Token usage tracked and displayed in prompt
+
+---
+
 ## Key Implementation Details
 
 ### Streaming Parallel Execution (The Hard Part)
