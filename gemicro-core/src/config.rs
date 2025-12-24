@@ -27,6 +27,7 @@ pub const MODEL: &str = "gemini-3-flash-preview";
 /// assert!(rendered.contains("What causes migraines?"));
 /// ```
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ResearchPrompts {
     /// System instruction for decomposition phase
     pub decomposition_system: String,
