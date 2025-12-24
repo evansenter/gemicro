@@ -3,34 +3,16 @@
 //! These tests require a valid GEMINI_API_KEY environment variable.
 //! They are skipped if the API key is not set.
 
+mod common;
+
+use common::{create_test_context, get_api_key};
 use futures_util::StreamExt;
 use gemicro_core::{
-    AgentContext, AgentError, DeepResearchAgent, LlmClient, LlmConfig, ResearchConfig,
-    EVENT_DECOMPOSITION_COMPLETE, EVENT_DECOMPOSITION_STARTED, EVENT_FINAL_RESULT,
-    EVENT_SUB_QUERY_COMPLETED, EVENT_SUB_QUERY_FAILED, EVENT_SUB_QUERY_STARTED,
-    EVENT_SYNTHESIS_STARTED,
+    AgentError, DeepResearchAgent, ResearchConfig, EVENT_DECOMPOSITION_COMPLETE,
+    EVENT_DECOMPOSITION_STARTED, EVENT_FINAL_RESULT, EVENT_SUB_QUERY_COMPLETED,
+    EVENT_SUB_QUERY_FAILED, EVENT_SUB_QUERY_STARTED, EVENT_SYNTHESIS_STARTED,
 };
-use std::env;
 use std::time::Duration;
-
-/// Helper to get the API key, or skip the test if not available
-fn get_api_key() -> Option<String> {
-    env::var("GEMINI_API_KEY").ok()
-}
-
-/// Create a test context with appropriate timeouts
-fn create_test_context(api_key: &str) -> AgentContext {
-    let genai_client = rust_genai::Client::builder(api_key.to_string()).build();
-    let config = LlmConfig {
-        timeout: Duration::from_secs(60),
-        max_tokens: 512,
-        temperature: 0.7,
-        max_retries: 1,
-        retry_base_delay_ms: 500,
-    };
-    let llm = LlmClient::new(genai_client, config);
-    AgentContext::new(llm)
-}
 
 #[tokio::test]
 async fn test_deep_research_agent_full_flow() {

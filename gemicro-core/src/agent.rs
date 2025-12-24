@@ -40,6 +40,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
+/// Buffer size for the mpsc channel used in parallel sub-query execution.
+/// This should be at least as large as the expected number of concurrent sub-queries
+/// to avoid blocking on send operations.
+const PARALLEL_EXECUTION_CHANNEL_BUFFER: usize = 16;
+
 /// Check if execution has exceeded the timeout
 fn check_timeout(start: Instant, timeout: Duration, phase: &str) -> Result<(), AgentError> {
     let elapsed = start.elapsed();
@@ -305,15 +310,19 @@ Return ONLY a JSON array of strings, no other text. Example:
 
 /// Parse a JSON array from LLM response, handling common formatting issues
 fn parse_json_array(text: &str) -> Result<Vec<String>, String> {
-    // Try direct parse first
+    // Fast path: try direct parse first (avoids allocations for well-formed JSON)
     if let Ok(arr) = serde_json::from_str::<Vec<String>>(text) {
         return Ok(arr);
     }
 
-    // Try to extract JSON array from markdown code block
+    // Try with trimmed whitespace
     let trimmed = text.trim();
-    let json_text = if trimmed.starts_with("```") {
-        // Extract content between ``` markers
+    if let Ok(arr) = serde_json::from_str::<Vec<String>>(trimmed) {
+        return Ok(arr);
+    }
+
+    // Slow path: only extract from markdown code block if markers are present
+    if trimmed.starts_with("```") {
         let lines: Vec<&str> = trimmed.lines().collect();
         if lines.len() >= 2 {
             let start = if lines[0].starts_with("```json") || lines[0] == "```" {
@@ -326,16 +335,16 @@ fn parse_json_array(text: &str) -> Result<Vec<String>, String> {
             } else {
                 lines.len()
             };
-            lines[start..end].join("\n")
-        } else {
-            trimmed.to_string()
+            let json_text = lines[start..end].join("\n");
+            return serde_json::from_str::<Vec<String>>(&json_text)
+                .map_err(|e| format!("Invalid JSON: {}. Response was: {}", e, text));
         }
-    } else {
-        trimmed.to_string()
-    };
+    }
 
-    serde_json::from_str::<Vec<String>>(&json_text)
-        .map_err(|e| format!("Invalid JSON: {}. Response was: {}", e, text))
+    Err(format!(
+        "Invalid JSON: expected array of strings. Response was: {}",
+        text
+    ))
 }
 
 /// Execute sub-queries in parallel, collecting results
@@ -354,7 +363,8 @@ async fn execute_parallel(
     context: &AgentContext,
     continue_on_partial_failure: bool,
 ) -> ExecutionResult {
-    let (tx, mut rx) = mpsc::channel::<(usize, Result<(String, Option<u32>), String>)>(10);
+    let (tx, mut rx) =
+        mpsc::channel::<(usize, Result<(String, Option<u32>), String>)>(PARALLEL_EXECUTION_CHANNEL_BUFFER);
 
     // Spawn all sub-query tasks
     for (id, query) in sub_queries.iter().enumerate() {

@@ -3,28 +3,11 @@
 //! These tests require a valid GEMINI_API_KEY environment variable.
 //! They are skipped if the API key is not set.
 
+mod common;
+
+use common::{create_test_client, get_api_key};
 use futures_util::StreamExt;
-use gemicro_core::{LlmClient, LlmConfig, LlmRequest};
-use std::env;
-use std::time::Duration;
-
-/// Helper to get the API key, or skip the test if not available
-fn get_api_key() -> Option<String> {
-    env::var("GEMINI_API_KEY").ok()
-}
-
-/// Create a test client with shorter timeouts for faster test failures
-fn create_test_client(api_key: &str) -> LlmClient {
-    let genai_client = rust_genai::Client::builder(api_key.to_string()).build();
-    let config = LlmConfig {
-        timeout: Duration::from_secs(60),
-        max_tokens: 256,
-        temperature: 0.0, // Deterministic for testing
-        max_retries: 1,
-        retry_base_delay_ms: 500,
-    };
-    LlmClient::new(genai_client, config)
-}
+use gemicro_core::LlmRequest;
 
 #[tokio::test]
 async fn test_generate_simple_prompt() {
