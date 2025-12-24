@@ -305,7 +305,7 @@ async fn decompose(
         .await
         .map_err(|e| AgentError::DecompositionFailed(e.to_string()))?;
 
-    // Extract token count before parsing
+    // Extract token count before consuming response text for parsing
     let tokens_used = response.tokens_used;
 
     // Parse JSON response
