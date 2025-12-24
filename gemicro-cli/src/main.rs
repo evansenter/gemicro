@@ -4,7 +4,7 @@ mod cli;
 mod display;
 mod format;
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use clap::Parser;
 use display::{DisplayState, IndicatifRenderer, Phase, Renderer};
 use futures_util::StreamExt;
@@ -13,6 +13,11 @@ use gemicro_core::{AgentContext, AgentError, DeepResearchAgent, LlmClient};
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = cli::Args::parse();
+
+    // Validate arguments
+    if let Err(e) = args.validate() {
+        bail!("{}", e);
+    }
 
     // Initialize logging
     if args.verbose {

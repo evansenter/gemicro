@@ -74,7 +74,10 @@ impl Renderer for IndicatifRenderer {
                 self.phase_bar
                     .finish_with_message(format!("✓ Decomposed into {} sub-queries", count));
 
-                // Create a new phase bar for execution
+                // Create a new phase bar for execution (ensure old one is finished)
+                if !self.phase_bar.is_finished() {
+                    self.phase_bar.finish_and_clear();
+                }
                 self.phase_bar = self.multi.add(ProgressBar::new_spinner());
                 self.phase_bar.set_style(
                     ProgressStyle::default_spinner()
@@ -101,7 +104,10 @@ impl Renderer for IndicatifRenderer {
                 self.phase_bar
                     .finish_with_message("✓ All sub-queries complete");
 
-                // Create a new phase bar for synthesis
+                // Create a new phase bar for synthesis (ensure old one is finished)
+                if !self.phase_bar.is_finished() {
+                    self.phase_bar.finish_and_clear();
+                }
                 self.phase_bar = self.multi.add(ProgressBar::new_spinner());
                 self.phase_bar.set_style(
                     ProgressStyle::default_spinner()

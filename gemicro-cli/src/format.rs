@@ -21,7 +21,7 @@ pub fn first_sentence(s: &str) -> String {
     // Try to find end of first sentence
     if let Some(pos) = s.find(['.', '\n']) {
         let sentence = s[..=pos].trim();
-        if sentence.len() >= 10 {
+        if sentence.chars().count() >= 10 {
             return truncate(sentence, 100);
         }
     }

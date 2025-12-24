@@ -30,7 +30,7 @@ pub struct Args {
     pub timeout: u64,
 
     /// Continue if some sub-queries fail
-    #[arg(long, default_value = "true")]
+    #[arg(long, default_value_t = true)]
     pub continue_on_failure: bool,
 
     /// LLM request timeout in seconds
@@ -42,7 +42,7 @@ pub struct Args {
     pub max_tokens: u32,
 
     /// Temperature for LLM generation (0.0-1.0)
-    #[arg(long, default_value = "0.7")]
+    #[arg(long, default_value_t = 0.7)]
     pub temperature: f32,
 
     /// Enable verbose logging
@@ -51,6 +51,25 @@ pub struct Args {
 }
 
 impl Args {
+    /// Validate CLI arguments.
+    ///
+    /// Returns an error if arguments are invalid.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.min_sub_queries > self.max_sub_queries {
+            return Err(format!(
+                "min-sub-queries ({}) cannot be greater than max-sub-queries ({})",
+                self.min_sub_queries, self.max_sub_queries
+            ));
+        }
+        if !(0.0..=1.0).contains(&self.temperature) {
+            return Err(format!(
+                "temperature ({}) must be between 0.0 and 1.0",
+                self.temperature
+            ));
+        }
+        Ok(())
+    }
+
     /// Build LlmConfig from CLI arguments.
     pub fn llm_config(&self) -> LlmConfig {
         LlmConfig {
