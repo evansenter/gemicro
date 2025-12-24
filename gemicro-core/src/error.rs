@@ -90,6 +90,10 @@ pub enum LlmError {
     #[error("Rate limit exceeded: {0}")]
     RateLimit(String),
 
+    /// Request was cancelled
+    #[error("Request cancelled")]
+    Cancelled,
+
     /// Other LLM error
     #[error("{0}")]
     Other(String),

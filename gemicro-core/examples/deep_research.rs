@@ -5,17 +5,22 @@
 //!
 //! Or with a custom query:
 //!   GEMINI_API_KEY=your_key cargo run -p gemicro-core --example deep_research -- "Your question here"
+//!
+//! Press Ctrl+C to cancel gracefully - partial results will be shown.
 
 use futures_util::StreamExt;
 use gemicro_core::{
-    AgentContext, DeepResearchAgent, LlmClient, LlmConfig, ResearchConfig,
+    AgentContext, AgentError, DeepResearchAgent, LlmClient, LlmConfig, ResearchConfig,
     EVENT_DECOMPOSITION_COMPLETE, EVENT_DECOMPOSITION_STARTED, EVENT_FINAL_RESULT,
     EVENT_SUB_QUERY_COMPLETED, EVENT_SUB_QUERY_FAILED, EVENT_SUB_QUERY_STARTED,
     EVENT_SYNTHESIS_STARTED,
 };
 use std::collections::HashMap;
 use std::env;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio_util::sync::CancellationToken;
 
 /// Truncate text to a maximum length, adding ellipsis if needed
 fn truncate(s: &str, max_chars: usize) -> String {
@@ -61,7 +66,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Query: {}", query);
     println!();
 
-    // Create LLM client
+    // Set up cancellation token for graceful shutdown
+    let cancellation_token = CancellationToken::new();
+    let token_clone = cancellation_token.clone();
+    let interrupted = Arc::new(AtomicBool::new(false));
+    let interrupted_clone = interrupted.clone();
+
+    // Spawn signal handler for Ctrl+C
+    tokio::spawn(async move {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            eprintln!("\n⚠️  Interrupt received - cancelling...");
+            eprintln!("   (Press Ctrl+C again to exit immediately)\n");
+            interrupted_clone.store(true, Ordering::SeqCst);
+            token_clone.cancel();
+
+            // Wait for second Ctrl+C to force exit
+            if tokio::signal::ctrl_c().await.is_ok() {
+                eprintln!("\n❌ Force exit");
+                std::process::exit(130);
+            }
+        }
+    });
+
+    // Create LLM client with cancellation support
     let genai_client = rust_genai::Client::builder(api_key).build();
     let llm_config = LlmConfig {
         timeout: Duration::from_secs(60),
@@ -71,7 +98,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         retry_base_delay_ms: 1000,
     };
     let llm = LlmClient::new(genai_client, llm_config);
-    let context = AgentContext::new(llm);
+    let context = AgentContext::new_with_cancellation(llm, cancellation_token);
 
     // Create agent with config
     let research_config = ResearchConfig {
@@ -283,11 +310,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 _ => {}
             },
+            Err(AgentError::Cancelled) => {
+                // Graceful cancellation - show what we have
+                println!();
+                println!("══════════════════════════════════════════════════════════════");
+                println!("⚠️  Research cancelled");
+                if !findings.is_empty() {
+                    println!(
+                        "   Collected {} partial results before cancellation",
+                        findings.len()
+                    );
+                }
+                println!("══════════════════════════════════════════════════════════════");
+                break;
+            }
             Err(e) => {
                 eprintln!("❌ Error: {:?}", e);
                 return Err(e.into());
             }
         }
+    }
+
+    // Exit with SIGINT code if interrupted
+    if interrupted.load(Ordering::SeqCst) {
+        std::process::exit(130);
     }
 
     Ok(())

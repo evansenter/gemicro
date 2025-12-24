@@ -83,6 +83,34 @@ fn truncate_for_error(text: &str, max_chars: usize) -> String {
     }
 }
 
+/// Run an async operation with timeout and cancellation support
+///
+/// This helper consolidates the common pattern of:
+/// - Wrapping an async operation in a timeout
+/// - Racing against a cancellation token
+/// - Returning appropriate errors for each case
+async fn with_timeout_and_cancellation<T, F>(
+    future: F,
+    timeout_duration: Duration,
+    cancellation_token: &CancellationToken,
+    on_timeout: impl FnOnce() -> AgentError,
+) -> Result<T, AgentError>
+where
+    F: std::future::Future<Output = Result<T, AgentError>>,
+{
+    tokio::select! {
+        result = tokio::time::timeout(timeout_duration, future) => {
+            match result {
+                Ok(inner) => inner,
+                Err(_) => Err(on_timeout()),
+            }
+        }
+        _ = cancellation_token.cancelled() => {
+            Err(AgentError::Cancelled)
+        }
+    }
+}
+
 /// Shared resources for agent execution
 ///
 /// Following [Evergreen spec](https://github.com/google-deepmind/evergreen-spec) philosophy:
@@ -229,16 +257,12 @@ impl DeepResearchAgent {
             // Phase 1: Decomposition (with timeout and cancellation)
             yield AgentUpdate::decomposition_started();
             let decomp_timeout = remaining_time(start_time, config.total_timeout, "decomposition")?;
-            let (sub_queries, decomposition_tokens) = tokio::select! {
-                result = tokio::time::timeout(decomp_timeout, decompose(&query, &context, &config)) => {
-                    result
-                        .map_err(|_| timeout_error(start_time, config.total_timeout, "decomposition"))
-                        .and_then(|inner| inner)
-                }
-                _ = context.cancellation_token.cancelled() => {
-                    Err(AgentError::Cancelled)
-                }
-            }?;
+            let (sub_queries, decomposition_tokens) = with_timeout_and_cancellation(
+                decompose(&query, &context, &config),
+                decomp_timeout,
+                &context.cancellation_token,
+                || timeout_error(start_time, config.total_timeout, "decomposition"),
+            ).await?;
             yield AgentUpdate::decomposition_complete(sub_queries.clone());
 
             // Phase 2: Parallel Execution (with timeout and cancellation)
@@ -248,17 +272,12 @@ impl DeepResearchAgent {
             }
 
             let exec_timeout = remaining_time(start_time, config.total_timeout, "parallel execution")?;
-            let execution_result = tokio::select! {
-                result = tokio::time::timeout(exec_timeout, execute_parallel(&sub_queries, &context, &config)) => {
-                    result
-                        .map(Ok)
-                        .map_err(|_| timeout_error(start_time, config.total_timeout, "parallel execution"))
-                        .and_then(|inner| inner)
-                }
-                _ = context.cancellation_token.cancelled() => {
-                    Err(AgentError::Cancelled)
-                }
-            }?;
+            let execution_result = with_timeout_and_cancellation(
+                async { Ok(execute_parallel(&sub_queries, &context, &config).await) },
+                exec_timeout,
+                &context.cancellation_token,
+                || timeout_error(start_time, config.total_timeout, "parallel execution"),
+            ).await?;
 
             // Yield completion/failure events as they arrived
             // Note: These arrive in non-deterministic order due to parallel execution
@@ -279,16 +298,12 @@ impl DeepResearchAgent {
             // Phase 3: Synthesis (with timeout and cancellation)
             yield AgentUpdate::synthesis_started();
             let synth_timeout = remaining_time(start_time, config.total_timeout, "synthesis")?;
-            let (answer, synthesis_tokens) = tokio::select! {
-                result = tokio::time::timeout(synth_timeout, synthesize(&query, &execution_result.results, &context, &config)) => {
-                    result
-                        .map_err(|_| timeout_error(start_time, config.total_timeout, "synthesis"))
-                        .and_then(|inner| inner)
-                }
-                _ = context.cancellation_token.cancelled() => {
-                    Err(AgentError::Cancelled)
-                }
-            }?;
+            let (answer, synthesis_tokens) = with_timeout_and_cancellation(
+                synthesize(&query, &execution_result.results, &context, &config),
+                synth_timeout,
+                &context.cancellation_token,
+                || timeout_error(start_time, config.total_timeout, "synthesis"),
+            ).await?;
 
             // Calculate final metadata
             let mut total_tokens = execution_result.total_tokens;
@@ -500,17 +515,16 @@ async fn execute_parallel(
             let request = LlmRequest::with_system(&query, &sub_query_system);
 
             // Execute LLM call with cancellation support
-            let result = tokio::select! {
-                res = llm.generate(request) => {
-                    match res {
-                        Ok(response) => Ok((response.text, response.tokens_used)),
-                        Err(e) => Err(e.to_string()),
-                    }
-                }
-                _ = cancellation_token.cancelled() => {
+            let result = match llm
+                .generate_with_cancellation(request, &cancellation_token)
+                .await
+            {
+                Ok(response) => Ok((response.text, response.tokens_used)),
+                Err(crate::LlmError::Cancelled) => {
                     log::debug!("Sub-query {} cancelled", id);
                     return; // Exit early, don't send result
                 }
+                Err(e) => Err(e.to_string()),
             };
 
             if tx.send((id, result)).await.is_err() {
@@ -576,7 +590,52 @@ async fn execute_parallel(
                 }
             }
             _ = context.cancellation_token.cancelled() => {
-                log::debug!("Parallel execution cancelled, stopping collection");
+                log::debug!("Parallel execution cancelled, collecting in-flight results");
+
+                // Grace period: give nearly-complete tasks a brief window to finish
+                // This collects results that were in-flight when cancellation occurred
+                let grace_period = Duration::from_millis(100);
+                let deadline = tokio::time::Instant::now() + grace_period;
+
+                loop {
+                    match tokio::time::timeout_at(deadline, rx.recv()).await {
+                        Ok(Some((id, result))) => {
+                            // Process result normally
+                            match result {
+                                Ok((text, tokens)) => {
+                                    match tokens {
+                                        Some(t) => total_tokens = total_tokens.saturating_add(t),
+                                        None => {
+                                            log::warn!("Token count unavailable for sub-query {}", id);
+                                            tokens_unavailable_count += 1;
+                                        }
+                                    }
+                                    updates.push(AgentUpdate::sub_query_completed(
+                                        id,
+                                        text.clone(),
+                                        tokens.unwrap_or(0),
+                                    ));
+                                    results.push(text);
+                                    succeeded += 1;
+                                }
+                                Err(error) => {
+                                    updates.push(AgentUpdate::sub_query_failed(id, error));
+                                    failed += 1;
+                                }
+                            }
+                        }
+                        Ok(None) => {
+                            // Channel closed, all tasks completed
+                            break;
+                        }
+                        Err(_) => {
+                            // Grace period expired
+                            log::debug!("Grace period expired, {} results collected", succeeded);
+                            break;
+                        }
+                    }
+                }
+
                 aborted_early = true;
                 break;
             }
