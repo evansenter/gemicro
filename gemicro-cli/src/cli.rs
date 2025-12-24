@@ -10,8 +10,12 @@ use std::time::Duration;
 #[command(about = "Deep research agent powered by Gemini", long_about = None)]
 #[command(version)]
 pub struct Args {
-    /// Research query
-    pub query: String,
+    /// Research query (required unless using --interactive)
+    pub query: Option<String>,
+
+    /// Interactive REPL mode
+    #[arg(short, long)]
+    pub interactive: bool,
 
     /// Gemini API key (can also use GEMINI_API_KEY env var)
     #[arg(long, env = "GEMINI_API_KEY")]
@@ -59,6 +63,19 @@ impl Args {
     ///
     /// Returns an error if arguments are invalid.
     pub fn validate(&self) -> Result<(), String> {
+        // Query is required unless in interactive mode
+        if !self.interactive && self.query.is_none() {
+            return Err("Query is required (or use --interactive for REPL mode)".to_string());
+        }
+
+        // Warn if both interactive and query are provided (query will be ignored)
+        if self.interactive && self.query.is_some() {
+            eprintln!(
+                "⚠️  Warning: Query argument is ignored in interactive mode. \
+                 Use single-query mode (without --interactive) to run a query."
+            );
+        }
+
         // Bounds validation
         if self.min_sub_queries == 0 {
             return Err("min-sub-queries must be greater than 0".to_string());
@@ -129,7 +146,8 @@ mod tests {
     /// Helper to create Args with default values for testing.
     fn test_args() -> Args {
         Args {
-            query: "test query".to_string(),
+            query: Some("test query".to_string()),
+            interactive: false,
             api_key: "test-key".to_string(),
             min_sub_queries: 3,
             max_sub_queries: 5,
@@ -286,6 +304,35 @@ mod tests {
         let mut args = test_args();
         args.llm_timeout = 60;
         args.timeout = 180;
+
+        assert!(args.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_query_required_without_interactive() {
+        let mut args = test_args();
+        args.query = None;
+        args.interactive = false;
+
+        let result = args.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Query is required"));
+    }
+
+    #[test]
+    fn test_validate_interactive_without_query() {
+        let mut args = test_args();
+        args.query = None;
+        args.interactive = true;
+
+        assert!(args.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_interactive_with_query() {
+        let mut args = test_args();
+        args.query = Some("test".to_string());
+        args.interactive = true;
 
         assert!(args.validate().is_ok());
     }

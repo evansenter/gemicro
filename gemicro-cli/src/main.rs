@@ -3,12 +3,14 @@
 mod cli;
 mod display;
 mod format;
+mod repl;
 
 use anyhow::{bail, Context, Result};
 use clap::Parser;
 use display::{DisplayState, IndicatifRenderer, Phase, Renderer};
 use futures_util::StreamExt;
 use gemicro_core::{AgentContext, AgentError, DeepResearchAgent, LlmClient};
+use repl::Session;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 
@@ -28,19 +30,40 @@ async fn main() -> Result<()> {
         env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
     }
 
-    // Print header
-    println!("╔══════════════════════════════════════════════════════════════╗");
-    println!("║                    gemicro Deep Research                     ║");
-    println!("╚══════════════════════════════════════════════════════════════╝");
-    println!();
-    println!("Query: {}", args.query);
-    println!();
+    if args.interactive {
+        run_interactive(&args).await
+    } else {
+        // Print header for single query mode
+        println!("╔══════════════════════════════════════════════════════════════╗");
+        println!("║                    gemicro Deep Research                     ║");
+        println!("╚══════════════════════════════════════════════════════════════╝");
+        println!();
+        // Safe to unwrap - validation ensures query exists when not interactive
+        let query = args.query.as_ref().unwrap();
+        println!("Query: {}", query);
+        println!();
 
-    // Run the research
-    run_research(&args).await
+        run_research(&args, query).await
+    }
 }
 
-async fn run_research(args: &cli::Args) -> Result<()> {
+/// Run the interactive REPL
+async fn run_interactive(args: &cli::Args) -> Result<()> {
+    let genai_client = rust_genai::Client::builder(args.api_key.clone()).build();
+    let llm = LlmClient::new(genai_client, args.llm_config());
+
+    let mut session = Session::new(llm);
+
+    // Register available agents
+    let research_config = args.research_config();
+    session.registry.register("deep_research", move || {
+        Box::new(DeepResearchAgent::new(research_config.clone()).expect("Invalid research config"))
+    });
+
+    session.run().await
+}
+
+async fn run_research(args: &cli::Args, query: &str) -> Result<()> {
     // Create LLM client and context
     let genai_client = rust_genai::Client::builder(args.api_key.clone()).build();
     let llm = LlmClient::new(genai_client, args.llm_config());
@@ -83,7 +106,7 @@ async fn run_research(args: &cli::Args) -> Result<()> {
     let is_interrupted = || interrupt_count.load(Ordering::SeqCst) > 0;
 
     // Get stream
-    let stream = agent.execute(&args.query, context);
+    let stream = agent.execute(query, context);
     futures_util::pin_mut!(stream);
 
     // Track if we were interrupted
