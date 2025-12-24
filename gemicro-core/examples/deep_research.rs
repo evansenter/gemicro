@@ -79,6 +79,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         max_sub_queries: 5,
         continue_on_partial_failure: true,
         total_timeout: Duration::from_secs(180),
+        ..Default::default()
     };
     let agent = DeepResearchAgent::new(research_config)?;
 
