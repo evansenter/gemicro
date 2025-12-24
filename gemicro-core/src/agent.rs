@@ -1,13 +1,19 @@
-//! Deep Research Agent implementation
+//! Agent trait and Deep Research Agent implementation
 //!
-//! This module provides the `DeepResearchAgent` which implements the Deep Research
-//! pattern: decompose a complex query into sub-queries, execute them in parallel,
-//! and synthesize the results.
+//! This module provides:
+//! - The `Agent` trait that all agents must implement
+//! - `DeepResearchAgent` which implements the Deep Research pattern
+//!
+//! # Agent Trait
+//!
+//! All agents implement the `Agent` trait, which returns a stream of `AgentUpdate`
+//! events. The stream uses `Pin<Box<dyn Stream>>` to enable trait objects and
+//! dynamic agent switching.
 //!
 //! # Example
 //!
 //! ```no_run
-//! use gemicro_core::{AgentContext, DeepResearchAgent, ResearchConfig, LlmClient, LlmConfig};
+//! use gemicro_core::{Agent, AgentContext, DeepResearchAgent, ResearchConfig, LlmClient, LlmConfig};
 //! use futures_util::StreamExt;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -17,6 +23,7 @@
 //! let context = AgentContext::new(llm);
 //! let agent = DeepResearchAgent::new(ResearchConfig::default())?;
 //!
+//! // Use via Agent trait
 //! let stream = agent.execute("What are the trends in quantum computing?", context);
 //! futures_util::pin_mut!(stream);
 //!
@@ -35,10 +42,56 @@ use crate::ResearchConfig;
 
 use async_stream::try_stream;
 use futures_util::stream::Stream;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, Semaphore};
 use tokio_util::sync::CancellationToken;
+
+/// Type alias for boxed agent streams
+///
+/// This type is used in the `Agent` trait to enable trait objects.
+/// The `Pin<Box<...>>` wrapper is required because:
+/// 1. `dyn Stream` is not `Sized`, so must be behind a pointer
+/// 2. Many stream implementations are self-referential and require pinning
+pub type AgentStream<'a> = Pin<Box<dyn Stream<Item = Result<AgentUpdate, AgentError>> + Send + 'a>>;
+
+/// Trait for all agents in the gemicro platform
+///
+/// Agents process queries and emit a stream of `AgentUpdate` events.
+/// The soft-typed event system (following Evergreen philosophy) means
+/// different agent types can emit different event types without
+/// modifying core infrastructure.
+///
+/// # Implementing an Agent
+///
+/// ```text
+/// impl Agent for MyAgent {
+///     fn name(&self) -> &str { "my_agent" }
+///     fn description(&self) -> &str { "Does something cool" }
+///
+///     fn execute(&self, query: &str, context: AgentContext) -> AgentStream<'_> {
+///         Box::pin(async_stream::try_stream! {
+///             yield AgentUpdate::decomposition_started();
+///             // ... do work ...
+///             yield AgentUpdate::final_result(answer, metadata);
+///         })
+///     }
+/// }
+/// ```
+pub trait Agent: Send + Sync {
+    /// Machine-readable agent name (e.g., "deep_research", "react")
+    fn name(&self) -> &str;
+
+    /// Human-readable description of agent capabilities
+    fn description(&self) -> &str;
+
+    /// Execute the agent, returning a stream of updates
+    ///
+    /// The stream yields `AgentUpdate` events as work progresses.
+    /// Event types are agent-specific (e.g., "sub_query_completed" for Deep Research).
+    fn execute(&self, query: &str, context: AgentContext) -> AgentStream<'_>;
+}
 
 /// Buffer size for the mpsc channel used in parallel sub-query execution.
 /// Set larger than `max_concurrent_sub_queries` (default: 5) to avoid blocking senders.
@@ -339,6 +392,20 @@ impl DeepResearchAgent {
 
             yield AgentUpdate::final_result(answer, metadata);
         }
+    }
+}
+
+impl Agent for DeepResearchAgent {
+    fn name(&self) -> &str {
+        "deep_research"
+    }
+
+    fn description(&self) -> &str {
+        "Decomposes queries into sub-questions, executes them in parallel, and synthesizes results"
+    }
+
+    fn execute(&self, query: &str, context: AgentContext) -> AgentStream<'_> {
+        Box::pin(DeepResearchAgent::execute(self, query, context))
     }
 }
 

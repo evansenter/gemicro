@@ -1051,26 +1051,49 @@ impl Renderer for RatatuiRenderer {
 
 ---
 
-### Phase 6: Interactive REPL Mode (Future)
+### Phase 6: Interactive REPL Mode with Agent Development Platform
 
-**Goal**: Multi-turn conversational interface similar to Claude Code
+**Goal**: Multi-turn conversational interface (Claude Code style) with fast agent development iteration
 
-**Overview**: Transform gemicro from a single-query tool into an interactive research assistant that maintains conversation context across multiple queries.
+**Overview**: Transform gemicro into an interactive agent development platform where users can:
+1. Run research queries with different agent types
+2. Switch agents mid-session while preserving conversation context
+3. Rapidly iterate on agent implementations with hot-reload support
+
+**Key Design Decisions:**
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| UX style | Claude Code (chat, streaming, scrolling) | Familiar, proven pattern |
+| Terminal libs | indicatif + rustyline | Simple, sufficient (no ratatui complexity) |
+| Agent switching | `/agent <name>` command | Like Claude Code's `/model` |
+| Agent code | Rust (full flexibility) | Type safety, performance |
+| Hot reload | `/reload` → cargo build → exec | Fast iteration without restart |
+| State persistence | Temp file (JSON) | Simple, survives exec |
+| Context across agents | Preserved | Conversation flows across agent switches |
 
 **Architecture:**
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    Interactive Session                       │
-├─────────────────────────────────────────────────────────────┤
-│  User Input → CommandParser → Agent/Command Handler          │
-│       ↓                              ↓                       │
-│  ConversationHistory ←──────── AgentUpdate Stream            │
-│       ↓                                                      │
-│  ContextCompressor (when history exceeds threshold)          │
-│       ↓                                                      │
-│  REPLRenderer (rustyline + indicatif hybrid)                │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                    Interactive Session                           │
+├─────────────────────────────────────────────────────────────────┤
+│  User Input → CommandParser → Agent/Command Handler              │
+│       ↓              ↓                    ↓                      │
+│  "/agent react"   "/reload"         "research query"             │
+│       ↓              ↓                    ↓                      │
+│  AgentRegistry   cargo build       CurrentAgent.execute()        │
+│       ↓           + exec                  ↓                      │
+│  Switch Agent    (state persists)   AgentUpdate Stream           │
+│       ↓                                   ↓                      │
+│  ConversationHistory ←────────────────────┘                      │
+│       ↓                                                          │
+│  ContextCompressor (when history exceeds threshold)              │
+│       ↓                                                          │
+│  REPLRenderer (rustyline + indicatif)                           │
+│       ↓                                                          │
+│  Stale Agent Indicator (file mtime check)                       │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 **Tasks:**
@@ -1083,37 +1106,100 @@ impl Renderer for RatatuiRenderer {
 
 2. **Implement command parser**
    - `/Users/evansenter/Documents/projects/gemicro/gemicro-cli/src/repl/commands.rs`
-   - Built-in commands: `/quit`, `/exit`, `/clear`, `/history`, `/help`, `/config`
-   - Anything not starting with `/` is treated as a research query
-   - Tab completion for commands
+   - Built-in commands with tab completion:
 
    ```rust
    pub enum ReplCommand {
-       Query(String),           // Run Deep Research
-       Quit,                    // Exit REPL
-       Clear,                   // Clear conversation history
-       History,                 // Show previous queries/results
-       Help,                    // Show available commands
-       Config(ConfigChange),    // Adjust settings (temperature, max_queries, etc.)
+       Query(String),              // Run query with current agent
+       Agent(AgentSwitch),         // /agent <name> - switch agents
+       Reload,                     // /reload - rebuild and exec
+       Quit,                       // /quit or /exit
+       Clear,                      // /clear - clear conversation history
+       History,                    // /history - show previous queries
+       Help,                       // /help - show commands
+       Config(ConfigChange),       // /config - adjust settings
+   }
+
+   pub struct AgentSwitch {
+       pub name: String,           // "deep_research", "react", "reflexion", etc.
    }
    ```
 
-3. **Implement conversation history**
-   - `/Users/evansenter/Documents/projects/gemicro/gemicro-core/src/history.rs`
-   - Track queries and synthesized answers
-   - Provide context to subsequent queries
-   - Configurable history depth
+3. **Implement agent registry**
+   - `/Users/evansenter/Documents/projects/gemicro/gemicro-core/src/registry.rs`
+   - Dynamic agent registration and lookup
+   - Support for multiple agent types
 
    ```rust
+   pub struct AgentRegistry {
+       agents: HashMap<String, Box<dyn AgentFactory>>,
+       current: String,
+   }
+
+   pub trait AgentFactory: Send + Sync {
+       fn name(&self) -> &str;
+       fn description(&self) -> &str;
+       fn create(&self, config: &AgentConfig) -> Box<dyn Agent>;
+   }
+
+   impl AgentRegistry {
+       pub fn register(&mut self, factory: Box<dyn AgentFactory>);
+       pub fn switch(&mut self, name: &str) -> Result<(), AgentError>;
+       pub fn current(&self) -> &dyn Agent;
+       pub fn list(&self) -> Vec<(&str, &str)>;  // (name, description)
+   }
+   ```
+
+4. **Implement hot-reload support**
+   - `/Users/evansenter/Documents/projects/gemicro/gemicro-cli/src/repl/reload.rs`
+   - Serialize session state before exec
+   - Detect stale agent code via file mtime
+
+   ```rust
+   /// Session state that persists across reloads
+   #[derive(Serialize, Deserialize)]
+   pub struct PersistentState {
+       pub history: ConversationHistory,
+       pub current_agent: String,
+       pub config: SessionConfig,
+       pub reload_count: u32,
+   }
+
+   impl PersistentState {
+       pub fn save(&self) -> Result<PathBuf>;        // Save to temp file
+       pub fn load() -> Result<Option<Self>>;        // Load if exists
+       pub fn cleanup(&self);                        // Remove temp file
+   }
+
+   /// Check if agent source files have changed since last load
+   pub struct StaleChecker {
+       load_time: SystemTime,
+       watched_paths: Vec<PathBuf>,  // src/agents/, etc.
+   }
+
+   impl StaleChecker {
+       pub fn is_stale(&self) -> bool;
+   }
+   ```
+
+5. **Implement conversation history**
+   - `/Users/evansenter/Documents/projects/gemicro/gemicro-core/src/history.rs`
+   - Track queries, answers, and which agent produced them
+   - Context preserved across agent switches
+
+   ```rust
+   #[derive(Serialize, Deserialize)]
    pub struct ConversationHistory {
        entries: Vec<HistoryEntry>,
        max_entries: usize,
        total_tokens: u32,
    }
 
+   #[derive(Serialize, Deserialize)]
    pub struct HistoryEntry {
        query: String,
        answer: String,
+       agent_name: String,          // Which agent produced this
        timestamp: SystemTime,
        tokens_used: u32,
    }
@@ -1125,15 +1211,13 @@ impl Renderer for RatatuiRenderer {
    }
    ```
 
-4. **Implement context compression**
+6. **Implement context compression**
    - `/Users/evansenter/Documents/projects/gemicro/gemicro-core/src/compression.rs`
    - Trigger when history exceeds token threshold
-   - Preserve recent entries verbatim, summarize older ones
-   - Pluggable compression strategies via trait
+   - Pluggable compression strategies
 
    ```rust
    pub trait ContextCompressor: Send + Sync {
-       /// Compress conversation history to fit within token budget
        async fn compress(
            &self,
            history: &ConversationHistory,
@@ -1145,40 +1229,35 @@ impl Renderer for RatatuiRenderer {
    pub struct SummarizationCompressor {
        preserve_recent: usize,  // Keep last N entries verbatim
    }
-
-   impl ContextCompressor for SummarizationCompressor {
-       // Summarize older entries using LLM
-   }
    ```
 
-5. **Implement REPL renderer**
+7. **Implement REPL renderer with stale indicator**
    - `/Users/evansenter/Documents/projects/gemicro/gemicro-cli/src/repl/renderer.rs`
-   - Use `rustyline` for input with history and line editing
-   - Integrate with existing `indicatif` progress display
-   - Show prompt with session info: `gemicro [3 queries, 2.4k tokens]> `
+   - Show stale agent warning in prompt
 
    ```rust
    pub struct ReplRenderer {
        editor: rustyline::Editor<ReplHelper>,
        progress_renderer: IndicatifRenderer,
+       stale_checker: StaleChecker,
    }
 
    impl ReplRenderer {
-       pub fn prompt(&mut self) -> Result<String, ReplError>;
-       pub fn show_result(&self, result: &str);
-       pub fn show_error(&self, error: &str);
+       /// Generate prompt with session info and stale warning
+       /// Normal: `gemicro [2 queries, 1.4k tokens]> `
+       /// Stale:  `gemicro [2 queries, 1.4k tokens] (agent outdated ⚠️)> `
+       pub fn prompt(&mut self, state: &SessionState) -> Result<String, ReplError>;
    }
    ```
 
-6. **Implement session state**
+8. **Implement session state with reload handling**
    - `/Users/evansenter/Documents/projects/gemicro/gemicro-cli/src/repl/session.rs`
-   - Manage REPL lifecycle
-   - Handle Ctrl+C (cancel current query, not exit)
-   - Handle Ctrl+D (exit)
+   - Handle `/reload` by saving state and exec'ing new binary
 
    ```rust
    pub struct ReplSession {
        history: ConversationHistory,
+       registry: AgentRegistry,
        compressor: Box<dyn ContextCompressor>,
        config: SessionConfig,
        renderer: ReplRenderer,
@@ -1187,38 +1266,68 @@ impl Renderer for RatatuiRenderer {
    impl ReplSession {
        pub async fn run(&mut self, context: AgentContext) -> Result<()> {
            loop {
-               match self.renderer.prompt()? {
-                   input if input.starts_with('/') => {
-                       self.handle_command(input)?;
+               let input = self.renderer.prompt(&self.state())?;
+
+               match self.parse_command(&input)? {
+                   ReplCommand::Reload => {
+                       self.handle_reload()?;  // Save state, exec new binary
                    }
-                   query => {
-                       self.run_research(&query, &context).await?;
+                   ReplCommand::Agent(switch) => {
+                       self.registry.switch(&switch.name)?;
+                       println!("Switched to {} agent", switch.name);
                    }
+                   ReplCommand::Query(q) => {
+                       if self.is_query_running() {
+                           println!("Query in progress. Wait or Ctrl+C to cancel.");
+                           continue;
+                       }
+                       self.run_query(&q, &context).await?;
+                   }
+                   // ... other commands
                }
            }
+       }
+
+       fn handle_reload(&self) -> Result<()> {
+           // Save state to temp file
+           let state_path = self.save_state()?;
+
+           // Build new binary
+           println!("🔨 Rebuilding...");
+           let status = std::process::Command::new("cargo")
+               .args(["build", "--release"])
+               .status()?;
+
+           if !status.success() {
+               println!("✗ Build failed");
+               return Ok(());  // Stay in current session
+           }
+
+           // Exec new binary with state path
+           let exe = std::env::current_exe()?;
+           std::process::Command::new(exe)
+               .arg("--restore-state")
+               .arg(&state_path)
+               .exec();  // Does not return on success
+
+           Ok(())
        }
    }
    ```
 
-7. **Context-aware research prompts**
-   - Modify DeepResearchAgent to accept optional conversation context
-   - Previous findings inform decomposition and synthesis
-   - Avoid re-researching already-covered topics
+9. **Implement planned agent types**
+   - Deep Research (existing)
+   - ReAct (thought → action → observation loops)
+   - Reflexion (self-critique and retry)
+   - Simple Q&A (single LLM call)
+   - Code execution (run code for computational queries)
 
-   ```rust
-   impl DeepResearchAgent {
-       pub fn execute_with_context(
-           &self,
-           query: &str,
-           context: AgentContext,
-           history: Option<&ConversationHistory>,
-       ) -> impl Stream<Item = Result<AgentUpdate, AgentError>> + Send;
-   }
-   ```
+   Each agent implements the `Agent` trait and registers with `AgentRegistry`.
 
 **New Dependencies:**
 - `rustyline` - Line editing and input history
-- `dirs` - For storing history file in user's home directory
+- `dirs` - For storing history/state files
+- `os_str_bytes` - For exec handling (Unix)
 
 **File Structure Addition:**
 ```
@@ -1228,12 +1337,21 @@ gemicro-cli/
         ├── mod.rs        # Module exports, ReplSession
         ├── commands.rs   # Command parsing
         ├── renderer.rs   # REPL-specific rendering
-        └── session.rs    # Session state management
+        ├── session.rs    # Session state management
+        └── reload.rs     # Hot-reload support
 
 gemicro-core/
 └── src/
+    ├── registry.rs       # AgentRegistry, AgentFactory trait
     ├── history.rs        # ConversationHistory
-    └── compression.rs    # ContextCompressor trait + implementations
+    ├── compression.rs    # ContextCompressor trait
+    └── agents/
+        ├── mod.rs
+        ├── deep_research.rs  # (moved from agent.rs)
+        ├── react.rs
+        ├── reflexion.rs
+        ├── simple_qa.rs
+        └── code_exec.rs
 ```
 
 **User Experience:**
@@ -1245,7 +1363,8 @@ $ gemicro -i
 ║                    gemicro Interactive Mode                   ║
 ╚══════════════════════════════════════════════════════════════╝
 
-Type a research query or /help for commands. Ctrl+D to exit.
+Using: deep_research agent
+Type a query or /help for commands. Ctrl+D to exit.
 
 gemicro> What are the main approaches to quantum error correction?
 
@@ -1262,21 +1381,37 @@ gemicro> What are the main approaches to quantum error correction?
 The main approaches to quantum error correction include:
 [... synthesized answer ...]
 
-gemicro [1 query, 1.2k tokens]> How do surface codes compare to topological codes?
+gemicro [1 query, 1.2k tokens]> /agent react
+Switched to react agent
 
-🔍 Decomposing query (with context from previous research)...
-[... continues with context-aware research ...]
+gemicro:react [1 query, 1.2k tokens]> How would I implement a surface code?
 
-gemicro [2 queries, 2.8k tokens]> /history
+💭 Thought: I should break this down into implementation steps...
+🔧 Action: search("surface code implementation tutorial")
+👁 Observation: Found 3 relevant resources...
+💭 Thought: Let me synthesize the implementation approach...
+✓ Complete
 
-Previous queries:
-  1. What are the main approaches to quantum error correction?
-  2. How do surface codes compare to topological codes?
+To implement a surface code, you would:
+[... answer with context from previous quantum error correction research ...]
 
-gemicro [2 queries, 2.8k tokens]> /clear
-History cleared.
+gemicro:react [2 queries, 2.8k tokens] (agent outdated ⚠️)> /reload
 
-gemicro> /quit
+🔨 Rebuilding...
+   Compiling gemicro-core v0.1.0 (1.4s)
+   Compiling gemicro-cli v0.1.0 (0.9s)
+✓ Reloaded (2.3s)
+
+gemicro:react [2 queries, 2.8k tokens]> /agent
+
+Available agents:
+  * react (current)
+    deep_research
+    reflexion
+    simple_qa
+    code_exec
+
+gemicro:react [2 queries, 2.8k tokens]> /quit
 Goodbye!
 ```
 
@@ -1284,13 +1419,33 @@ Goodbye!
 
 **Acceptance Criteria:**
 - ☐ REPL mode starts with `-i` flag or no query argument
-- ☐ Commands work: `/quit`, `/clear`, `/history`, `/help`
+- ☐ Commands work: `/quit`, `/clear`, `/history`, `/help`, `/agent`, `/reload`
 - ☐ Line editing and history recall work (arrow keys, Ctrl+R)
 - ☐ Ctrl+C cancels current query without exiting
 - ☐ Ctrl+D exits cleanly
-- ☐ Conversation context improves subsequent queries
+- ☐ `/agent <name>` switches agents, preserving conversation context
+- ☐ `/reload` rebuilds and restores session state
+- ☐ Stale agent indicator shows when source files changed
+- ☐ `/reload` blocked during query execution with helpful message
+- ☐ Conversation context improves subsequent queries (even across agent switches)
 - ☐ Context compression triggers when history exceeds threshold
 - ☐ Token usage tracked and displayed in prompt
+
+**Deferred to Future Issues:**
+- Fresh start each session (persistent history deferred to #39)
+- Default agent: Deep Research (remember last agent deferred to #39)
+- Tab completion deferred to #41
+- `/config` command deferred to #42
+- ReAct agent tools/actions deferred to #40
+- Code execution agent details deferred to #9
+
+**Related Issues:**
+- #9: Code execution agent (open questions about sandboxing)
+- #36: `/reload --watch` mode for auto-reload
+- #39: Persistent session history
+- #40: ReAct agent with configurable tools
+- #41: Tab completion
+- #42: `/config` command
 
 ---
 

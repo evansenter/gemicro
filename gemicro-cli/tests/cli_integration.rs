@@ -216,3 +216,158 @@ fn test_cli_parallel_speedup_displayed() {
         "Parallel speedup should be displayed"
     );
 }
+
+// ============================================================================
+// Interactive REPL Tests
+// ============================================================================
+
+#[test]
+fn test_cli_interactive_help() {
+    let output = run_cli(&["--help"]);
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("--interactive"),
+        "Help should mention --interactive flag"
+    );
+    assert!(stdout.contains("-i"), "Help should mention -i short flag");
+}
+
+#[test]
+fn test_cli_interactive_no_query_required() {
+    // Interactive mode should not require a query argument
+    // This will fail on missing API key, but that's expected
+    let output = run_cli(&["--interactive", "--api-key", "fake-key"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // Should NOT fail with "Query is required"
+    assert!(
+        !stderr.contains("Query is required"),
+        "Interactive mode should not require query"
+    );
+}
+
+/// Helper to run CLI with stdin input
+fn run_cli_with_stdin(args: &[&str], stdin: &str) -> std::process::Output {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_gemicro"))
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("Failed to spawn gemicro CLI");
+
+    if let Some(mut child_stdin) = child.stdin.take() {
+        child_stdin.write_all(stdin.as_bytes()).ok();
+    }
+
+    child
+        .wait_with_output()
+        .expect("Failed to wait on gemicro CLI")
+}
+
+#[test]
+#[ignore] // Requires GEMINI_API_KEY
+fn test_cli_interactive_quit() {
+    if !has_api_key() {
+        eprintln!("Skipping test: GEMINI_API_KEY not set");
+        return;
+    }
+
+    // Send /quit to exit the REPL immediately
+    let output = run_cli_with_stdin(&["--interactive"], "/quit\n");
+
+    assert!(output.status.success(), "REPL should exit cleanly on /quit");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Goodbye"), "Should show goodbye message");
+}
+
+#[test]
+#[ignore] // Requires GEMINI_API_KEY
+fn test_cli_interactive_list_agents() {
+    if !has_api_key() {
+        eprintln!("Skipping test: GEMINI_API_KEY not set");
+        return;
+    }
+
+    // List agents then quit
+    let output = run_cli_with_stdin(&["--interactive"], "/agent\n/quit\n");
+
+    assert!(output.status.success(), "REPL should exit cleanly");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("deep_research"),
+        "Should list deep_research agent"
+    );
+    assert!(
+        stdout.contains("Available agents"),
+        "Should show agent list header"
+    );
+}
+
+#[test]
+#[ignore] // Requires GEMINI_API_KEY
+fn test_cli_interactive_unknown_command() {
+    if !has_api_key() {
+        eprintln!("Skipping test: GEMINI_API_KEY not set");
+        return;
+    }
+
+    // Try unknown command then quit
+    let output = run_cli_with_stdin(&["--interactive"], "/foobar\n/quit\n");
+
+    assert!(
+        output.status.success(),
+        "REPL should handle unknown commands gracefully"
+    );
+
+    // Unknown command message goes to stderr
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Unknown command"),
+        "Should show unknown command message on stderr"
+    );
+}
+
+#[test]
+#[ignore] // Requires GEMINI_API_KEY
+fn test_cli_interactive_simple_query() {
+    if !has_api_key() {
+        eprintln!("Skipping test: GEMINI_API_KEY not set");
+        return;
+    }
+
+    // Run a simple query then quit
+    // Note: Rustyline may not work perfectly with piped stdin in all environments
+    let output = run_cli_with_stdin(
+        &[
+            "--interactive",
+            "--timeout",
+            "120",
+            "--min-sub-queries",
+            "2",
+            "--max-sub-queries",
+            "2",
+        ],
+        "What is 1+1?\n/quit\n",
+    );
+
+    // Check that the REPL at least started (shows header or prompt)
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let combined = format!("{}{}", stdout, stderr);
+
+    assert!(
+        combined.contains("gemicro REPL")
+            || combined.contains("deep_research")
+            || combined.contains("Decomposing"),
+        "Should show REPL activity. stdout: {}, stderr: {}",
+        stdout,
+        stderr
+    );
+}

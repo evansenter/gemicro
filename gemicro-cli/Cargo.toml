@@ -21,6 +21,9 @@ clap = { version = "4.5", features = ["derive", "env"] }
 # Display
 indicatif = "0.17"
 
+# REPL
+rustyline = "15.0"
+
 # Error handling
 anyhow = "1.0"
 
@@ -30,3 +33,6 @@ env_logger = "0.11"
 
 # For tests
 serde_json = { workspace = true }
+
+[dev-dependencies]
+async-stream = { workspace = true }

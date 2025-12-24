@@ -16,8 +16,8 @@ Gemicro allows you to explore and interact with different AI agent patterns thro
 
 ### Two-Crate Workspace
 
-- **gemicro-core**: Platform-agnostic library with zero platform-specific dependencies
-- **gemicro-cli**: Terminal UI using indicatif for progress display (coming soon)
+- **gemicro-core**: Platform-agnostic library with Agent trait, streaming updates, and conversation history
+- **gemicro-cli**: Terminal UI with indicatif progress display and rustyline REPL
 
 ### Design Philosophy
 
@@ -28,71 +28,150 @@ Gemicro allows you to explore and interact with different AI agent patterns thro
 
 ## Project Status
 
-🚧 **Early Development** - Phase 1 (Core Foundation) complete
+🚧 **Active Development** - Phase 6 (Interactive REPL) complete
 
 See [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for detailed implementation roadmap.
+
+## Quick Start
+
+```bash
+# Set your API key
+export GEMINI_API_KEY="your-api-key"
+
+# Single query mode
+gemicro "What are the latest developments in quantum computing?"
+
+# Interactive REPL mode
+gemicro --interactive
+```
+
+## Usage
+
+### Single Query Mode
+
+Run a single research query with real-time streaming output:
+
+```bash
+# Basic query
+gemicro "What is Rust?"
+
+# With custom configuration
+gemicro "Compare async runtimes" \
+    --min-sub-queries 3 \
+    --max-sub-queries 7 \
+    --timeout 120
+
+# Verbose mode (debug logging)
+gemicro "Your query" --verbose
+```
+
+### Interactive REPL Mode
+
+Start an interactive session for multiple queries with conversation context:
+
+```bash
+gemicro --interactive
+# or
+gemicro -i
+```
+
+**REPL Commands:**
+
+| Command | Alias | Description |
+|---------|-------|-------------|
+| `/agent [name]` | `/a` | Switch agent or list available agents |
+| `/history` | `/h` | Show conversation history |
+| `/clear` | | Clear conversation history |
+| `/reload` | `/r` | Hot-reload agents (placeholder) |
+| `/quit` | `/q`, `/exit` | Exit the REPL |
+
+**Example session:**
+
+```
+gemicro REPL - Type /help for commands, /quit to exit
+
+[deep_research] > What is Rust?
+⠋ Decomposing query...
+✓ Generated 4 sub-queries
+⠋ Executing sub-queries...
+...
+
+[deep_research] > /agent
+Available agents:
+  deep_research * - Decomposes queries into sub-questions...
+
+[deep_research] > /quit
+Goodbye!
+```
+
+### CLI Options
+
+```bash
+gemicro [OPTIONS] [QUERY]
+
+Arguments:
+  [QUERY]  Research query (required unless using --interactive)
+
+Options:
+  -i, --interactive          Interactive REPL mode
+      --api-key <KEY>        Gemini API key (or set GEMINI_API_KEY)
+      --min-sub-queries <N>  Minimum sub-queries [default: 3]
+      --max-sub-queries <N>  Maximum sub-queries [default: 5]
+      --max-concurrent <N>   Max parallel executions [default: 5]
+      --timeout <SECS>       Total timeout [default: 180]
+      --llm-timeout <SECS>   Per-request timeout [default: 60]
+      --temperature <F>      Generation temperature 0.0-1.0 [default: 0.7]
+  -v, --verbose              Enable debug logging
+  -h, --help                 Print help
+  -V, --version              Print version
+```
 
 ## Development
 
 ### Prerequisites
 
-This project depends on the [rust-genai](https://github.com/evansenter/rust-genai) library (v0.2.0+) via git dependency.
-
 ```bash
 # Clone and build
 git clone https://github.com/evansenter/gemicro.git
 cd gemicro
-cargo build
+cargo build --workspace
 ```
 
 ### Building and Testing
 
 ```bash
 # Build workspace
-cargo build
+cargo build --workspace
 
-# Run tests
-cargo test
+# Run unit tests
+cargo test --workspace
 
-# Run tests with logging output
-RUST_LOG=debug cargo test
+# Run ALL tests including LLM integration tests
+cargo test --workspace -- --include-ignored
 
-# Build with all features
-cargo build --all-features
+# Linting
+cargo clippy --workspace -- -D warnings
+
+# Format check
+cargo fmt --all -- --check
 ```
 
-### Dependency Note
-
-The workspace `Cargo.toml` references rust-genai from GitHub:
-```toml
-rust-genai = { git = "https://github.com/evansenter/rust-genai", branch = "main" }
-```
-
-For local development of rust-genai, you can temporarily switch to a path dependency:
-```toml
-rust-genai = { path = "../rust-genai" }
-```
-
-## Planned Usage (CLI coming in Phase 4)
+### Running Examples
 
 ```bash
-export GEMINI_API_KEY="your-api-key"
+# Deep research example (non-interactive)
+cargo run -p gemicro-core --example deep_research
 
-# Basic research query
-gemicro "What are the latest developments in quantum computing?"
-
-# Custom configuration
-gemicro "Compare async runtimes" --max-queries 7 --timeout 45
-
-# Verbose mode
-gemicro "Your query" --verbose
+# REPL demo script
+./examples/repl_demo.sh
 ```
 
 ## Future Exploration Areas
 
-- Memory compression schemes (inspired by Claude Code's approach)
-- Multi-turn conversation support
+- Hot-reload for agent development (`/reload --watch`)
+- Persistent sessions across restarts
 - Additional agent patterns (ReAct, Reflexion, Planning)
+- Tab completion for commands
 - iOS/mobile interface
 
 ## License
