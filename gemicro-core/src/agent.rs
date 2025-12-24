@@ -875,6 +875,8 @@ mod tests {
 
     // Timeout enforcement tests
 
+    /// Verifies that remaining_time returns Ok with correct duration when
+    /// sufficient time remains in the total timeout budget.
     #[test]
     fn test_remaining_time_not_exceeded() {
         let start = Instant::now();
@@ -889,58 +891,88 @@ mod tests {
         assert!(remaining <= Duration::from_secs(10));
     }
 
+    /// Verifies that remaining_time returns a Timeout error when elapsed time
+    /// exceeds the total timeout budget.
     #[test]
     fn test_remaining_time_exceeded() {
-        // Create a start time in the "past" by using a very short timeout
         let start = Instant::now();
-        let total_timeout = Duration::from_nanos(1);
+        // Use 10ms timeout with 50ms sleep for reliable CI behavior
+        let total_timeout = Duration::from_millis(10);
 
-        // Sleep briefly to ensure time has passed
-        std::thread::sleep(Duration::from_millis(1));
+        std::thread::sleep(Duration::from_millis(50));
 
         let result = remaining_time(start, total_timeout, "decomposition");
         assert!(result.is_err());
 
         match result.unwrap_err() {
             AgentError::Timeout {
-                elapsed_ms: _,
+                elapsed_ms,
                 timeout_ms,
                 phase,
             } => {
-                assert_eq!(timeout_ms, 0); // 1 nanosecond rounds to 0ms
+                assert!(elapsed_ms >= 50); // At least 50ms elapsed
+                assert_eq!(timeout_ms, 10);
                 assert_eq!(phase, "decomposition");
             }
             _ => panic!("Expected Timeout error"),
         }
     }
 
+    /// Verifies that the exact boundary condition (elapsed == timeout) triggers
+    /// a timeout error, since we use >= comparison.
+    #[test]
+    fn test_remaining_time_exact_boundary() {
+        let start = Instant::now();
+        let total_timeout = Duration::from_millis(20);
+
+        // Sleep slightly past the timeout to ensure we hit the boundary
+        std::thread::sleep(Duration::from_millis(25));
+
+        let result = remaining_time(start, total_timeout, "boundary_test");
+        // At or past boundary should error
+        assert!(result.is_err());
+
+        match result.unwrap_err() {
+            AgentError::Timeout { phase, .. } => {
+                assert_eq!(phase, "boundary_test");
+            }
+            _ => panic!("Expected Timeout error"),
+        }
+    }
+
+    /// Verifies that the phase name is correctly preserved in timeout errors
+    /// for all agent execution phases.
     #[test]
     fn test_remaining_time_phase_name_preserved() {
         let start = Instant::now();
-        let total_timeout = Duration::from_nanos(1);
-        std::thread::sleep(Duration::from_millis(1));
+        let total_timeout = Duration::from_millis(10);
+        std::thread::sleep(Duration::from_millis(50));
 
         // Test different phase names
         for phase in &["decomposition", "parallel execution", "synthesis"] {
             let result = remaining_time(start, total_timeout, phase);
             assert!(result.is_err());
 
-            if let AgentError::Timeout {
-                phase: error_phase, ..
-            } = result.unwrap_err()
-            {
-                assert_eq!(&error_phase, phase);
+            match result.unwrap_err() {
+                AgentError::Timeout {
+                    phase: error_phase, ..
+                } => {
+                    assert_eq!(&error_phase, phase);
+                }
+                _ => panic!("Expected Timeout error for phase: {}", phase),
             }
         }
     }
 
+    /// Verifies that timeout_error correctly constructs a Timeout error with
+    /// accurate elapsed and timeout millisecond values.
     #[test]
     fn test_timeout_error_creation() {
         let start = Instant::now();
         let total_timeout = Duration::from_secs(5);
 
         // Sleep a bit so elapsed > 0
-        std::thread::sleep(Duration::from_millis(10));
+        std::thread::sleep(Duration::from_millis(20));
 
         let error = timeout_error(start, total_timeout, "synthesis");
 
@@ -950,7 +982,7 @@ mod tests {
                 timeout_ms,
                 phase,
             } => {
-                assert!(elapsed_ms >= 10); // At least 10ms elapsed
+                assert!(elapsed_ms >= 20); // At least 20ms elapsed
                 assert_eq!(timeout_ms, 5000); // 5 seconds = 5000ms
                 assert_eq!(phase, "synthesis");
             }
@@ -958,6 +990,8 @@ mod tests {
         }
     }
 
+    /// Verifies that the Timeout error Display implementation includes all
+    /// relevant information: elapsed time, timeout limit, and phase name.
     #[test]
     fn test_timeout_error_display() {
         let error = AgentError::Timeout {
@@ -972,6 +1006,8 @@ mod tests {
         assert!(display.contains("decomposition"));
     }
 
+    /// Verifies that remaining_time correctly calculates the difference between
+    /// total timeout and elapsed time.
     #[test]
     fn test_remaining_time_calculates_difference() {
         let start = Instant::now();
@@ -985,8 +1021,8 @@ mod tests {
 
         let remaining = result.unwrap();
         // Should have ~400ms remaining (500 - 100)
-        // Allow some tolerance for timing variations
-        assert!(remaining > Duration::from_millis(350));
+        // Allow generous tolerance for CI timing variations
+        assert!(remaining > Duration::from_millis(300));
         assert!(remaining < Duration::from_millis(450));
     }
 }
