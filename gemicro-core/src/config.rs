@@ -612,4 +612,27 @@ mod tests {
         };
         assert!(prompts.validate().is_ok());
     }
+
+    #[test]
+    fn test_research_prompts_validation_case_sensitive_placeholders() {
+        // Placeholder matching is case-sensitive - {Query} is not the same as {query}
+        let prompts = ResearchPrompts {
+            decomposition_template: "{min} to {max}: {Query}".to_string(), // Wrong case
+            ..Default::default()
+        };
+        let result = prompts.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("{query}"));
+
+        // Same for synthesis template
+        let prompts = ResearchPrompts {
+            synthesis_template: "{Query} -> {Findings}".to_string(), // Wrong case
+            ..Default::default()
+        };
+        let result = prompts.validate();
+        assert!(result.is_err());
+        // Should fail on first missing placeholder ({query} or {findings})
+        let err = result.unwrap_err();
+        assert!(err.contains("{query}") || err.contains("{findings}"));
+    }
 }
