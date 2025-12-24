@@ -37,8 +37,22 @@ use crate::ResearchConfig;
 use async_stream::try_stream;
 use futures_util::stream::Stream;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
+
+/// Check if execution has exceeded the timeout
+fn check_timeout(start: Instant, timeout: Duration, phase: &str) -> Result<(), AgentError> {
+    let elapsed = start.elapsed();
+    if elapsed > timeout {
+        Err(AgentError::Timeout {
+            elapsed_ms: elapsed.as_millis() as u64,
+            timeout_ms: timeout.as_millis() as u64,
+            phase: phase.to_string(),
+        })
+    } else {
+        Ok(())
+    }
+}
 
 /// Shared resources for agent execution
 ///
@@ -141,17 +155,33 @@ impl DeepResearchAgent {
             let sub_queries = decompose(&query, &context, &config).await?;
             yield AgentUpdate::decomposition_complete(sub_queries.clone());
 
+            // Check timeout after decomposition
+            check_timeout(start_time, config.total_timeout, "decomposition")?;
+
             // Phase 2: Parallel Execution
             // We need to yield sub_query_started events, then collect results
             for (id, q) in sub_queries.iter().enumerate() {
                 yield AgentUpdate::sub_query_started(id, q.clone());
             }
 
-            let execution_result = execute_parallel(&sub_queries, &context).await;
+            let execution_result = execute_parallel(
+                &sub_queries,
+                &context,
+                config.continue_on_partial_failure,
+            ).await;
+
+            // Check timeout after parallel execution
+            check_timeout(start_time, config.total_timeout, "parallel execution")?;
 
             // Yield completion/failure events as they arrived
+            // Note: These arrive in non-deterministic order due to parallel execution
             for update in execution_result.updates {
                 yield update;
+            }
+
+            // Check if we aborted early due to failure
+            if execution_result.aborted_early {
+                Err(AgentError::AllSubQueriesFailed)?;
             }
 
             // Check if we have at least one result
@@ -203,7 +233,12 @@ struct ExecutionResult {
     /// Number of calls where token count was unavailable
     tokens_unavailable_count: usize,
     /// Updates to yield (sub_query_completed / sub_query_failed)
+    ///
+    /// Note: These updates arrive in non-deterministic order due to parallel
+    /// execution. The order depends on which sub-queries complete first.
     updates: Vec<AgentUpdate>,
+    /// Whether execution was aborted early due to failure (when continue_on_partial_failure=false)
+    aborted_early: bool,
 }
 
 /// Decompose a query into sub-queries using the LLM
@@ -304,7 +339,21 @@ fn parse_json_array(text: &str) -> Result<Vec<String>, String> {
 }
 
 /// Execute sub-queries in parallel, collecting results
-async fn execute_parallel(sub_queries: &[String], context: &AgentContext) -> ExecutionResult {
+///
+/// # Arguments
+///
+/// * `sub_queries` - The sub-queries to execute
+/// * `context` - Agent context with LLM client
+/// * `continue_on_partial_failure` - If false, abort on first failure
+///
+/// # Returns
+///
+/// Results with updates in non-deterministic order (depends on which queries complete first).
+async fn execute_parallel(
+    sub_queries: &[String],
+    context: &AgentContext,
+    continue_on_partial_failure: bool,
+) -> ExecutionResult {
     let (tx, mut rx) = mpsc::channel::<(usize, Result<(String, Option<u32>), String>)>(10);
 
     // Spawn all sub-query tasks
@@ -338,6 +387,7 @@ async fn execute_parallel(sub_queries: &[String], context: &AgentContext) -> Exe
     let mut failed = 0;
     let mut total_tokens = 0u32;
     let mut tokens_unavailable_count = 0usize;
+    let mut aborted_early = false;
 
     while let Some((id, result)) = rx.recv().await {
         match result {
@@ -360,6 +410,16 @@ async fn execute_parallel(sub_queries: &[String], context: &AgentContext) -> Exe
             Err(error) => {
                 updates.push(AgentUpdate::sub_query_failed(id, error));
                 failed += 1;
+
+                // Abort early if configured to fail fast
+                if !continue_on_partial_failure {
+                    log::warn!(
+                        "Sub-query {} failed and continue_on_partial_failure=false, aborting",
+                        id
+                    );
+                    aborted_early = true;
+                    break;
+                }
             }
         }
     }
@@ -371,6 +431,7 @@ async fn execute_parallel(sub_queries: &[String], context: &AgentContext) -> Exe
         total_tokens,
         tokens_unavailable_count,
         updates,
+        aborted_early,
     }
 }
 

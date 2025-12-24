@@ -45,6 +45,14 @@ pub enum AgentError {
     #[error("Invalid configuration: {0}")]
     InvalidConfig(String),
 
+    /// Agent execution timed out
+    #[error("Timeout after {elapsed_ms}ms (limit: {timeout_ms}ms) during {phase}")]
+    Timeout {
+        elapsed_ms: u64,
+        timeout_ms: u64,
+        phase: String,
+    },
+
     /// Other agent-specific error
     #[error("{0}")]
     Other(String),
