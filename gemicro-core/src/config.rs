@@ -50,6 +50,9 @@ pub struct ResearchPrompts {
 
 impl ResearchPrompts {
     /// Render the decomposition prompt with placeholders substituted
+    ///
+    /// Note: `{query}` is replaced last to prevent user input containing
+    /// literal `{min}` or `{max}` from being substituted.
     pub fn render_decomposition(&self, min: usize, max: usize, query: &str) -> String {
         self.decomposition_template
             .replace("{min}", &min.to_string())
@@ -58,10 +61,13 @@ impl ResearchPrompts {
     }
 
     /// Render the synthesis prompt with placeholders substituted
+    ///
+    /// Note: `{findings}` is replaced before `{query}` to prevent user input
+    /// containing literal `{findings}` from being substituted.
     pub fn render_synthesis(&self, query: &str, findings: &str) -> String {
         self.synthesis_template
-            .replace("{query}", query)
             .replace("{findings}", findings)
+            .replace("{query}", query)
     }
 
     /// Validate that all prompts are non-empty
