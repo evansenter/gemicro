@@ -209,6 +209,7 @@ impl Renderer for IndicatifRenderer {
             print_final_result(
                 &result.answer,
                 state.elapsed(),
+                state.sequential_time(),
                 result.sub_queries_succeeded,
                 result.sub_queries_failed,
                 result.total_tokens,

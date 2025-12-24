@@ -42,6 +42,7 @@ pub fn format_duration(duration: Duration) -> String {
 pub fn print_final_result(
     answer: &str,
     duration: Duration,
+    sequential_time: Option<Duration>,
     sub_queries_succeeded: usize,
     sub_queries_failed: usize,
     total_tokens: u32,
@@ -60,6 +61,20 @@ pub fn print_final_result(
 
     println!("📊 Performance:");
     println!("   Total time: {}", format_duration(duration));
+
+    // Show parallel speedup if we have sequential timing data
+    if let Some(seq_time) = sequential_time {
+        if seq_time > duration {
+            let saved = seq_time - duration;
+            let speedup = seq_time.as_secs_f64() / duration.as_secs_f64();
+            println!(
+                "   Parallel speedup: {:.1}x (saved {})",
+                speedup,
+                format_duration(saved)
+            );
+        }
+    }
+
     println!(
         "   Sub-queries: {}/{} succeeded",
         sub_queries_succeeded, total

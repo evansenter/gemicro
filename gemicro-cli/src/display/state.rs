@@ -221,6 +221,20 @@ impl DisplayState {
     pub fn final_result(&self) -> Option<&FinalResultData> {
         self.final_result.as_ref()
     }
+
+    /// Calculate the total time if sub-queries had run sequentially.
+    ///
+    /// This is the sum of all individual sub-query durations.
+    /// Returns None if no sub-queries have completed with timing data.
+    pub fn sequential_time(&self) -> Option<Duration> {
+        let total: Duration = self.sub_queries.iter().filter_map(|sq| sq.duration).sum();
+
+        if total.is_zero() {
+            None
+        } else {
+            Some(total)
+        }
+    }
 }
 
 impl Default for DisplayState {
@@ -375,5 +389,49 @@ mod tests {
 
         assert!(result.is_none());
         assert_eq!(state.phase(), Phase::NotStarted);
+    }
+
+    #[test]
+    fn test_sequential_time_no_queries() {
+        let state = DisplayState::new();
+        assert!(state.sequential_time().is_none());
+    }
+
+    #[test]
+    fn test_sequential_time_with_completed_queries() {
+        let mut state = DisplayState::new();
+
+        // Set up sub-queries with durations
+        state.update(&AgentUpdate::decomposition_complete(vec![
+            "Q1".to_string(),
+            "Q2".to_string(),
+        ]));
+
+        // Manually set durations since we can't wait for real time in tests
+        state.sub_queries[0].duration = Some(Duration::from_secs(2));
+        state.sub_queries[1].duration = Some(Duration::from_secs(3));
+
+        let seq_time = state.sequential_time();
+        assert!(seq_time.is_some());
+        assert_eq!(seq_time.unwrap(), Duration::from_secs(5));
+    }
+
+    #[test]
+    fn test_sequential_time_partial_completion() {
+        let mut state = DisplayState::new();
+
+        state.update(&AgentUpdate::decomposition_complete(vec![
+            "Q1".to_string(),
+            "Q2".to_string(),
+            "Q3".to_string(),
+        ]));
+
+        // Only two have durations
+        state.sub_queries[0].duration = Some(Duration::from_secs(2));
+        state.sub_queries[2].duration = Some(Duration::from_secs(4));
+
+        let seq_time = state.sequential_time();
+        assert!(seq_time.is_some());
+        assert_eq!(seq_time.unwrap(), Duration::from_secs(6));
     }
 }
