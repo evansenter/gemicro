@@ -2,6 +2,7 @@
 
 use super::renderer::Renderer;
 use super::state::{DisplayState, Phase, SubQueryStatus};
+use crate::cli::OutputConfig;
 use crate::format::{format_duration, print_final_result, truncate};
 use anyhow::Result;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
@@ -11,22 +12,18 @@ use std::time::Duration;
 /// Spinner animation tick interval in milliseconds.
 const SPINNER_TICK_MS: u64 = 120;
 
-/// Maximum characters to display for sub-query text.
-const MAX_QUERY_DISPLAY_CHARS: usize = 55;
-
-/// Maximum characters to display for result previews.
-const MAX_PREVIEW_CHARS: usize = 40;
-
 /// Renderer using indicatif for progress bar display.
 pub struct IndicatifRenderer {
     multi: MultiProgress,
     phase_bar: ProgressBar,
     sub_query_bars: HashMap<usize, ProgressBar>,
+    /// Output configuration for truncation limits
+    output_config: OutputConfig,
 }
 
 impl IndicatifRenderer {
-    /// Create a new IndicatifRenderer.
-    pub fn new() -> Self {
+    /// Create a new IndicatifRenderer with the given output configuration.
+    pub fn new(output_config: OutputConfig) -> Self {
         let multi = MultiProgress::new();
         let phase_bar = multi.add(ProgressBar::new_spinner());
 
@@ -41,6 +38,7 @@ impl IndicatifRenderer {
             multi,
             phase_bar,
             sub_query_bars: HashMap::new(),
+            output_config,
         }
     }
 
@@ -56,7 +54,7 @@ impl IndicatifRenderer {
             let prefix = format!("{}", sq.id + 1);
             log::debug!("Creating sub-query bar: id={}, prefix={}", sq.id, prefix);
             pb.set_prefix(prefix);
-            pb.set_message(truncate(&sq.query, MAX_QUERY_DISPLAY_CHARS));
+            pb.set_message(truncate(&sq.query, self.output_config.query_display_chars));
             self.sub_query_bars.insert(sq.id, pb);
         }
         log::debug!("Created {} sub-query bars", self.sub_query_bars.len());
@@ -65,7 +63,7 @@ impl IndicatifRenderer {
 
 impl Default for IndicatifRenderer {
     fn default() -> Self {
-        Self::new()
+        Self::new(OutputConfig::default())
     }
 }
 
@@ -179,13 +177,14 @@ impl Renderer for IndicatifRenderer {
                     String::new()
                 };
 
+                let preview_chars = self.output_config.preview_chars;
                 // Suspend multi-progress, print, then resume to avoid display issues
                 self.multi.suspend(|| {
                     println!(
                         "   [{}] ✅ {} → \"{}\"{}",
                         id + 1,
                         duration_str,
-                        truncate(result_preview, MAX_PREVIEW_CHARS),
+                        truncate(result_preview, preview_chars),
                         token_info
                     );
                 });
@@ -198,12 +197,13 @@ impl Renderer for IndicatifRenderer {
                     .map(format_duration)
                     .unwrap_or_else(|| "?".to_string());
 
+                let preview_chars = self.output_config.preview_chars;
                 self.multi.suspend(|| {
                     println!(
                         "   [{}] ❌ {} → Failed: {}",
                         id + 1,
                         duration_str,
-                        truncate(error, MAX_PREVIEW_CHARS)
+                        truncate(error, preview_chars)
                     );
                 });
                 pb.finish_and_clear();
@@ -266,7 +266,9 @@ impl Renderer for IndicatifRenderer {
             );
             for sq in completed {
                 if let SubQueryStatus::Completed { result_preview, .. } = &sq.status {
-                    println!("  [{}] {}", sq.id + 1, truncate(result_preview, 60));
+                    // Use preview_chars * 1.5 for interrupted results to show more context
+                    let chars = (self.output_config.preview_chars * 3) / 2;
+                    println!("  [{}] {}", sq.id + 1, truncate(result_preview, chars));
                 }
             }
         } else {
