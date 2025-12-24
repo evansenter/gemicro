@@ -40,8 +40,8 @@ use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, Semaphore};
 
 /// Buffer size for the mpsc channel used in parallel sub-query execution.
-/// This should be at least as large as the expected number of concurrent sub-queries
-/// to avoid blocking on send operations.
+/// Set larger than `max_concurrent_sub_queries` (default: 5) to avoid blocking senders.
+/// Value of 16 handles typical workloads and even unlimited concurrency scenarios.
 const PARALLEL_EXECUTION_CHANNEL_BUFFER: usize = 16;
 
 /// Calculate remaining time from total timeout, returning error if already exceeded
