@@ -37,7 +37,7 @@ use async_stream::try_stream;
 use futures_util::stream::Stream;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Semaphore};
 
 /// Buffer size for the mpsc channel used in parallel sub-query execution.
 /// This should be at least as large as the expected number of concurrent sub-queries
@@ -394,7 +394,7 @@ fn parse_json_array(text: &str) -> Result<Vec<String>, String> {
 ///
 /// * `sub_queries` - The sub-queries to execute
 /// * `context` - Agent context with LLM client
-/// * `config` - Research configuration (for prompts and continue_on_partial_failure)
+/// * `config` - Research configuration (for prompts, continue_on_partial_failure, and concurrency limit)
 ///
 /// # Returns
 ///
@@ -408,14 +408,28 @@ async fn execute_parallel(
         PARALLEL_EXECUTION_CHANNEL_BUFFER,
     );
 
+    // Create semaphore for concurrency limiting (0 means unlimited)
+    let semaphore = if config.max_concurrent_sub_queries > 0 {
+        Some(Arc::new(Semaphore::new(config.max_concurrent_sub_queries)))
+    } else {
+        None
+    };
+
     // Spawn all sub-query tasks
     for (id, query) in sub_queries.iter().enumerate() {
         let tx = tx.clone();
         let llm = context.llm.clone();
         let query = query.clone();
         let sub_query_system = config.prompts.sub_query_system.clone();
+        let semaphore = semaphore.clone();
 
         tokio::spawn(async move {
+            // Acquire semaphore permit if concurrency is limited
+            let _permit = match &semaphore {
+                Some(sem) => Some(sem.acquire().await.expect("semaphore closed unexpectedly")),
+                None => None,
+            };
+
             let request = LlmRequest::with_system(&query, &sub_query_system);
 
             let result = match llm.generate(request).await {

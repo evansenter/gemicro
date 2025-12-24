@@ -147,6 +147,14 @@ pub struct ResearchConfig {
     /// Default: 3
     pub min_sub_queries: usize,
 
+    /// Maximum number of sub-queries to execute concurrently
+    ///
+    /// This limits parallel API calls to prevent rate limiting and control costs.
+    /// Set to 0 for unlimited concurrency.
+    ///
+    /// Default: 5
+    pub max_concurrent_sub_queries: usize,
+
     /// Whether to continue if some sub-queries fail
     ///
     /// If true, synthesis will proceed with partial results.
@@ -206,6 +214,7 @@ impl Default for ResearchConfig {
         Self {
             max_sub_queries: 5,
             min_sub_queries: 3,
+            max_concurrent_sub_queries: 5,
             continue_on_partial_failure: true,
             total_timeout: Duration::from_secs(60),
             prompts: ResearchPrompts::default(),
@@ -295,6 +304,7 @@ mod tests {
         let config = ResearchConfig::default();
         assert_eq!(config.max_sub_queries, 5);
         assert_eq!(config.min_sub_queries, 3);
+        assert_eq!(config.max_concurrent_sub_queries, 5);
         assert!(config.continue_on_partial_failure);
         assert_eq!(config.total_timeout, Duration::from_secs(60));
     }
