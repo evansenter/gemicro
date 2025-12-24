@@ -872,4 +872,121 @@ mod tests {
         // Just verify it compiles - we can't easily test without a real client
         let _context_fn = |llm: LlmClient| AgentContext::new(llm);
     }
+
+    // Timeout enforcement tests
+
+    #[test]
+    fn test_remaining_time_not_exceeded() {
+        let start = Instant::now();
+        let total_timeout = Duration::from_secs(10);
+
+        let result = remaining_time(start, total_timeout, "test_phase");
+        assert!(result.is_ok());
+
+        let remaining = result.unwrap();
+        // Should have close to 10 seconds remaining (minus small elapsed time)
+        assert!(remaining > Duration::from_secs(9));
+        assert!(remaining <= Duration::from_secs(10));
+    }
+
+    #[test]
+    fn test_remaining_time_exceeded() {
+        // Create a start time in the "past" by using a very short timeout
+        let start = Instant::now();
+        let total_timeout = Duration::from_nanos(1);
+
+        // Sleep briefly to ensure time has passed
+        std::thread::sleep(Duration::from_millis(1));
+
+        let result = remaining_time(start, total_timeout, "decomposition");
+        assert!(result.is_err());
+
+        match result.unwrap_err() {
+            AgentError::Timeout {
+                elapsed_ms: _,
+                timeout_ms,
+                phase,
+            } => {
+                assert_eq!(timeout_ms, 0); // 1 nanosecond rounds to 0ms
+                assert_eq!(phase, "decomposition");
+            }
+            _ => panic!("Expected Timeout error"),
+        }
+    }
+
+    #[test]
+    fn test_remaining_time_phase_name_preserved() {
+        let start = Instant::now();
+        let total_timeout = Duration::from_nanos(1);
+        std::thread::sleep(Duration::from_millis(1));
+
+        // Test different phase names
+        for phase in &["decomposition", "parallel execution", "synthesis"] {
+            let result = remaining_time(start, total_timeout, phase);
+            assert!(result.is_err());
+
+            if let AgentError::Timeout {
+                phase: error_phase, ..
+            } = result.unwrap_err()
+            {
+                assert_eq!(&error_phase, phase);
+            }
+        }
+    }
+
+    #[test]
+    fn test_timeout_error_creation() {
+        let start = Instant::now();
+        let total_timeout = Duration::from_secs(5);
+
+        // Sleep a bit so elapsed > 0
+        std::thread::sleep(Duration::from_millis(10));
+
+        let error = timeout_error(start, total_timeout, "synthesis");
+
+        match error {
+            AgentError::Timeout {
+                elapsed_ms,
+                timeout_ms,
+                phase,
+            } => {
+                assert!(elapsed_ms >= 10); // At least 10ms elapsed
+                assert_eq!(timeout_ms, 5000); // 5 seconds = 5000ms
+                assert_eq!(phase, "synthesis");
+            }
+            _ => panic!("Expected Timeout error"),
+        }
+    }
+
+    #[test]
+    fn test_timeout_error_display() {
+        let error = AgentError::Timeout {
+            elapsed_ms: 1500,
+            timeout_ms: 1000,
+            phase: "decomposition".to_string(),
+        };
+
+        let display = error.to_string();
+        assert!(display.contains("1500"));
+        assert!(display.contains("1000"));
+        assert!(display.contains("decomposition"));
+    }
+
+    #[test]
+    fn test_remaining_time_calculates_difference() {
+        let start = Instant::now();
+        let total_timeout = Duration::from_millis(500);
+
+        // Sleep for 100ms
+        std::thread::sleep(Duration::from_millis(100));
+
+        let result = remaining_time(start, total_timeout, "test");
+        assert!(result.is_ok());
+
+        let remaining = result.unwrap();
+        // Should have ~400ms remaining (500 - 100)
+        // Allow some tolerance for timing variations
+        assert!(remaining > Duration::from_millis(350));
+        assert!(remaining < Duration::from_millis(450));
+    }
 }
