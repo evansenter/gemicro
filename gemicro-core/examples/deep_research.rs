@@ -7,6 +7,9 @@
 //!   GEMINI_API_KEY=your_key cargo run -p gemicro-core --example deep_research -- "Your question here"
 //!
 //! Press Ctrl+C to cancel gracefully - partial results will be shown.
+//!
+//! Note: For real-time web data, use the CLI with `--google-search`:
+//!   gemicro "What happened in tech news today?" --google-search
 
 use futures_util::StreamExt;
 use gemicro_core::{

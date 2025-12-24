@@ -11,6 +11,7 @@ Gemicro allows you to explore and interact with different AI agent patterns thro
 - 🏗️ **Extensible Architecture**: Soft-typed events allow adding new agent types without protocol changes
 - 📱 **iOS-Ready**: Platform-agnostic core library for future mobile support
 - ⚡ **Parallel Execution**: Deep Research pattern fans out queries for faster results
+- 🌐 **Google Search Grounding**: Enable real-time web search for current events and live data
 
 ## Architecture
 
@@ -28,9 +29,7 @@ Gemicro allows you to explore and interact with different AI agent patterns thro
 
 ## Project Status
 
-🚧 **Active Development** - Phase 6 (Interactive REPL) complete
-
-See [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for detailed implementation roadmap.
+🚧 **Active Development** - Core features complete, see [GitHub Issues](https://github.com/evansenter/gemicro/issues) for roadmap.
 
 ## Quick Start
 
@@ -60,6 +59,9 @@ gemicro "Compare async runtimes" \
     --min-sub-queries 3 \
     --max-sub-queries 7 \
     --timeout 120
+
+# With Google Search grounding for real-time web data
+gemicro "What are the latest AI developments this week?" --google-search
 
 # Verbose mode (debug logging)
 gemicro "Your query" --verbose
@@ -121,6 +123,8 @@ Options:
       --timeout <SECS>       Total timeout [default: 180]
       --llm-timeout <SECS>   Per-request timeout [default: 60]
       --temperature <F>      Generation temperature 0.0-1.0 [default: 0.7]
+      --google-search        Enable Google Search grounding for real-time data
+      --plain                Use plain text output (no markdown rendering)
   -v, --verbose              Enable debug logging
   -h, --help                 Print help
   -V, --version              Print version
