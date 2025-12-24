@@ -88,12 +88,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 EVENT_SUB_QUERY_COMPLETED => {
                     if let Some(result) = update.as_sub_query_completed() {
-                        println!(
-                            "✅ [{}/{}] Complete ({} tokens)",
-                            result.id + 1,
-                            sub_query_count,
-                            result.tokens_used
-                        );
+                        if result.tokens_used > 0 {
+                            println!(
+                                "✅ [{}/{}] Complete ({} tokens)",
+                                result.id + 1,
+                                sub_query_count,
+                                result.tokens_used
+                            );
+                        } else {
+                            println!("✅ [{}/{}] Complete", result.id + 1, sub_query_count);
+                        }
                     }
                 }
                 EVENT_SUB_QUERY_FAILED => {
@@ -117,13 +121,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         println!("{}", result.answer);
                         println!();
                         println!("──────────────────────────────────────────────────────────────");
-                        println!(
-                            "📊 Stats: {} tokens | {}ms | {}/{} sub-queries succeeded",
-                            result.metadata.total_tokens,
-                            result.metadata.duration_ms,
-                            result.metadata.sub_queries_succeeded,
-                            result.metadata.sub_queries_succeeded + result.metadata.sub_queries_failed
-                        );
+
+                        let total_queries = result.metadata.sub_queries_succeeded
+                            + result.metadata.sub_queries_failed;
+
+                        // Format duration nicely
+                        let duration = if result.metadata.duration_ms >= 1000 {
+                            format!("{:.1}s", result.metadata.duration_ms as f64 / 1000.0)
+                        } else {
+                            format!("{}ms", result.metadata.duration_ms)
+                        };
+
+                        // Show token info only if available
+                        if result.metadata.tokens_unavailable_count == 0
+                            && result.metadata.total_tokens > 0
+                        {
+                            println!(
+                                "📊 Stats: {} tokens | {} | {}/{} sub-queries succeeded",
+                                result.metadata.total_tokens,
+                                duration,
+                                result.metadata.sub_queries_succeeded,
+                                total_queries
+                            );
+                        } else {
+                            println!(
+                                "📊 Stats: {} | {}/{} sub-queries succeeded",
+                                duration,
+                                result.metadata.sub_queries_succeeded,
+                                total_queries
+                            );
+                        }
                     }
                 }
                 _ => {}
