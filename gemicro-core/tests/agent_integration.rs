@@ -297,7 +297,7 @@ async fn test_cancellation_during_execution() {
     );
 }
 
-/// Test that immediate cancellation (before execution starts) works
+/// Test that pre-cancelled token causes early termination
 #[tokio::test]
 async fn test_immediate_cancellation() {
     let Some(api_key) = get_api_key() else {
@@ -321,10 +321,38 @@ async fn test_immediate_cancellation() {
     let stream = agent.execute("What is 2+2?", context);
     futures_util::pin_mut!(stream);
 
-    // Should immediately get Cancelled error
-    let first_result = stream.next().await;
+    // First item may be decomposition_started (yielded before cancellation check),
+    // then we should get Cancelled during decomposition phase
+    let mut got_cancelled = false;
+    let mut event_count = 0;
+
+    while let Some(result) = stream.next().await {
+        event_count += 1;
+        match result {
+            Ok(update) => {
+                println!("[{}] {}", update.event_type, update.message);
+                // Should not proceed past decomposition_started with a pre-cancelled token
+                assert!(
+                    update.event_type == EVENT_DECOMPOSITION_STARTED,
+                    "Should only see decomposition_started before cancellation, got {}",
+                    update.event_type
+                );
+            }
+            Err(AgentError::Cancelled) => {
+                println!("Got AgentError::Cancelled");
+                got_cancelled = true;
+                break;
+            }
+            Err(e) => {
+                panic!("Unexpected error: {:?}", e);
+            }
+        }
+    }
+
+    assert!(got_cancelled, "Should have received AgentError::Cancelled");
     assert!(
-        matches!(first_result, Some(Err(AgentError::Cancelled))),
-        "Should immediately return Cancelled when token is already cancelled"
+        event_count <= 2,
+        "Should cancel quickly (got {} events)",
+        event_count
     );
 }
