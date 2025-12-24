@@ -735,102 +735,275 @@ Stats: 4/5 sub-queries succeeded | 1,247 total tokens | 23.4s
 
 ### Phase 4: CLI Application (Day 6)
 
-**Goal**: Build CLI that consumes the stream
+**Goal**: Build CLI that consumes the stream with state-renderer separation for future TUI swappability
+
+**Architecture Overview:**
+
+The CLI uses a **state-renderer separation pattern** that enables swapping from indicatif to ratatui later:
+
+```
+AgentUpdate → DisplayState.update() → Renderer.render(state)
+                    ↓                         ↓
+              (pure state)          (indicatif now, ratatui later)
+```
+
+**File Structure:**
+```
+gemicro-cli/
+├── Cargo.toml
+└── src/
+    ├── main.rs           # Entry point, stream orchestration
+    ├── cli.rs            # Clap argument parsing
+    ├── format.rs         # Text formatting utilities (shared across renderers)
+    └── display/
+        ├── mod.rs        # Module exports
+        ├── state.rs      # DisplayState (terminal-agnostic)
+        ├── renderer.rs   # Renderer trait
+        └── indicatif.rs  # IndicatifRenderer implementation
+```
 
 **Tasks:**
 
 1. **Create gemicro-cli crate**
    - `/Users/evansenter/Documents/projects/gemicro/gemicro-cli/Cargo.toml`
-   - Dependencies: gemicro-core, clap, indicatif, tokio, anyhow, futures-util
+   - Dependencies: gemicro-core, clap, indicatif, tokio, anyhow, futures-util, log, env_logger
 
 2. **Implement argument parsing**
    - `/Users/evansenter/Documents/projects/gemicro/gemicro-cli/src/cli.rs`
-   - `Args` struct with clap
-   - Fields: query, api_key (env), max_queries, timeout, verbose
-
-3. **Implement stream display**
-   - `/Users/evansenter/Documents/projects/gemicro/gemicro-cli/src/display.rs`
-   - `StreamDisplay` struct wrapping `MultiProgress`
-   - Consumes `Stream<AgentUpdate>` and updates indicatif in real-time
+   - `Args` struct with clap derive
+   - Fields: query, api_key (from GEMINI_API_KEY env), min/max_sub_queries, timeout, verbose
 
    ```rust
-   pub struct StreamDisplay {
-       multi: MultiProgress,
-       main_bar: ProgressBar,
-       sub_bars: HashMap<usize, ProgressBar>,
+   #[derive(Parser, Debug)]
+   #[command(name = "gemicro")]
+   #[command(about = "AI agent exploration platform")]
+   pub struct Args {
+       /// Research query
+       pub query: String,
+
+       /// Gemini API key (can also use GEMINI_API_KEY env var)
+       #[arg(long, env = "GEMINI_API_KEY")]
+       pub api_key: String,
+
+       /// Maximum number of sub-queries
+       #[arg(long, default_value = "5")]
+       pub max_sub_queries: usize,
+
+       /// Total timeout in seconds
+       #[arg(long, default_value = "180")]
+       pub timeout: u64,
+
+       /// Enable verbose logging
+       #[arg(short, long)]
+       pub verbose: bool,
    }
 
-   impl StreamDisplay {
-       pub async fn consume(
-           &mut self,
-           stream: impl Stream<Item = Result<AgentUpdate, AgentError>>,
-       ) -> Result<String> {
-           futures::pin_mut!(stream);
-
-           while let Some(update) = stream.next().await {
-               let update = update?;
-               match update.event_type.as_str() {
-                   "decomposition_started" => {
-                       self.main_bar.set_message("Decomposing...");
-                   }
-                   "sub_query_started" => {
-                       if let Some(id) = update.data.get("id").and_then(|v| v.as_u64()) {
-                           if let Some(query) = update.data.get("query").and_then(|v| v.as_str()) {
-                               let pb = self.multi.add(ProgressBar::new_spinner());
-                               pb.set_message(format!("[{}/{}] {}", id+1, total, query));
-                               self.sub_bars.insert(id as usize, pb);
-                           }
-                       }
-                   }
-                   "sub_query_completed" => {
-                       if let Some(result) = update.as_sub_query_completed() {
-                           if let Some(pb) = self.sub_bars.get(&result.id) {
-                               pb.finish_with_message(format!("✓ ({} tokens)", result.tokens_used));
-                           }
-                       }
-                   }
-                   "final_result" => {
-                       if let Some(final_result) = update.as_final_result() {
-                           self.main_bar.finish();
-                           return Ok(final_result.answer);
-                       }
-                   }
-                   _ => {
-                       // Log unknown event types
-                       log::debug!("Unknown event type: {}", update.event_type);
-                   }
-               }
-           }
-
-           Err(anyhow!("Stream ended without final result"))
-       }
+   impl Args {
+       pub fn llm_config(&self) -> LlmConfig { /* ... */ }
+       pub fn research_config(&self) -> ResearchConfig { /* ... */ }
    }
    ```
 
-4. **Implement main entry point**
+3. **Implement DisplayState (terminal-agnostic)**
+   - `/Users/evansenter/Documents/projects/gemicro/gemicro-cli/src/display/state.rs`
+   - Tracks phase, sub-query status, timing, results
+   - Pure state with no terminal dependencies (testable)
+
+   ```rust
+   #[derive(Debug, Clone, PartialEq)]
+   pub enum Phase {
+       Decomposing,
+       Executing,
+       Synthesizing,
+       Complete,
+   }
+
+   #[derive(Debug, Clone)]
+   pub enum SubQueryStatus {
+       Pending,
+       InProgress,
+       Completed { result_preview: String, tokens: u32 },
+       Failed { error: String },
+   }
+
+   #[derive(Debug, Clone)]
+   pub struct SubQueryState {
+       pub id: usize,
+       pub query: String,
+       pub status: SubQueryStatus,
+       pub start_time: Option<Instant>,
+       pub duration: Option<Duration>,
+   }
+
+   pub struct DisplayState {
+       phase: Phase,
+       sub_queries: Vec<SubQueryState>,
+       start_time: Instant,
+       final_result: Option<FinalResultData>,
+   }
+
+   impl DisplayState {
+       pub fn new() -> Self;
+
+       /// Update state from an AgentUpdate event
+       pub fn update(&mut self, event: &AgentUpdate);
+
+       /// Query methods for renderers
+       pub fn phase(&self) -> &Phase;
+       pub fn sub_queries(&self) -> &[SubQueryState];
+       pub fn elapsed(&self) -> Duration;
+       pub fn final_result(&self) -> Option<&FinalResultData>;
+   }
+   ```
+
+4. **Implement Renderer trait**
+   - `/Users/evansenter/Documents/projects/gemicro/gemicro-cli/src/display/renderer.rs`
+   - Clean interface for swappable rendering backends
+
+   ```rust
+   pub trait Renderer {
+       /// Called when phase changes
+       fn on_phase_change(&mut self, state: &DisplayState) -> Result<()>;
+
+       /// Called when a sub-query status updates
+       fn on_sub_query_update(&mut self, state: &DisplayState, id: usize) -> Result<()>;
+
+       /// Called when final result is ready
+       fn on_final_result(&mut self, state: &DisplayState) -> Result<()>;
+
+       /// Called when stream ends (cleanup)
+       fn finish(&mut self) -> Result<()>;
+   }
+   ```
+
+5. **Implement IndicatifRenderer**
+   - `/Users/evansenter/Documents/projects/gemicro/gemicro-cli/src/display/indicatif.rs`
+   - Implements `Renderer` using `indicatif::MultiProgress`
+   - Creates/updates progress bars based on state
+
+   ```rust
+   pub struct IndicatifRenderer {
+       multi: MultiProgress,
+       phase_bar: ProgressBar,
+       sub_query_bars: HashMap<usize, ProgressBar>,
+   }
+
+   impl IndicatifRenderer {
+       pub fn new() -> Self;
+   }
+
+   impl Renderer for IndicatifRenderer {
+       fn on_phase_change(&mut self, state: &DisplayState) -> Result<()> {
+           match state.phase() {
+               Phase::Decomposing => {
+                   self.phase_bar.set_message("🔍 Decomposing query...");
+               }
+               Phase::Executing => {
+                   self.phase_bar.finish_with_message("✓ Decomposed");
+                   // Create new bar for execution phase
+               }
+               // ...
+           }
+           Ok(())
+       }
+       // ...
+   }
+   ```
+
+6. **Implement format utilities**
+   - `/Users/evansenter/Documents/projects/gemicro/gemicro-cli/src/format.rs`
+   - Shared text formatting (truncation, duration formatting)
+   - Final result display with box-drawing characters
+
+   ```rust
+   pub fn truncate(s: &str, max_chars: usize) -> String;
+   pub fn format_duration(duration: Duration) -> String;
+   pub fn print_final_result(result: &FinalResultData);
+   ```
+
+7. **Implement main entry point**
    - `/Users/evansenter/Documents/projects/gemicro/gemicro-cli/src/main.rs`
-   - Parse CLI args
-   - Load API key from env
-   - Create `rust_genai::Client`
-   - Create `LlmClient`, `AgentContext`
-   - Create `DeepResearchAgent`
-   - Get stream from `agent.execute()`
-   - Pass stream to `StreamDisplay::consume()`
-   - Print final result
+   - Stream orchestration with state-renderer pattern
 
-5. **Implement output formatting**
-   - `/Users/evansenter/Documents/projects/gemicro/gemicro-cli/src/output.rs`
-   - Format final answer with metadata
-   - Show sub-query summary
+   ```rust
+   #[tokio::main]
+   async fn main() -> Result<()> {
+       let args = Args::parse();
 
-**Validation**: Manual end-to-end testing
+       // Initialize logging
+       if args.verbose {
+           env_logger::Builder::from_env(
+               env_logger::Env::default().default_filter_or("debug")
+           ).init();
+       }
+
+       // Create agent and context
+       let genai_client = rust_genai::Client::builder(args.api_key.clone()).build();
+       let llm = LlmClient::new(genai_client, args.llm_config());
+       let context = AgentContext::new(llm);
+       let agent = DeepResearchAgent::new(args.research_config())?;
+
+       // Initialize state and renderer
+       let mut state = DisplayState::new();
+       let mut renderer = IndicatifRenderer::new();
+
+       // Consume stream
+       let stream = agent.execute(&args.query, context);
+       futures_util::pin_mut!(stream);
+
+       while let Some(result) = stream.next().await {
+           let update = result?;
+
+           let prev_phase = state.phase().clone();
+           state.update(&update);
+
+           // Notify renderer of changes
+           if state.phase() != &prev_phase {
+               renderer.on_phase_change(&state)?;
+           }
+
+           // Handle sub-query updates
+           if let Some(id) = extract_sub_query_id(&update) {
+               renderer.on_sub_query_update(&state, id)?;
+           }
+       }
+
+       renderer.on_final_result(&state)?;
+       renderer.finish()?;
+
+       Ok(())
+   }
+   ```
+
+**Validation**: Manual end-to-end testing with real API
 
 **Acceptance Criteria:**
 - ✅ CLI consumes agent stream
 - ✅ Progress bars update in real-time
-- ✅ Sub-queries show as they complete (not all at once)
-- ✅ Final result is well-formatted
+- ✅ Sub-queries show as they complete (non-deterministic order handled)
+- ✅ Final result is well-formatted with stats
 - ✅ Errors are user-friendly
+- ✅ State logic is unit-testable (no terminal dependencies)
+- ✅ Renderer can be swapped to ratatui by implementing trait
+
+**Future: Swapping to ratatui**
+
+When ready to switch to a full TUI:
+
+1. Create `RatatuiRenderer` implementing `Renderer` trait
+2. Add feature flag: `--features ratatui-display`
+3. `DisplayState` and all state logic remains unchanged
+
+```rust
+// Future: src/display/ratatui.rs
+impl Renderer for RatatuiRenderer {
+    fn on_phase_change(&mut self, state: &DisplayState) -> Result<()> {
+        // Full terminal redraw with widgets
+        self.terminal.draw(|f| { /* ... */ })?;
+        Ok(())
+    }
+}
+```
 
 ---
 

@@ -1,0 +1,31 @@
+[package]
+name = "gemicro-cli"
+version = "0.1.0"
+edition = "2021"
+description = "CLI for gemicro AI agent exploration platform"
+
+[[bin]]
+name = "gemicro"
+path = "src/main.rs"
+
+[dependencies]
+gemicro-core = { path = "../gemicro-core" }
+rust-genai = { workspace = true }
+tokio = { workspace = true }
+futures-util = { workspace = true }
+
+# CLI
+clap = { version = "4.5", features = ["derive", "env"] }
+
+# Display
+indicatif = "0.17"
+
+# Error handling
+anyhow = "1.0"
+
+# Logging
+log = "0.4"
+env_logger = "0.11"
+
+# For tests
+serde_json = { workspace = true }
