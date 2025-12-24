@@ -206,9 +206,24 @@ pub struct FinalResult {
 /// Metadata about the overall research result
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResultMetadata {
+    /// Total tokens used across all LLM calls
+    ///
+    /// If `tokens_unavailable_count > 0`, this is a partial sum (lower bound).
     pub total_tokens: u32,
+
+    /// Number of LLM calls that didn't report token usage
+    ///
+    /// When the API doesn't return token counts, we treat them as 0 for summation
+    /// but track how many were missing here. If this is > 0, `total_tokens` is incomplete.
+    pub tokens_unavailable_count: usize,
+
+    /// Total execution time in milliseconds
     pub duration_ms: u64,
+
+    /// Number of sub-queries that completed successfully
     pub sub_queries_succeeded: usize,
+
+    /// Number of sub-queries that failed
     pub sub_queries_failed: usize,
 }
 
@@ -259,6 +274,7 @@ mod tests {
     fn test_final_result() {
         let metadata = ResultMetadata {
             total_tokens: 100,
+            tokens_unavailable_count: 0,
             duration_ms: 5000,
             sub_queries_succeeded: 3,
             sub_queries_failed: 1,
@@ -270,6 +286,23 @@ mod tests {
         let result = update.as_final_result().unwrap();
         assert_eq!(result.answer, "Answer");
         assert_eq!(result.metadata.total_tokens, 100);
+        assert_eq!(result.metadata.tokens_unavailable_count, 0);
+    }
+
+    #[test]
+    fn test_final_result_with_incomplete_tokens() {
+        let metadata = ResultMetadata {
+            total_tokens: 50,
+            tokens_unavailable_count: 2,
+            duration_ms: 3000,
+            sub_queries_succeeded: 3,
+            sub_queries_failed: 2,
+        };
+        let update = AgentUpdate::final_result("Partial answer".to_string(), metadata);
+
+        let result = update.as_final_result().unwrap();
+        assert_eq!(result.metadata.tokens_unavailable_count, 2);
+        // total_tokens is a partial sum when tokens_unavailable_count > 0
     }
 
     #[test]

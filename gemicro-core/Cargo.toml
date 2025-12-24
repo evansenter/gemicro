@@ -3,6 +3,10 @@ name = "gemicro-core"
 version = "0.1.0"
 edition = "2021"
 
+[[example]]
+name = "deep_research"
+path = "examples/deep_research.rs"
+
 [dependencies]
 rust-genai = { workspace = true }
 tokio = { workspace = true }

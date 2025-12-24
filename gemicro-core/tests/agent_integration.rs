@@ -1,0 +1,209 @@
+//! Integration tests for DeepResearchAgent
+//!
+//! These tests require a valid GEMINI_API_KEY environment variable.
+//! They are skipped if the API key is not set.
+
+mod common;
+
+use common::{create_test_context, get_api_key};
+use futures_util::StreamExt;
+use gemicro_core::{
+    AgentError, DeepResearchAgent, ResearchConfig, EVENT_DECOMPOSITION_COMPLETE,
+    EVENT_DECOMPOSITION_STARTED, EVENT_FINAL_RESULT, EVENT_SUB_QUERY_COMPLETED,
+    EVENT_SUB_QUERY_FAILED, EVENT_SUB_QUERY_STARTED, EVENT_SYNTHESIS_STARTED,
+};
+use std::time::Duration;
+
+#[tokio::test]
+async fn test_deep_research_agent_full_flow() {
+    let Some(api_key) = get_api_key() else {
+        eprintln!("Skipping test: GEMINI_API_KEY not set");
+        return;
+    };
+
+    let context = create_test_context(&api_key);
+
+    // Use minimal config for faster testing
+    let config = ResearchConfig {
+        min_sub_queries: 2,
+        max_sub_queries: 3,
+        continue_on_partial_failure: true,
+        total_timeout: Duration::from_secs(120),
+    };
+
+    let agent = DeepResearchAgent::new(config).expect("Should create agent");
+
+    let stream = agent.execute("What are the main benefits of the Rust programming language?", context);
+    futures_util::pin_mut!(stream);
+
+    // Track event order
+    let mut events: Vec<String> = Vec::new();
+    let mut sub_query_count = 0;
+    let mut sub_query_results = 0;
+    let mut final_answer = String::new();
+
+    while let Some(result) = stream.next().await {
+        match result {
+            Ok(update) => {
+                println!("[{}] {}", update.event_type, update.message);
+                events.push(update.event_type.clone());
+
+                match update.event_type.as_str() {
+                    EVENT_DECOMPOSITION_COMPLETE => {
+                        if let Some(sub_queries) = update.as_decomposition_complete() {
+                            sub_query_count = sub_queries.len();
+                            println!("  Sub-queries: {:?}", sub_queries);
+                        }
+                    }
+                    EVENT_SUB_QUERY_COMPLETED => {
+                        sub_query_results += 1;
+                        if let Some(result) = update.as_sub_query_completed() {
+                            println!(
+                                "  Sub-query {} completed ({} tokens)",
+                                result.id, result.tokens_used
+                            );
+                        }
+                    }
+                    EVENT_SUB_QUERY_FAILED => {
+                        println!("  Sub-query failed: {:?}", update.data);
+                    }
+                    EVENT_FINAL_RESULT => {
+                        if let Some(result) = update.as_final_result() {
+                            final_answer = result.answer.clone();
+                            println!("\n=== Final Answer ===");
+                            println!("{}", result.answer);
+                            println!("\n=== Metadata ===");
+                            println!("  Total tokens: {}", result.metadata.total_tokens);
+                            println!(
+                                "  Tokens unavailable: {}",
+                                result.metadata.tokens_unavailable_count
+                            );
+                            println!("  Duration: {}ms", result.metadata.duration_ms);
+                            println!(
+                                "  Succeeded: {}, Failed: {}",
+                                result.metadata.sub_queries_succeeded,
+                                result.metadata.sub_queries_failed
+                            );
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Err(e) => {
+                panic!("Agent error: {:?}", e);
+            }
+        }
+    }
+
+    // Verify event order
+    assert!(
+        events.contains(&EVENT_DECOMPOSITION_STARTED.to_string()),
+        "Should have decomposition_started"
+    );
+    assert!(
+        events.contains(&EVENT_DECOMPOSITION_COMPLETE.to_string()),
+        "Should have decomposition_complete"
+    );
+    assert!(
+        events.contains(&EVENT_SYNTHESIS_STARTED.to_string()),
+        "Should have synthesis_started"
+    );
+    assert!(
+        events.contains(&EVENT_FINAL_RESULT.to_string()),
+        "Should have final_result"
+    );
+
+    // Verify decomposition happened
+    assert!(sub_query_count >= 2, "Should have at least 2 sub-queries");
+    assert!(sub_query_count <= 3, "Should have at most 3 sub-queries");
+
+    // Verify at least one sub-query succeeded
+    assert!(sub_query_results > 0, "At least one sub-query should succeed");
+
+    // Verify final answer is not empty
+    assert!(!final_answer.is_empty(), "Final answer should not be empty");
+    assert!(
+        final_answer.len() > 50,
+        "Final answer should be substantive"
+    );
+}
+
+#[tokio::test]
+async fn test_agent_event_ordering() {
+    let Some(api_key) = get_api_key() else {
+        eprintln!("Skipping test: GEMINI_API_KEY not set");
+        return;
+    };
+
+    let context = create_test_context(&api_key);
+
+    let config = ResearchConfig {
+        min_sub_queries: 2,
+        max_sub_queries: 2,
+        continue_on_partial_failure: true,
+        total_timeout: Duration::from_secs(120),
+    };
+
+    let agent = DeepResearchAgent::new(config).unwrap();
+    let stream = agent.execute("What is 2+2 and what is 3+3?", context);
+    futures_util::pin_mut!(stream);
+
+    let mut events: Vec<String> = Vec::new();
+    while let Some(result) = stream.next().await {
+        if let Ok(update) = result {
+            events.push(update.event_type.clone());
+        }
+    }
+
+    // Verify strict ordering of phases
+    let decomp_start = events
+        .iter()
+        .position(|e| e == EVENT_DECOMPOSITION_STARTED);
+    let decomp_complete = events
+        .iter()
+        .position(|e| e == EVENT_DECOMPOSITION_COMPLETE);
+    let synth_start = events.iter().position(|e| e == EVENT_SYNTHESIS_STARTED);
+    let final_result = events.iter().position(|e| e == EVENT_FINAL_RESULT);
+
+    assert!(decomp_start.is_some(), "Should have decomposition_started");
+    assert!(
+        decomp_complete.is_some(),
+        "Should have decomposition_complete"
+    );
+    assert!(synth_start.is_some(), "Should have synthesis_started");
+    assert!(final_result.is_some(), "Should have final_result");
+
+    // Verify order: decomp_start < decomp_complete < synth_start < final_result
+    let ds = decomp_start.unwrap();
+    let dc = decomp_complete.unwrap();
+    let ss = synth_start.unwrap();
+    let fr = final_result.unwrap();
+
+    assert!(ds < dc, "decomposition_started should come before decomposition_complete");
+    assert!(dc < ss, "decomposition_complete should come before synthesis_started");
+    assert!(ss < fr, "synthesis_started should come before final_result");
+
+    // Verify sub_query_started events come after decomposition_complete
+    let first_sub_query_started = events.iter().position(|e| e == EVENT_SUB_QUERY_STARTED);
+    if let Some(sq_start) = first_sub_query_started {
+        assert!(
+            sq_start > dc,
+            "sub_query_started should come after decomposition_complete"
+        );
+        assert!(
+            sq_start < ss,
+            "sub_query_started should come before synthesis_started"
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_agent_invalid_config() {
+    let mut config = ResearchConfig::default();
+    config.min_sub_queries = 10;
+    config.max_sub_queries = 5;
+
+    let result = DeepResearchAgent::new(config);
+    assert!(result.is_err());
+    assert!(matches!(result, Err(AgentError::InvalidConfig(_))));
+}

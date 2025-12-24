@@ -9,8 +9,8 @@ pub const MODEL: &str = "gemini-3-flash-preview";
 ///
 /// Contains only cross-agent configuration. Agent-specific configuration
 /// (like `ResearchConfig`) should be passed directly to agent constructors,
-/// not embedded here. This follows the Evergreen soft-typing philosophy:
-/// extensibility without protocol modifications.
+/// not embedded here. This follows the [Evergreen spec](https://github.com/google-deepmind/evergreen-spec)
+/// soft-typing philosophy: extensibility without protocol modifications.
 #[derive(Debug, Clone, Default)]
 pub struct GemicroConfig {
     /// Configuration for LLM client (shared across all agents)

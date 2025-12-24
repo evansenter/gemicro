@@ -8,28 +8,42 @@
 //! ## Architecture
 //!
 //! - **Streaming-first**: Agents return async streams of updates for real-time observability
-//! - **Soft-typed events**: `AgentUpdate` uses flexible JSON following Evergreen spec philosophy
+//! - **Soft-typed events**: `AgentUpdate` uses flexible JSON following [Evergreen spec](https://github.com/google-deepmind/evergreen-spec) philosophy
 //! - **Platform-agnostic**: Zero platform-specific dependencies for iOS compatibility
 //!
 //! ## Example
 //!
 //! ```no_run
-//! use gemicro_core::{AgentUpdate, GemicroConfig};
+//! use gemicro_core::{AgentContext, DeepResearchAgent, ResearchConfig, LlmClient, LlmConfig};
+//! use futures_util::StreamExt;
 //!
-//! // Create configuration
-//! let config = GemicroConfig::default();
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! // Create LLM client and context
+//! let genai_client = rust_genai::Client::builder("api-key".to_string()).build();
+//! let llm = LlmClient::new(genai_client, LlmConfig::default());
+//! let context = AgentContext::new(llm);
 //!
-//! // Work with agent updates
-//! let update = AgentUpdate::decomposition_started();
-//! println!("{}", update.message);
+//! // Create agent and execute
+//! let agent = DeepResearchAgent::new(ResearchConfig::default())?;
+//! let stream = agent.execute("What is quantum computing?", context);
+//! futures_util::pin_mut!(stream);
+//!
+//! while let Some(update) = stream.next().await {
+//!     let update = update?;
+//!     println!("[{}] {}", update.event_type, update.message);
+//! }
+//! # Ok(())
+//! # }
 //! ```
 
+pub mod agent;
 pub mod config;
 pub mod error;
 pub mod llm;
 pub mod update;
 
 // Re-export public API
+pub use agent::{AgentContext, DeepResearchAgent};
 pub use config::{GemicroConfig, LlmConfig, ResearchConfig, MODEL};
 pub use error::{AgentError, GemicroError, LlmError};
 pub use llm::{LlmClient, LlmRequest, LlmResponse, LlmStreamChunk};
