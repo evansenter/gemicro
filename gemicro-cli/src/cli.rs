@@ -57,7 +57,7 @@ pub struct Args {
     #[arg(short, long)]
     pub verbose: bool,
 
-    /// Disable markdown rendering (plain text output)
+    /// Use plain text output instead of markdown rendering
     #[arg(long)]
     pub plain: bool,
 }

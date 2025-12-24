@@ -91,7 +91,7 @@ pub fn print_final_result(info: &FinalResultInfo<'_>) {
     if info.plain {
         println!("{}", info.answer);
     } else {
-        print!("{}", render_markdown(info.answer));
+        println!("{}", render_markdown(info.answer));
     }
     println!();
     println!("══════════════════════════════════════════════════════════════");
