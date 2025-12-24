@@ -211,9 +211,11 @@ async fn test_agent_event_ordering() {
 
 #[tokio::test]
 async fn test_agent_invalid_config() {
-    let mut config = ResearchConfig::default();
-    config.min_sub_queries = 10;
-    config.max_sub_queries = 5;
+    let config = ResearchConfig {
+        min_sub_queries: 10,
+        max_sub_queries: 5,
+        ..Default::default()
+    };
 
     let result = DeepResearchAgent::new(config);
     assert!(result.is_err());

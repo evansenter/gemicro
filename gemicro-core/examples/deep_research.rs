@@ -32,7 +32,7 @@ fn truncate(s: &str, max_chars: usize) -> String {
 fn first_sentence(s: &str) -> String {
     let s = s.trim();
     // Try to find end of first sentence
-    if let Some(pos) = s.find(|c| c == '.' || c == '\n') {
+    if let Some(pos) = s.find(['.', '\n']) {
         let sentence = s[..=pos].trim();
         if sentence.len() > 10 {
             return truncate(sentence, 100);

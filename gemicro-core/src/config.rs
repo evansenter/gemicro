@@ -331,9 +331,11 @@ mod tests {
 
     #[test]
     fn test_custom_config() {
-        let mut config = ResearchConfig::default();
-        config.max_sub_queries = 10;
-        config.continue_on_partial_failure = false;
+        let config = ResearchConfig {
+            max_sub_queries: 10,
+            continue_on_partial_failure: false,
+            ..Default::default()
+        };
 
         assert_eq!(config.max_sub_queries, 10);
         assert!(!config.continue_on_partial_failure);
@@ -344,17 +346,21 @@ mod tests {
         let config = ResearchConfig::default();
         assert!(config.validate().is_ok());
 
-        let mut config = ResearchConfig::default();
-        config.min_sub_queries = 5;
-        config.max_sub_queries = 5;
+        let config = ResearchConfig {
+            min_sub_queries: 5,
+            max_sub_queries: 5,
+            ..Default::default()
+        };
         assert!(config.validate().is_ok());
     }
 
     #[test]
     fn test_research_config_validation_min_greater_than_max() {
-        let mut config = ResearchConfig::default();
-        config.min_sub_queries = 10;
-        config.max_sub_queries = 5;
+        let config = ResearchConfig {
+            min_sub_queries: 10,
+            max_sub_queries: 5,
+            ..Default::default()
+        };
 
         let result = config.validate();
         assert!(result.is_err());
@@ -363,8 +369,10 @@ mod tests {
 
     #[test]
     fn test_research_config_validation_zero_max() {
-        let mut config = ResearchConfig::default();
-        config.max_sub_queries = 0;
+        let config = ResearchConfig {
+            max_sub_queries: 0,
+            ..Default::default()
+        };
 
         let result = config.validate();
         assert!(result.is_err());
@@ -375,8 +383,10 @@ mod tests {
 
     #[test]
     fn test_research_config_validation_zero_min() {
-        let mut config = ResearchConfig::default();
-        config.min_sub_queries = 0;
+        let config = ResearchConfig {
+            min_sub_queries: 0,
+            ..Default::default()
+        };
 
         let result = config.validate();
         assert!(result.is_err());
@@ -387,8 +397,10 @@ mod tests {
 
     #[test]
     fn test_research_config_validation_zero_timeout() {
-        let mut config = ResearchConfig::default();
-        config.total_timeout = Duration::from_secs(0);
+        let config = ResearchConfig {
+            total_timeout: Duration::from_secs(0),
+            ..Default::default()
+        };
 
         let result = config.validate();
         assert!(result.is_err());
@@ -434,8 +446,10 @@ mod tests {
 
     #[test]
     fn test_research_prompts_validation_empty_decomposition_system() {
-        let mut prompts = ResearchPrompts::default();
-        prompts.decomposition_system = "".to_string();
+        let prompts = ResearchPrompts {
+            decomposition_system: "".to_string(),
+            ..Default::default()
+        };
         assert!(prompts.validate().is_err());
         assert!(prompts
             .validate()
@@ -445,16 +459,23 @@ mod tests {
 
     #[test]
     fn test_research_prompts_validation_whitespace_only() {
-        let mut prompts = ResearchPrompts::default();
-        prompts.sub_query_system = "   ".to_string();
+        let prompts = ResearchPrompts {
+            sub_query_system: "   ".to_string(),
+            ..Default::default()
+        };
         assert!(prompts.validate().is_err());
         assert!(prompts.validate().unwrap_err().contains("sub_query_system"));
     }
 
     #[test]
     fn test_research_config_validates_prompts() {
-        let mut config = ResearchConfig::default();
-        config.prompts.synthesis_system = "".to_string();
+        let config = ResearchConfig {
+            prompts: ResearchPrompts {
+                synthesis_system: "".to_string(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
 
         let result = config.validate();
         assert!(result.is_err());
@@ -463,8 +484,13 @@ mod tests {
 
     #[test]
     fn test_research_config_with_custom_prompts() {
-        let mut config = ResearchConfig::default();
-        config.prompts.decomposition_system = "Custom system instruction".to_string();
+        let config = ResearchConfig {
+            prompts: ResearchPrompts {
+                decomposition_system: "Custom system instruction".to_string(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
 
         assert!(config.validate().is_ok());
         assert_eq!(
