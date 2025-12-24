@@ -53,10 +53,13 @@ impl IndicatifRenderer {
                     .template("   {spinner:.cyan} [{prefix}] {msg}")
                     .expect("Invalid template"),
             );
-            pb.set_prefix(format!("{}", sq.id + 1));
+            let prefix = format!("{}", sq.id + 1);
+            log::debug!("Creating sub-query bar: id={}, prefix={}", sq.id, prefix);
+            pb.set_prefix(prefix);
             pb.set_message(truncate(&sq.query, MAX_QUERY_DISPLAY_CHARS));
             self.sub_query_bars.insert(sq.id, pb);
         }
+        log::debug!("Created {} sub-query bars", self.sub_query_bars.len());
     }
 }
 
@@ -169,11 +172,18 @@ impl Renderer for IndicatifRenderer {
                     .map(format_duration)
                     .unwrap_or_else(|| "?".to_string());
 
+                // Only show token count if available (non-zero)
+                let token_info = if *tokens > 0 {
+                    format!(" ({} tokens)", tokens)
+                } else {
+                    String::new()
+                };
+
                 pb.finish_with_message(format!(
-                    "✅ {} → \"{}\" ({} tokens)",
+                    "✅ {} → \"{}\"{}",
                     duration_str,
                     truncate(result_preview, MAX_PREVIEW_CHARS),
-                    tokens
+                    token_info
                 ));
             }
 
