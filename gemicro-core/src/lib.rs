@@ -44,7 +44,7 @@ pub mod update;
 
 // Re-export public API
 pub use agent::{AgentContext, DeepResearchAgent};
-pub use config::{GemicroConfig, LlmConfig, ResearchConfig, MODEL};
+pub use config::{GemicroConfig, LlmConfig, ResearchConfig, ResearchPrompts, MODEL};
 pub use error::{AgentError, GemicroError, LlmError};
 pub use llm::{LlmClient, LlmRequest, LlmResponse, LlmStreamChunk};
 pub use update::{

@@ -5,6 +5,115 @@ use std::time::Duration;
 /// Hardcoded to gemini-3-flash-preview as per project requirements.
 pub const MODEL: &str = "gemini-3-flash-preview";
 
+/// Prompts used by the Deep Research agent
+///
+/// Contains system instructions and user templates for the three phases:
+/// decomposition, sub-query execution, and synthesis.
+///
+/// # Template Placeholders
+///
+/// - `decomposition_template`: `{min}`, `{max}`, `{query}`
+/// - `synthesis_template`: `{query}`, `{findings}`
+///
+/// # Example
+///
+/// ```
+/// use gemicro_core::ResearchPrompts;
+///
+/// let mut prompts = ResearchPrompts::default();
+/// prompts.decomposition_system = "You are a medical research expert.".to_string();
+///
+/// let rendered = prompts.render_decomposition(3, 5, "What causes migraines?");
+/// assert!(rendered.contains("What causes migraines?"));
+/// ```
+#[derive(Debug, Clone)]
+pub struct ResearchPrompts {
+    /// System instruction for decomposition phase
+    pub decomposition_system: String,
+
+    /// User template for decomposition phase
+    ///
+    /// Placeholders: `{min}`, `{max}`, `{query}`
+    pub decomposition_template: String,
+
+    /// System instruction for sub-query execution phase
+    pub sub_query_system: String,
+
+    /// System instruction for synthesis phase
+    pub synthesis_system: String,
+
+    /// User template for synthesis phase
+    ///
+    /// Placeholders: `{query}`, `{findings}`
+    pub synthesis_template: String,
+}
+
+impl ResearchPrompts {
+    /// Render the decomposition prompt with placeholders substituted
+    pub fn render_decomposition(&self, min: usize, max: usize, query: &str) -> String {
+        self.decomposition_template
+            .replace("{min}", &min.to_string())
+            .replace("{max}", &max.to_string())
+            .replace("{query}", query)
+    }
+
+    /// Render the synthesis prompt with placeholders substituted
+    pub fn render_synthesis(&self, query: &str, findings: &str) -> String {
+        self.synthesis_template
+            .replace("{query}", query)
+            .replace("{findings}", findings)
+    }
+
+    /// Validate that all prompts are non-empty
+    pub fn validate(&self) -> Result<(), String> {
+        let fields = [
+            ("decomposition_system", &self.decomposition_system),
+            ("decomposition_template", &self.decomposition_template),
+            ("sub_query_system", &self.sub_query_system),
+            ("synthesis_system", &self.synthesis_system),
+            ("synthesis_template", &self.synthesis_template),
+        ];
+
+        for (name, value) in fields {
+            if value.trim().is_empty() {
+                return Err(format!("{} cannot be empty", name));
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Default for ResearchPrompts {
+    fn default() -> Self {
+        Self {
+            decomposition_system:
+                "You are a research query decomposition expert. Return only valid JSON arrays of strings."
+                    .to_string(),
+            decomposition_template: r#"Decompose this research query into {min}-{max} focused, independent sub-questions.
+
+Query: {query}
+
+Return ONLY a JSON array of strings, no other text. Example:
+["What is X?", "How does Y work?", "What are the benefits of Z?"]"#
+                .to_string(),
+            sub_query_system:
+                "You are a research assistant. Provide a focused, informative answer.".to_string(),
+            synthesis_system:
+                "You are a research synthesis expert. Provide comprehensive, coherent answers."
+                    .to_string(),
+            synthesis_template: r#"Synthesize these research findings into a comprehensive answer.
+
+Original question: {query}
+
+Research findings:
+{findings}
+
+Provide a clear, well-organized answer that integrates all findings. Do not mention the research process or sub-questions."#
+                .to_string(),
+        }
+    }
+}
+
 /// Top-level configuration for gemicro
 ///
 /// Contains only cross-agent configuration. Agent-specific configuration
@@ -42,6 +151,11 @@ pub struct ResearchConfig {
     ///
     /// Default: 60 seconds
     pub total_timeout: Duration,
+
+    /// Prompts for the research agent
+    ///
+    /// Default: Built-in prompts optimized for Gemini
+    pub prompts: ResearchPrompts,
 }
 
 impl ResearchConfig {
@@ -52,6 +166,7 @@ impl ResearchConfig {
     /// - `max_sub_queries` is 0
     /// - `min_sub_queries > max_sub_queries`
     /// - `total_timeout` is 0
+    /// - Any prompt is empty
     pub fn validate(&self) -> Result<(), String> {
         if self.min_sub_queries == 0 {
             return Err("min_sub_queries must be greater than 0".to_string());
@@ -72,6 +187,8 @@ impl ResearchConfig {
             return Err("total_timeout must be greater than 0".to_string());
         }
 
+        self.prompts.validate()?;
+
         Ok(())
     }
 }
@@ -83,6 +200,7 @@ impl Default for ResearchConfig {
             min_sub_queries: 3,
             continue_on_partial_failure: true,
             total_timeout: Duration::from_secs(60),
+            prompts: ResearchPrompts::default(),
         }
     }
 }
@@ -267,5 +385,94 @@ mod tests {
         let result = config.validate();
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("must be greater than 0"));
+    }
+
+    // ResearchPrompts tests
+
+    #[test]
+    fn test_research_prompts_default() {
+        let prompts = ResearchPrompts::default();
+        assert!(prompts.validate().is_ok());
+        assert!(prompts.decomposition_system.contains("decomposition"));
+        assert!(prompts.decomposition_template.contains("{min}"));
+        assert!(prompts.decomposition_template.contains("{max}"));
+        assert!(prompts.decomposition_template.contains("{query}"));
+        assert!(prompts.synthesis_template.contains("{query}"));
+        assert!(prompts.synthesis_template.contains("{findings}"));
+    }
+
+    #[test]
+    fn test_research_prompts_render_decomposition() {
+        let prompts = ResearchPrompts::default();
+        let rendered = prompts.render_decomposition(3, 5, "What is Rust?");
+
+        assert!(rendered.contains("3-5"));
+        assert!(rendered.contains("What is Rust?"));
+        assert!(!rendered.contains("{min}"));
+        assert!(!rendered.contains("{max}"));
+        assert!(!rendered.contains("{query}"));
+    }
+
+    #[test]
+    fn test_research_prompts_render_synthesis() {
+        let prompts = ResearchPrompts::default();
+        let rendered = prompts.render_synthesis("Original question", "Finding 1\nFinding 2");
+
+        assert!(rendered.contains("Original question"));
+        assert!(rendered.contains("Finding 1\nFinding 2"));
+        assert!(!rendered.contains("{query}"));
+        assert!(!rendered.contains("{findings}"));
+    }
+
+    #[test]
+    fn test_research_prompts_validation_empty_decomposition_system() {
+        let mut prompts = ResearchPrompts::default();
+        prompts.decomposition_system = "".to_string();
+        assert!(prompts.validate().is_err());
+        assert!(prompts
+            .validate()
+            .unwrap_err()
+            .contains("decomposition_system"));
+    }
+
+    #[test]
+    fn test_research_prompts_validation_whitespace_only() {
+        let mut prompts = ResearchPrompts::default();
+        prompts.sub_query_system = "   ".to_string();
+        assert!(prompts.validate().is_err());
+        assert!(prompts.validate().unwrap_err().contains("sub_query_system"));
+    }
+
+    #[test]
+    fn test_research_config_validates_prompts() {
+        let mut config = ResearchConfig::default();
+        config.prompts.synthesis_system = "".to_string();
+
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("synthesis_system"));
+    }
+
+    #[test]
+    fn test_research_config_with_custom_prompts() {
+        let mut config = ResearchConfig::default();
+        config.prompts.decomposition_system = "Custom system instruction".to_string();
+
+        assert!(config.validate().is_ok());
+        assert_eq!(
+            config.prompts.decomposition_system,
+            "Custom system instruction"
+        );
+    }
+
+    #[test]
+    fn test_default_research_config_includes_prompts() {
+        let config = ResearchConfig::default();
+        assert!(config.validate().is_ok());
+        assert!(!config.prompts.decomposition_system.is_empty());
+        assert!(!config.prompts.decomposition_template.is_empty());
+        assert!(!config.prompts.sub_query_system.is_empty());
+        assert!(!config.prompts.synthesis_system.is_empty());
+        assert!(!config.prompts.synthesis_template.is_empty());
     }
 }
