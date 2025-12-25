@@ -261,7 +261,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_runner_default() {
-        let runner = AgentRunner::default();
+        let runner = AgentRunner;
         assert!(std::mem::size_of_val(&runner) == 0); // Zero-size struct
     }
 }
