@@ -33,7 +33,7 @@ pub enum DatasetError {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```text
 /// struct MyDataset {
 ///     path: PathBuf,
 /// }
