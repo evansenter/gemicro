@@ -1,9 +1,9 @@
 //! Indicatif-based renderer for CLI progress display.
 
 use super::renderer::Renderer;
-use super::state::{DisplayState, Phase, SubQueryStatus};
 use crate::format::{format_duration, print_final_result, truncate, FinalResultInfo};
 use anyhow::Result;
+use gemicro_runner::{ExecutionState, Phase, SubQueryStatus};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::collections::HashMap;
 use std::time::Duration;
@@ -60,7 +60,7 @@ impl IndicatifRenderer {
     }
 
     /// Create progress bars for all sub-queries when entering execution phase.
-    fn create_sub_query_bars(&mut self, state: &DisplayState) {
+    fn create_sub_query_bars(&mut self, state: &ExecutionState) {
         for sq in state.sub_queries() {
             let pb = self.multi.add(ProgressBar::new_spinner());
             pb.set_style(
@@ -85,7 +85,7 @@ impl Default for IndicatifRenderer {
 }
 
 impl Renderer for IndicatifRenderer {
-    fn on_phase_change(&mut self, state: &DisplayState) -> Result<()> {
+    fn on_phase_change(&mut self, state: &ExecutionState) -> Result<()> {
         match state.phase() {
             Phase::NotStarted => {
                 // Nothing to do
@@ -153,12 +153,17 @@ impl Renderer for IndicatifRenderer {
             Phase::Complete => {
                 self.phase_bar.finish_with_message("✓ Synthesis complete");
             }
+
+            // Handle future phase variants gracefully
+            _ => {
+                log::warn!("Unknown phase encountered: {:?}", state.phase());
+            }
         }
 
         Ok(())
     }
 
-    fn on_sub_query_update(&mut self, state: &DisplayState, id: usize) -> Result<()> {
+    fn on_sub_query_update(&mut self, state: &ExecutionState, id: usize) -> Result<()> {
         let sq = match state.sub_query(id) {
             Some(sq) => sq,
             None => return Ok(()),
@@ -223,12 +228,17 @@ impl Renderer for IndicatifRenderer {
                 });
                 pb.finish_and_clear();
             }
+
+            // Handle future status variants gracefully
+            _ => {
+                log::warn!("Unknown sub-query status encountered for id {}", id);
+            }
         }
 
         Ok(())
     }
 
-    fn on_final_result(&mut self, state: &DisplayState) -> Result<()> {
+    fn on_final_result(&mut self, state: &ExecutionState) -> Result<()> {
         if let Some(result) = state.final_result() {
             print_final_result(&FinalResultInfo {
                 answer: &result.answer,
@@ -245,7 +255,7 @@ impl Renderer for IndicatifRenderer {
         Ok(())
     }
 
-    fn on_interrupted(&mut self, state: &DisplayState) -> Result<()> {
+    fn on_interrupted(&mut self, state: &ExecutionState) -> Result<()> {
         // Finish all progress bars
         self.phase_bar
             .finish_with_message("⚠️  Research interrupted by user");

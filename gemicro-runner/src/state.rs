@@ -1,18 +1,20 @@
-//! Terminal-agnostic state tracking for research progress.
+//! Terminal-agnostic state tracking for agent execution.
 //!
 //! This module contains pure state with no terminal dependencies,
 //! making it easy to test and enabling renderer swappability.
 
-use crate::format::first_sentence;
+use crate::utils::first_sentence;
 use gemicro_core::{
     AgentUpdate, EVENT_DECOMPOSITION_COMPLETE, EVENT_DECOMPOSITION_STARTED, EVENT_FINAL_RESULT,
     EVENT_SUB_QUERY_COMPLETED, EVENT_SUB_QUERY_FAILED, EVENT_SUB_QUERY_STARTED,
     EVENT_SYNTHESIS_STARTED,
 };
+use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 
-/// Current execution phase of the research agent.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Current execution phase of the agent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum Phase {
     /// Initial state before any events
     NotStarted,
@@ -22,12 +24,13 @@ pub enum Phase {
     Executing,
     /// Results are being synthesized
     Synthesizing,
-    /// Research is complete
+    /// Execution is complete
     Complete,
 }
 
 /// Status of an individual sub-query.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum SubQueryStatus {
     /// Waiting to start
     Pending,
@@ -40,40 +43,43 @@ pub enum SubQueryStatus {
 }
 
 /// State of an individual sub-query.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubQueryState {
     pub id: usize,
     pub query: String,
     pub status: SubQueryStatus,
+    /// Start time is not serializable, so we skip it.
+    #[serde(skip)]
     pub start_time: Option<Instant>,
     pub duration: Option<Duration>,
 }
 
 /// Data from the final result event.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FinalResultData {
     pub answer: String,
     pub total_tokens: u32,
     pub tokens_unavailable_count: usize,
     // Note: duration_ms from metadata is not stored here.
-    // Use DisplayState::elapsed() for wall-clock timing instead.
+    // Use ExecutionState::elapsed() for wall-clock timing instead.
     pub sub_queries_succeeded: usize,
     pub sub_queries_failed: usize,
 }
 
-/// Terminal-agnostic state machine for research progress.
+/// Terminal-agnostic state machine for agent execution.
 ///
 /// Tracks the current phase, sub-query statuses, timing information,
 /// and final results. Updated via `update()` from `AgentUpdate` events.
-pub struct DisplayState {
+#[derive(Clone)]
+pub struct ExecutionState {
     phase: Phase,
     sub_queries: Vec<SubQueryState>,
     start_time: Instant,
     final_result: Option<FinalResultData>,
 }
 
-impl DisplayState {
-    /// Create a new DisplayState.
+impl ExecutionState {
+    /// Create a new ExecutionState.
     pub fn new() -> Self {
         Self {
             phase: Phase::NotStarted,
@@ -122,8 +128,8 @@ impl DisplayState {
                     if let Some(sq) = self.sub_queries.get_mut(id) {
                         sq.status = SubQueryStatus::InProgress;
                         sq.start_time = Some(Instant::now());
+                        return Some(id);
                     }
-                    return Some(id);
                 }
                 None
             }
@@ -191,7 +197,7 @@ impl DisplayState {
             }
 
             _ => {
-                log::debug!("Unknown event type in DisplayState: {}", event.event_type);
+                log::debug!("Unknown event type in ExecutionState: {}", event.event_type);
                 None
             }
         }
@@ -237,7 +243,7 @@ impl DisplayState {
     }
 }
 
-impl Default for DisplayState {
+impl Default for ExecutionState {
     fn default() -> Self {
         Self::new()
     }
@@ -251,7 +257,7 @@ mod tests {
 
     #[test]
     fn test_initial_state() {
-        let state = DisplayState::new();
+        let state = ExecutionState::new();
         assert_eq!(state.phase(), Phase::NotStarted);
         assert!(state.sub_queries().is_empty());
         assert!(state.final_result().is_none());
@@ -259,7 +265,7 @@ mod tests {
 
     #[test]
     fn test_decomposition_started() {
-        let mut state = DisplayState::new();
+        let mut state = ExecutionState::new();
         let event = AgentUpdate::decomposition_started();
 
         state.update(&event);
@@ -269,7 +275,7 @@ mod tests {
 
     #[test]
     fn test_decomposition_complete() {
-        let mut state = DisplayState::new();
+        let mut state = ExecutionState::new();
         let event = AgentUpdate::decomposition_complete(vec![
             "Query 1".to_string(),
             "Query 2".to_string(),
@@ -288,7 +294,7 @@ mod tests {
 
     #[test]
     fn test_sub_query_started() {
-        let mut state = DisplayState::new();
+        let mut state = ExecutionState::new();
         state.update(&AgentUpdate::decomposition_complete(vec!["Q1".to_string()]));
 
         let event = AgentUpdate::sub_query_started(0, "Q1".to_string());
@@ -302,7 +308,7 @@ mod tests {
 
     #[test]
     fn test_sub_query_completed() {
-        let mut state = DisplayState::new();
+        let mut state = ExecutionState::new();
         state.update(&AgentUpdate::decomposition_complete(vec!["Q1".to_string()]));
         state.update(&AgentUpdate::sub_query_started(0, "Q1".to_string()));
 
@@ -326,7 +332,7 @@ mod tests {
 
     #[test]
     fn test_sub_query_failed() {
-        let mut state = DisplayState::new();
+        let mut state = ExecutionState::new();
         state.update(&AgentUpdate::decomposition_complete(vec!["Q1".to_string()]));
         state.update(&AgentUpdate::sub_query_started(0, "Q1".to_string()));
 
@@ -345,7 +351,7 @@ mod tests {
 
     #[test]
     fn test_synthesis_started() {
-        let mut state = DisplayState::new();
+        let mut state = ExecutionState::new();
         state.update(&AgentUpdate::decomposition_complete(vec!["Q1".to_string()]));
 
         let event = AgentUpdate::synthesis_started();
@@ -356,7 +362,7 @@ mod tests {
 
     #[test]
     fn test_final_result() {
-        let mut state = DisplayState::new();
+        let mut state = ExecutionState::new();
 
         let metadata = gemicro_core::ResultMetadata {
             total_tokens: 100,
@@ -377,7 +383,7 @@ mod tests {
 
     #[test]
     fn test_unknown_event_ignored() {
-        let mut state = DisplayState::new();
+        let mut state = ExecutionState::new();
         let event = AgentUpdate {
             event_type: "unknown_event".to_string(),
             message: "Unknown".to_string(),
@@ -393,13 +399,13 @@ mod tests {
 
     #[test]
     fn test_sequential_time_no_queries() {
-        let state = DisplayState::new();
+        let state = ExecutionState::new();
         assert!(state.sequential_time().is_none());
     }
 
     #[test]
     fn test_sequential_time_with_completed_queries() {
-        let mut state = DisplayState::new();
+        let mut state = ExecutionState::new();
 
         // Set up sub-queries with durations
         state.update(&AgentUpdate::decomposition_complete(vec![
@@ -418,7 +424,7 @@ mod tests {
 
     #[test]
     fn test_sequential_time_partial_completion() {
-        let mut state = DisplayState::new();
+        let mut state = ExecutionState::new();
 
         state.update(&AgentUpdate::decomposition_complete(vec![
             "Q1".to_string(),
@@ -433,5 +439,22 @@ mod tests {
         let seq_time = state.sequential_time();
         assert!(seq_time.is_some());
         assert_eq!(seq_time.unwrap(), Duration::from_secs(6));
+    }
+
+    #[test]
+    fn test_out_of_bounds_sub_query_returns_none() {
+        let mut state = ExecutionState::new();
+        state.update(&AgentUpdate::decomposition_complete(vec!["Q1".to_string()]));
+
+        // Try to start a sub-query that doesn't exist (id=99)
+        let event = AgentUpdate::sub_query_started(99, "Invalid".to_string());
+        let result = state.update(&event);
+
+        // Should return None since id 99 doesn't exist
+        assert!(result.is_none());
+
+        // Original sub-query should still be pending
+        let sq = state.sub_query(0).unwrap();
+        assert_eq!(sq.status, SubQueryStatus::Pending);
     }
 }
