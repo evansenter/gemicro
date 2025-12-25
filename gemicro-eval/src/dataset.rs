@@ -5,6 +5,7 @@
 use crate::results::EvalQuestion;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
+use tokio::fs;
 
 /// Errors that can occur when loading datasets.
 #[derive(Debug, Error)]
@@ -163,7 +164,7 @@ impl HotpotQA {
         }
 
         // Create cache directory
-        std::fs::create_dir_all(&self.cache_dir).map_err(|e| {
+        fs::create_dir_all(&self.cache_dir).await.map_err(|e| {
             DatasetError::CacheDir(format!("Failed to create {:?}: {}", self.cache_dir, e))
         })?;
 
@@ -186,7 +187,7 @@ impl HotpotQA {
             .await
             .map_err(|e| DatasetError::Download(e.to_string()))?;
 
-        std::fs::write(&cache_path, &bytes)?;
+        fs::write(&cache_path, &bytes).await?;
         log::info!("Cached HotpotQA to {:?}", cache_path);
 
         Ok(cache_path)
@@ -201,7 +202,7 @@ impl Dataset for HotpotQA {
     async fn load(&self, sample_size: Option<usize>) -> Result<Vec<EvalQuestion>, DatasetError> {
         let path = self.ensure_downloaded().await?;
 
-        let content = std::fs::read_to_string(&path)?;
+        let content = fs::read_to_string(&path).await?;
         let data: Vec<HotpotQAEntry> =
             serde_json::from_str(&content).map_err(|e| DatasetError::Parse(e.to_string()))?;
 
@@ -274,7 +275,7 @@ impl Dataset for JsonFileDataset {
     }
 
     async fn load(&self, sample_size: Option<usize>) -> Result<Vec<EvalQuestion>, DatasetError> {
-        let content = std::fs::read_to_string(&self.path)?;
+        let content = fs::read_to_string(&self.path).await?;
         let data: Vec<JsonEntry> =
             serde_json::from_str(&content).map_err(|e| DatasetError::Parse(e.to_string()))?;
 

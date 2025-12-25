@@ -96,6 +96,6 @@ pub mod scorer;
 
 // Re-export public API
 pub use dataset::{Dataset, DatasetError, HotpotQA, JsonFileDataset};
-pub use harness::{EvalConfig, EvalError, EvalHarness};
+pub use harness::{EvalConfig, EvalError, EvalHarness, EvalProgress};
 pub use results::{EvalQuestion, EvalResult, EvalSummary};
 pub use scorer::{Contains, ExactMatch, F1Score, Scorer, Scorers};
