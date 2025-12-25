@@ -36,6 +36,7 @@ use gemicro_core::{Agent, AgentContext, AgentError};
 /// # Ok(())
 /// # }
 /// ```
+#[derive(Debug, Clone, Copy)]
 pub struct AgentRunner;
 
 impl AgentRunner {

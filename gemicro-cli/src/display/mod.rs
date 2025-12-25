@@ -12,6 +12,5 @@ pub use indicatif::IndicatifRenderer;
 pub use renderer::Renderer;
 
 // Re-export execution state types from gemicro-runner
-// DisplayState is an alias for backwards compatibility
-pub use gemicro_runner::ExecutionState as DisplayState;
+pub use gemicro_runner::ExecutionState;
 pub use gemicro_runner::Phase;

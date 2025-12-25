@@ -4,7 +4,7 @@
 
 use super::commands::Command;
 use super::registry::AgentRegistry;
-use crate::display::{DisplayState, IndicatifRenderer, Phase, Renderer};
+use crate::display::{ExecutionState, IndicatifRenderer, Phase, Renderer};
 use crate::format::truncate;
 use anyhow::{Context, Result};
 use futures_util::StreamExt;
@@ -116,7 +116,7 @@ impl Session {
         };
 
         // Initialize state and renderer
-        let mut state = DisplayState::new();
+        let mut state = ExecutionState::new();
         let mut renderer = IndicatifRenderer::new(self.plain);
         let mut events = Vec::new();
 

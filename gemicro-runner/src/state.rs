@@ -99,6 +99,17 @@ impl ExecutionState {
     /// Update state from an AgentUpdate event.
     ///
     /// Returns the ID of the sub-query that was updated, if any.
+    ///
+    /// # Error Handling
+    ///
+    /// This method follows the Evergreen philosophy of graceful degradation:
+    /// - **Unknown event types** are logged at debug level and ignored
+    /// - **Malformed event data** is logged at warn level and ignored
+    ///
+    /// The state machine continues processing subsequent events even if some
+    /// events are malformed. This ensures robustness against protocol evolution
+    /// and partial failures, but callers should monitor logs if strict validation
+    /// is required.
     pub fn update(&mut self, event: &AgentUpdate) -> Option<usize> {
         match event.event_type.as_str() {
             EVENT_DECOMPOSITION_STARTED => {
