@@ -1025,4 +1025,173 @@ mod tests {
         assert!(remaining > Duration::from_millis(300));
         assert!(remaining < Duration::from_millis(450));
     }
+
+    // truncate_for_error edge case tests
+
+    #[test]
+    fn test_truncate_for_error_empty_string() {
+        let result = truncate_for_error("", 10);
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn test_truncate_for_error_zero_max_chars() {
+        let result = truncate_for_error("hello", 0);
+        assert_eq!(result, "... (5 chars total)");
+    }
+
+    #[test]
+    fn test_truncate_for_error_exact_boundary() {
+        let result = truncate_for_error("hello", 5);
+        assert_eq!(result, "hello"); // No truncation at exact boundary
+    }
+
+    #[test]
+    fn test_truncate_for_error_one_over_boundary() {
+        let result = truncate_for_error("hello!", 5);
+        assert_eq!(result, "hello... (6 chars total)");
+    }
+
+    #[test]
+    fn test_truncate_for_error_unicode_emoji() {
+        // Emoji are single characters for counting purposes
+        let text = "🎉🎊🎁🎂🎈";
+        assert_eq!(text.chars().count(), 5);
+
+        let result = truncate_for_error(text, 3);
+        assert_eq!(result, "🎉🎊🎁... (5 chars total)");
+    }
+
+    #[test]
+    fn test_truncate_for_error_unicode_cjk() {
+        let text = "你好世界";
+        assert_eq!(text.chars().count(), 4);
+
+        let result = truncate_for_error(text, 2);
+        assert_eq!(result, "你好... (4 chars total)");
+    }
+
+    #[test]
+    fn test_truncate_for_error_mixed_unicode() {
+        let text = "Hello 你好 🎉";
+        // 'H','e','l','l','o',' ','你','好',' ','🎉' = 10 chars
+        assert_eq!(text.chars().count(), 10);
+
+        let result = truncate_for_error(text, 8);
+        assert_eq!(result, "Hello 你好... (10 chars total)");
+    }
+
+    // parse_json_array edge case tests
+
+    #[test]
+    fn test_parse_json_array_nested_arrays() {
+        // Nested arrays should fail (we expect Vec<String>, not Vec<Vec<...>>)
+        let input = r#"[["nested"]]"#;
+        let result = parse_json_array(input);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_json_array_mixed_types() {
+        // Mixed strings and numbers should fail
+        let input = r#"["question", 42, "another"]"#;
+        let result = parse_json_array(input);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_json_array_null_values() {
+        // Null values in array should fail
+        let input = r#"["question", null, "another"]"#;
+        let result = parse_json_array(input);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_json_array_large_array() {
+        // Large array should work
+        let items: Vec<String> = (0..100).map(|i| format!("Question {}?", i)).collect();
+        let input = serde_json::to_string(&items).unwrap();
+        let result = parse_json_array(&input).unwrap();
+        assert_eq!(result.len(), 100);
+        assert_eq!(result[0], "Question 0?");
+        assert_eq!(result[99], "Question 99?");
+    }
+
+    #[test]
+    fn test_parse_json_array_unicode_content() {
+        let input = r#"["你好吗?", "こんにちは?", "🤔 What?"]"#;
+        let result = parse_json_array(input).unwrap();
+        assert_eq!(result, vec!["你好吗?", "こんにちは?", "🤔 What?"]);
+    }
+
+    #[test]
+    fn test_parse_json_array_escaped_quotes() {
+        let input = r#"["Question with \"quotes\"?", "Normal question?"]"#;
+        let result = parse_json_array(input).unwrap();
+        assert_eq!(
+            result,
+            vec!["Question with \"quotes\"?", "Normal question?"]
+        );
+    }
+
+    #[test]
+    fn test_parse_json_array_error_message_contains_response() {
+        let input = "invalid json here";
+        let result = parse_json_array(input);
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err();
+        assert!(
+            error_msg.contains("invalid json here"),
+            "Error should contain the invalid response text"
+        );
+    }
+
+    // Error display tests
+
+    #[test]
+    fn test_agent_error_decomposition_failed_display() {
+        let error = AgentError::DecompositionFailed("LLM returned garbage".to_string());
+        let display = error.to_string();
+        assert!(display.contains("decompose"));
+        assert!(display.contains("LLM returned garbage"));
+    }
+
+    #[test]
+    fn test_agent_error_parse_failed_display() {
+        let error = AgentError::ParseFailed("invalid JSON".to_string());
+        let display = error.to_string();
+        assert!(display.contains("parse"));
+        assert!(display.contains("invalid JSON"));
+    }
+
+    #[test]
+    fn test_agent_error_synthesis_failed_display() {
+        let error = AgentError::SynthesisFailed("empty response".to_string());
+        let display = error.to_string();
+        assert!(display.contains("synthesize"));
+        assert!(display.contains("empty response"));
+    }
+
+    #[test]
+    fn test_agent_error_all_sub_queries_failed_display() {
+        let error = AgentError::AllSubQueriesFailed;
+        let display = error.to_string();
+        assert!(display.contains("sub-queries failed"));
+    }
+
+    #[test]
+    fn test_agent_error_cancelled_display() {
+        let error = AgentError::Cancelled;
+        let display = error.to_string();
+        assert!(display.contains("cancelled"));
+    }
+
+    #[test]
+    fn test_agent_error_invalid_config_display() {
+        let error = AgentError::InvalidConfig("min > max".to_string());
+        let display = error.to_string();
+        assert!(display.contains("configuration"));
+        assert!(display.contains("min > max"));
+    }
 }

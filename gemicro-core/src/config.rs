@@ -76,7 +76,12 @@ impl ResearchPrompts {
             .replace("{query}", query)
     }
 
-    /// Validate that all prompts are non-empty
+    /// Validate that all prompts are non-empty and contain required placeholders
+    ///
+    /// Returns an error if:
+    /// - Any prompt string is empty or whitespace-only
+    /// - `decomposition_template` is missing `{min}`, `{max}`, or `{query}`
+    /// - `synthesis_template` is missing `{query}` or `{findings}`
     pub fn validate(&self) -> Result<(), AgentError> {
         if self.decomposition_system.trim().is_empty() {
             return Err(AgentError::InvalidConfig(
@@ -103,6 +108,26 @@ impl ResearchPrompts {
                 "synthesis_template cannot be empty".to_string(),
             ));
         }
+
+        // Validate required placeholders in decomposition_template
+        if !self.decomposition_template.contains("{min}")
+            || !self.decomposition_template.contains("{max}")
+            || !self.decomposition_template.contains("{query}")
+        {
+            return Err(AgentError::InvalidConfig(
+                "decomposition_template must contain {min}, {max}, and {query}".to_string(),
+            ));
+        }
+
+        // Validate required placeholders in synthesis_template
+        if !self.synthesis_template.contains("{query}")
+            || !self.synthesis_template.contains("{findings}")
+        {
+            return Err(AgentError::InvalidConfig(
+                "synthesis_template must contain {query} and {findings}".to_string(),
+            ));
+        }
+
         Ok(())
     }
 }
@@ -601,5 +626,76 @@ mod tests {
         assert!(rendered.contains("Research says: What is Rust? is important"));
         // Original query is also in its proper location
         assert!(rendered.contains("Original question: What is Rust?"));
+    }
+
+    // Placeholder validation tests
+
+    #[test]
+    fn test_research_prompts_validation_missing_min_placeholder() {
+        let prompts = ResearchPrompts {
+            decomposition_template: "Query: {query}, max: {max}".to_string(),
+            ..Default::default()
+        };
+        let result = prompts.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("{min}"));
+    }
+
+    #[test]
+    fn test_research_prompts_validation_missing_max_placeholder() {
+        let prompts = ResearchPrompts {
+            decomposition_template: "Query: {query}, min: {min}".to_string(),
+            ..Default::default()
+        };
+        let result = prompts.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("{max}"));
+    }
+
+    #[test]
+    fn test_research_prompts_validation_missing_query_in_decomposition() {
+        let prompts = ResearchPrompts {
+            decomposition_template: "Generate {min}-{max} sub-queries".to_string(),
+            ..Default::default()
+        };
+        let result = prompts.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("{query}"));
+    }
+
+    #[test]
+    fn test_research_prompts_validation_missing_query_in_synthesis() {
+        let prompts = ResearchPrompts {
+            synthesis_template: "Findings: {findings}".to_string(),
+            ..Default::default()
+        };
+        let result = prompts.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("{query}"));
+    }
+
+    #[test]
+    fn test_research_prompts_validation_missing_findings_placeholder() {
+        let prompts = ResearchPrompts {
+            synthesis_template: "Query: {query}".to_string(),
+            ..Default::default()
+        };
+        let result = prompts.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("{findings}"));
+    }
+
+    #[test]
+    fn test_research_prompts_placeholder_case_sensitive() {
+        // Uppercase placeholders should NOT be recognized
+        let prompts = ResearchPrompts {
+            decomposition_template: "{MIN}-{MAX} sub-queries for {QUERY}".to_string(),
+            ..Default::default()
+        };
+        let result = prompts.validate();
+        assert!(
+            result.is_err(),
+            "Uppercase placeholders should not be recognized"
+        );
     }
 }
