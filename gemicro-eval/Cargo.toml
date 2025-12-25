@@ -1,18 +1,24 @@
 [package]
-name = "gemicro-runner"
+name = "gemicro-eval"
 version = "0.1.0"
 edition = "2021"
-description = "Headless execution runtime for gemicro agents"
+description = "Evaluation framework for benchmarking gemicro agents against datasets"
 
 [dependencies]
 gemicro-core = { path = "../gemicro-core" }
+gemicro-runner = { path = "../gemicro-runner" }
 tokio = { workspace = true }
 futures-util = { workspace = true }
-async-stream = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+thiserror = { workspace = true }
 log = { workspace = true }
+reqwest = { version = "0.12", features = ["json"] }
+dirs = "6.0"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros"] }
 rust-genai = { workspace = true }
+tempfile = "3.20"
+async-stream = { workspace = true }
+futures-util = { workspace = true }
