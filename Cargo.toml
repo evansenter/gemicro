@@ -1,5 +1,5 @@
 [workspace]
-members = ["gemicro-core", "gemicro-cli"]
+members = ["gemicro-core", "gemicro-runner", "gemicro-cli"]
 resolver = "2"
 
 [workspace.dependencies]

@@ -1,0 +1,18 @@
+[package]
+name = "gemicro-runner"
+version = "0.1.0"
+edition = "2021"
+description = "Headless execution runtime for gemicro agents"
+
+[dependencies]
+gemicro-core = { path = "../gemicro-core" }
+tokio = { workspace = true }
+futures-util = { workspace = true }
+async-stream = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+log = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "macros"] }
+rust-genai = { workspace = true }
