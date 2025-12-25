@@ -21,6 +21,16 @@ mod placeholders {
 /// templates gracefully (unclosed braces are ignored, nested braces
 /// restart the search from the inner brace with a warning logged).
 ///
+/// # Examples
+///
+/// ```text
+/// extract_placeholders("Hello {name}!") → ["{name}"]
+/// extract_placeholders("{a} and {b}") → ["{a}", "{b}"]
+/// extract_placeholders("{unclosed") → [] (unclosed brace ignored)
+/// extract_placeholders("{{inner}}") → ["{inner}"] (outer brace ignored, warning logged)
+/// extract_placeholders("{out{inner}}") → ["{inner}"] (restarts from inner brace)
+/// ```
+///
 /// # Note
 ///
 /// This function does not support brace escaping. If you need literal braces
@@ -68,22 +78,25 @@ fn extract_placeholders(template: &str) -> Vec<String> {
 /// Validates that a template contains required placeholders
 ///
 /// Returns a list of missing placeholders. Logs warnings for unrecognized placeholders.
+///
+/// Uses `extract_placeholders()` for exact matching to avoid substring false positives
+/// (e.g., `{minimum}` should not satisfy requirement for `{min}`).
 fn validate_template_placeholders(
     template: &str,
     required: &[&str],
     template_name: &str,
 ) -> Vec<String> {
     let mut missing = Vec::new();
+    let found_placeholders = extract_placeholders(template);
 
-    // Check for required placeholders
+    // Check for required placeholders using exact match against extracted placeholders
     for placeholder in required {
-        if !template.contains(placeholder) {
+        if !found_placeholders.iter().any(|p| p == placeholder) {
             missing.push((*placeholder).to_string());
         }
     }
 
     // Warn about unrecognized placeholders
-    let found_placeholders = extract_placeholders(template);
     for found in &found_placeholders {
         if !required.contains(&found.as_str()) {
             log::warn!(
@@ -112,8 +125,9 @@ fn validate_template_placeholders(
 ///
 /// Template placeholders do **not** support brace escaping. If your template
 /// contains literal `{` or `}` characters, they will be interpreted as
-/// placeholder delimiters. There is currently no escape sequence to include
-/// literal braces in templates.
+/// placeholder delimiters. Nested braces (e.g., `{{name}}`) will extract
+/// the innermost placeholder (`{name}`). There is currently no escape sequence
+/// to include literal braces in templates.
 ///
 /// # Example
 ///
@@ -941,5 +955,54 @@ mod tests {
             result.is_err(),
             "Uppercase placeholders should not be recognized"
         );
+    }
+
+    #[test]
+    fn test_validate_substring_false_positive() {
+        // {minimum} should NOT satisfy requirement for {min}
+        // {maximum} should NOT satisfy requirement for {max}
+        // {query_text} should NOT satisfy requirement for {query}
+        let prompts = ResearchPrompts {
+            decomposition_template: "Generate {minimum}-{maximum} queries for {query_text}"
+                .to_string(),
+            ..Default::default()
+        };
+        let result = prompts.validate();
+        assert!(
+            result.is_err(),
+            "Substring matches should not satisfy placeholder requirements"
+        );
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("{min}"), "Should report {{min}} as missing");
+        assert!(err.contains("{max}"), "Should report {{max}} as missing");
+        assert!(
+            err.contains("{query}"),
+            "Should report {{query}} as missing"
+        );
+    }
+
+    #[test]
+    fn test_extract_placeholders_nested_and_unclosed() {
+        // Combination of nested braces and unclosed brace
+        // "{outer {inner}" has unclosed outer and nested inner - should extract {inner}
+        let placeholders = super::extract_placeholders("{outer {inner}");
+        assert_eq!(placeholders.len(), 1);
+        assert_eq!(placeholders[0], "{inner}");
+    }
+
+    #[test]
+    fn test_extract_placeholders_double_nested() {
+        // "{{name}}" - double opening brace, should extract {name}
+        let placeholders = super::extract_placeholders("Hello {{name}}!");
+        assert_eq!(placeholders.len(), 1);
+        assert_eq!(placeholders[0], "{name}");
+    }
+
+    #[test]
+    fn test_extract_placeholders_restarts_from_inner() {
+        // "{out{inner}}" - should restart from inner brace and extract {inner}
+        let placeholders = super::extract_placeholders("{out{inner}}");
+        assert_eq!(placeholders.len(), 1);
+        assert_eq!(placeholders[0], "{inner}");
     }
 }
