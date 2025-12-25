@@ -68,6 +68,12 @@ pub trait Dataset: Send + Sync {
 /// Automatically downloads and caches the HotpotQA dev set from the official source.
 /// Uses the distractor setting by default.
 ///
+/// # Security Note
+///
+/// The official HotpotQA dataset is only available over HTTP (not HTTPS).
+/// For production use, consider using [`HotpotQA::from_file`] with a
+/// pre-downloaded and verified dataset file.
+///
 /// # Example
 ///
 /// ```no_run
@@ -118,12 +124,28 @@ impl HotpotQA {
         }
     }
 
-    /// Create a loader from a local file (skip download).
+    /// Create a loader from a local file (skips download).
+    ///
+    /// Use this when you have a pre-downloaded and verified HotpotQA dataset,
+    /// or for offline/air-gapped environments.
+    ///
+    /// The file must be named `hotpot_dev_distractor_v1.json` and be in the
+    /// HotpotQA JSON format.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use gemicro_eval::HotpotQA;
+    /// use std::path::PathBuf;
+    ///
+    /// // Use a pre-verified local copy
+    /// let dataset = HotpotQA::from_file(PathBuf::from("/data/hotpotqa/"));
+    /// ```
     pub fn from_file(path: PathBuf) -> Self {
         let cache_dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
         Self {
             cache_dir,
-            url: String::new(), // Empty URL means use local file only
+            url: String::new(), // Empty URL skips download
         }
     }
 
