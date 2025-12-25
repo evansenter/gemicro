@@ -125,8 +125,9 @@ fn validate_template_placeholders(
 ///
 /// Template placeholders do **not** support brace escaping. If your template
 /// contains literal `{` or `}` characters, they will be interpreted as
-/// placeholder delimiters. There is currently no escape sequence to include
-/// literal braces in templates.
+/// placeholder delimiters. Nested braces (e.g., `{{name}}`) will extract
+/// the innermost placeholder (`{name}`). There is currently no escape sequence
+/// to include literal braces in templates.
 ///
 /// # Example
 ///
