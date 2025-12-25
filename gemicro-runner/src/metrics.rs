@@ -59,8 +59,12 @@ pub struct SubQueryTiming {
     /// The sub-query text
     pub query: String,
 
-    /// Whether the sub-query succeeded or failed
-    pub succeeded: bool,
+    /// Whether the sub-query succeeded or failed.
+    ///
+    /// - `Some(true)` = completed successfully
+    /// - `Some(false)` = failed with error
+    /// - `None` = still in progress (pending or executing)
+    pub succeeded: Option<bool>,
 
     /// Duration of the sub-query execution
     pub duration: Option<Duration>,
@@ -86,10 +90,15 @@ impl From<&ExecutionState> for ExecutionMetrics {
             .sub_queries()
             .iter()
             .map(|sq| {
+                // Allow unreachable_patterns: SubQueryStatus is #[non_exhaustive], but the
+                // wildcard is unreachable within this crate. We keep it for consistency with
+                // how downstream crates must handle this enum.
+                #[allow(unreachable_patterns)]
                 let (succeeded, tokens_used) = match &sq.status {
-                    SubQueryStatus::Completed { tokens, .. } => (true, Some(*tokens)),
-                    SubQueryStatus::Failed { .. } => (false, None),
-                    SubQueryStatus::Pending | SubQueryStatus::InProgress => (false, None),
+                    SubQueryStatus::Completed { tokens, .. } => (Some(true), Some(*tokens)),
+                    SubQueryStatus::Failed { .. } => (Some(false), None),
+                    SubQueryStatus::Pending | SubQueryStatus::InProgress => (None, None),
+                    _ => (None, None),
                 };
 
                 SubQueryTiming {
@@ -102,16 +111,13 @@ impl From<&ExecutionState> for ExecutionMetrics {
             })
             .collect();
 
-        let sub_queries_succeeded = sub_query_timings.iter().filter(|t| t.succeeded).count();
+        let sub_queries_succeeded = sub_query_timings
+            .iter()
+            .filter(|t| t.succeeded == Some(true))
+            .count();
         let sub_queries_failed = sub_query_timings
             .iter()
-            .filter(|t| {
-                !t.succeeded
-                    && state
-                        .sub_query(t.id)
-                        .map(|sq| matches!(sq.status, SubQueryStatus::Failed { .. }))
-                        .unwrap_or(false)
-            })
+            .filter(|t| t.succeeded == Some(false))
             .count();
 
         let (total_tokens, tokens_unavailable_count, final_answer) =
@@ -126,7 +132,7 @@ impl From<&ExecutionState> for ExecutionMetrics {
                 let tokens: u32 = sub_query_timings.iter().filter_map(|t| t.tokens_used).sum();
                 let unavailable = sub_query_timings
                     .iter()
-                    .filter(|t| t.succeeded && t.tokens_used.is_none())
+                    .filter(|t| t.succeeded == Some(true) && t.tokens_used.is_none())
                     .count();
                 (tokens, unavailable, None)
             };
@@ -226,14 +232,14 @@ mod tests {
         assert_eq!(metrics.sub_query_timings.len(), 3);
 
         // First two succeeded
-        assert!(metrics.sub_query_timings[0].succeeded);
+        assert_eq!(metrics.sub_query_timings[0].succeeded, Some(true));
         assert_eq!(metrics.sub_query_timings[0].tokens_used, Some(50));
 
-        assert!(metrics.sub_query_timings[1].succeeded);
+        assert_eq!(metrics.sub_query_timings[1].succeeded, Some(true));
         assert_eq!(metrics.sub_query_timings[1].tokens_used, Some(60));
 
         // Third failed
-        assert!(!metrics.sub_query_timings[2].succeeded);
+        assert_eq!(metrics.sub_query_timings[2].succeeded, Some(false));
         assert_eq!(metrics.sub_query_timings[2].tokens_used, None);
     }
 
@@ -251,7 +257,12 @@ mod tests {
         assert_eq!(metrics.completion_phase, Phase::Executing);
         assert_eq!(metrics.sub_queries_total, 2);
         assert_eq!(metrics.sub_queries_succeeded, 0);
+        assert_eq!(metrics.sub_queries_failed, 0);
         assert!(metrics.final_answer.is_none());
+
+        // Pending sub-queries should have succeeded: None (not false)
+        assert_eq!(metrics.sub_query_timings[0].succeeded, None);
+        assert_eq!(metrics.sub_query_timings[1].succeeded, None);
     }
 
     #[test]

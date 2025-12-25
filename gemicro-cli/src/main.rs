@@ -7,7 +7,7 @@ mod repl;
 
 use anyhow::{bail, Context, Result};
 use clap::Parser;
-use display::{DisplayState, IndicatifRenderer, Phase, Renderer};
+use display::{ExecutionState, IndicatifRenderer, Phase, Renderer};
 use futures_util::StreamExt;
 use gemicro_core::{AgentContext, AgentError, DeepResearchAgent, LlmClient};
 use repl::Session;
@@ -85,7 +85,7 @@ async fn run_research(args: &cli::Args, query: &str) -> Result<()> {
         .context("Failed to create research agent")?;
 
     // Initialize state and renderer
-    let mut state = DisplayState::new();
+    let mut state = ExecutionState::new();
     let mut renderer = IndicatifRenderer::new(args.plain);
 
     // Set up interrupt handling with AtomicU8 for cross-thread visibility.
