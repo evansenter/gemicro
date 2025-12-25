@@ -506,7 +506,7 @@ impl LlmClient {
         }
 
         if request.use_google_search {
-            interaction = interaction.with_google_search();
+            interaction = interaction.with_tools(vec![rust_genai::Tool::GoogleSearch]);
         }
 
         interaction
