@@ -43,12 +43,19 @@ pub enum SubQueryStatus {
 }
 
 /// State of an individual sub-query.
+///
+/// # Serialization
+///
+/// `start_time` is skipped during serialization (`Instant` is not portable).
+/// Timing data is preserved via `duration`, which is populated when the
+/// sub-query completes. If you serialize mid-execution, in-progress queries
+/// will have `start_time: None` after deserialization.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubQueryState {
     pub id: usize,
     pub query: String,
     pub status: SubQueryStatus,
-    /// Start time is not serializable, so we skip it.
+    /// Skipped during serialization. See struct-level docs.
     #[serde(skip)]
     pub start_time: Option<Instant>,
     pub duration: Option<Duration>,
