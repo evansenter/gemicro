@@ -8,7 +8,9 @@ use crate::error::ErrorFormatter;
 use crate::format::truncate;
 use anyhow::{Context, Result};
 use futures_util::StreamExt;
-use gemicro_core::{AgentContext, AgentError, ConversationHistory, HistoryEntry, LlmClient};
+use gemicro_core::{
+    AgentContext, AgentError, AgentUpdate, ConversationHistory, HistoryEntry, LlmClient,
+};
 use gemicro_runner::AgentRegistry;
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
@@ -54,6 +56,9 @@ pub struct Session {
 
     /// Whether to use plain text output (no markdown rendering)
     plain: bool,
+
+    /// Cumulative tokens used in this session
+    session_tokens: u64,
 }
 
 impl Session {
@@ -75,15 +80,21 @@ impl Session {
             binary_path,
             binary_mtime,
             plain,
+            session_tokens: 0,
         }
     }
 
     /// Set the current agent by name.
     ///
     /// This should be called after registering agents to set the initial selection.
+    /// Resets the session token count when switching to a different agent.
     /// Returns `Ok(())` if the agent exists, `Err` with message otherwise.
     pub fn set_current_agent(&mut self, name: &str) -> Result<(), String> {
         if self.registry.contains(name) {
+            // Reset token count when switching agents
+            if self.current_agent_name != name {
+                self.session_tokens = 0;
+            }
             self.current_agent_name = name.to_string();
             Ok(())
         } else {
@@ -265,9 +276,15 @@ impl Session {
 
         renderer.finish().context("Renderer cleanup failed")?;
 
+        // Extract tokens before moving events to history
+        let tokens_used = extract_tokens_from_events(&events);
+
         // Store in history
         self.history
             .push(HistoryEntry::new(query.to_string(), agent_name, events));
+
+        // Accumulate session token count
+        self.session_tokens += tokens_used;
 
         Ok(())
     }
@@ -280,14 +297,19 @@ impl Session {
         println!();
 
         loop {
-            // Build prompt with stale indicator
+            // Build prompt with optional token count and stale indicator
             let stale_indicator = if self.is_stale() { " [stale]" } else { "" };
+            let token_display = if self.session_tokens > 0 {
+                format!(" ({})", format_tokens(self.session_tokens))
+            } else {
+                String::new()
+            };
             let agent_display = if self.current_agent_name.is_empty() {
                 "no agent"
             } else {
                 &self.current_agent_name
             };
-            let prompt = format!("[{}{}] > ", agent_display, stale_indicator);
+            let prompt = format!("[{}{}{}] > ", agent_display, token_display, stale_indicator);
 
             match rl.readline(&prompt) {
                 Ok(line) => {
@@ -386,10 +408,32 @@ fn format_agent_error(e: AgentError) -> anyhow::Error {
     ErrorFormatter::plain().format(e)
 }
 
+/// Format a token count for display (e.g., "1.2k" for 1200).
+fn format_tokens(count: u64) -> String {
+    if count >= 1_000_000 {
+        format!("{:.1}M", count as f64 / 1_000_000.0)
+    } else if count >= 1_000 {
+        format!("{:.1}k", count as f64 / 1_000.0)
+    } else {
+        count.to_string()
+    }
+}
+
+/// Extract total tokens from a list of agent events.
+///
+/// Looks for final_result events and sums their total_tokens metadata.
+fn extract_tokens_from_events(events: &[AgentUpdate]) -> u64 {
+    events
+        .iter()
+        .filter_map(|e| e.as_final_result())
+        .map(|r| u64::from(r.metadata.total_tokens))
+        .sum()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gemicro_core::LlmConfig;
+    use gemicro_core::{LlmConfig, ResultMetadata};
 
     // Note: Most session tests require a mock LLM client which we don't have yet.
     // These are basic structural tests.
@@ -403,6 +447,16 @@ mod tests {
 
         // Fresh session should not be stale
         assert!(!session.is_stale());
+    }
+
+    #[test]
+    fn test_session_initial_token_count() {
+        let genai_client = rust_genai::Client::builder("test-key".to_string()).build();
+        let llm = LlmClient::new(genai_client, LlmConfig::default());
+        let session = Session::new(llm, false);
+
+        // Initial token count should be zero
+        assert_eq!(session.session_tokens, 0);
     }
 
     // Compile-time validation of constants
@@ -426,5 +480,64 @@ mod tests {
 
         // Short answers should pass through unchanged
         assert_eq!(result, short_answer);
+    }
+
+    // Token formatting tests
+
+    #[test]
+    fn test_format_tokens_small() {
+        assert_eq!(format_tokens(0), "0");
+        assert_eq!(format_tokens(1), "1");
+        assert_eq!(format_tokens(999), "999");
+    }
+
+    #[test]
+    fn test_format_tokens_thousands() {
+        assert_eq!(format_tokens(1000), "1.0k");
+        assert_eq!(format_tokens(1234), "1.2k");
+        assert_eq!(format_tokens(12345), "12.3k");
+        assert_eq!(format_tokens(999999), "1000.0k");
+    }
+
+    #[test]
+    fn test_format_tokens_millions() {
+        assert_eq!(format_tokens(1_000_000), "1.0M");
+        assert_eq!(format_tokens(1_234_567), "1.2M");
+        assert_eq!(format_tokens(12_345_678), "12.3M");
+    }
+
+    // Token extraction tests
+
+    #[test]
+    fn test_extract_tokens_empty_events() {
+        let events: Vec<AgentUpdate> = vec![];
+        assert_eq!(extract_tokens_from_events(&events), 0);
+    }
+
+    #[test]
+    fn test_extract_tokens_no_final_result() {
+        let events = vec![
+            AgentUpdate::decomposition_started(),
+            AgentUpdate::decomposition_complete(vec!["Q1".to_string()]),
+        ];
+        assert_eq!(extract_tokens_from_events(&events), 0);
+    }
+
+    #[test]
+    fn test_extract_tokens_with_final_result() {
+        let events = vec![
+            AgentUpdate::decomposition_started(),
+            AgentUpdate::final_result(
+                "The answer".to_string(),
+                ResultMetadata {
+                    total_tokens: 1500,
+                    tokens_unavailable_count: 0,
+                    duration_ms: 1000,
+                    sub_queries_succeeded: 2,
+                    sub_queries_failed: 0,
+                },
+            ),
+        ];
+        assert_eq!(extract_tokens_from_events(&events), 1500);
     }
 }
