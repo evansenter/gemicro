@@ -16,6 +16,7 @@
 //!
 //! - [`DeepResearchAgent`]: Decomposes queries, executes sub-queries in parallel, synthesizes results
 //! - [`SimpleQaAgent`]: Minimal single-call agent for reference/demonstration
+//! - [`ReactAgent`]: Reasoning + Acting pattern with iterative tool use
 //!
 //! ## Example
 //!
@@ -38,9 +39,11 @@
 //! ```
 
 mod deep_research;
+mod react;
 mod simple_qa;
 
 pub use deep_research::DeepResearchAgent;
+pub use react::ReactAgent;
 pub use simple_qa::{
     SimpleQaAgent, SimpleQaConfig, EVENT_SIMPLE_QA_RESULT, EVENT_SIMPLE_QA_STARTED,
 };

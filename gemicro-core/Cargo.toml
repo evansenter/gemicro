@@ -18,6 +18,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 futures-util = { workspace = true }
 log = { workspace = true }
+meval = "0.2"
 
 [dev-dependencies]
 rstest = "0.23"
