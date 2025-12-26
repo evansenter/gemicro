@@ -7,6 +7,7 @@ Gemicro allows you to explore and interact with different AI agent patterns thro
 ## Features
 
 - 🔬 **Deep Research Agent**: Query decomposition with parallel sub-query execution and synthesis
+- 🔄 **ReAct Agent**: Reasoning and Acting loops with Thought → Action → Observation cycles
 - 🎯 **Simple QA Agent**: Minimal reference implementation for agent authoring
 - 📊 **Real-time Observability**: Streaming updates show agent execution as it happens
 - 🏗️ **Extensible Architecture**: Soft-typed events allow adding new agent types without protocol changes
@@ -30,7 +31,7 @@ gemicro-cli (terminal rendering)
 
 | Crate | Purpose |
 |-------|---------|
-| **gemicro-core** | Platform-agnostic library: Agent trait, AgentUpdate events, LlmClient, conversation history |
+| **gemicro-core** | Platform-agnostic library: Agent trait, AgentUpdate events, LlmClient, conversation history. Agents: DeepResearchAgent, ReActAgent, SimpleQaAgent |
 | **gemicro-runner** | Headless execution runtime: ExecutionState, AgentRunner, AgentRegistry, metrics collection |
 | **gemicro-eval** | Evaluation framework: HotpotQA/custom datasets, scorers (ExactMatch, F1, Contains), LlmJudgeAgent |
 | **gemicro-cli** | Terminal UI: indicatif progress display, rustyline REPL, markdown rendering |
@@ -195,7 +196,7 @@ cargo run -p gemicro-eval --example ab_comparison
 
 See [GitHub Issues](https://github.com/evansenter/gemicro/issues) for the full roadmap. Key areas include:
 
-- Additional agent patterns (ReAct with configurable tools)
+- Additional agent patterns (Reflexion, Plan-and-Execute)
 - Model Context Protocol (MCP) client support
 - Hot-reload for agent development (`/reload --watch`)
 - Persistent sessions across restarts
