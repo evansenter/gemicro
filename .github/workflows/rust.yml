@@ -6,13 +6,11 @@ on:
     paths-ignore:
       - '**.md'
       - 'LICENSE'
-      - '.github/workflows/**'
   pull_request:
     branches: [ "main" ]
     paths-ignore:
       - '**.md'
       - 'LICENSE'
-      - '.github/workflows/**'
 
 env:
   CARGO_TERM_COLOR: always
@@ -87,3 +85,20 @@ jobs:
         run: cargo doc --workspace --no-deps --document-private-items
         env:
           RUSTDOCFLAGS: -D warnings
+
+  # Gate job that always runs - use this as the single required check
+  # This allows paths-ignore to skip CI jobs while still satisfying branch protection
+  ci-gate:
+    name: CI Gate
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [check, test, test-integration, fmt, clippy, doc]
+    steps:
+      - name: Check all jobs passed
+        run: |
+          # Check if any job failed (not skipped, actually failed)
+          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" ]]; then
+            echo "One or more jobs failed"
+            exit 1
+          fi
+          echo "All jobs passed or were skipped"
