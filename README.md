@@ -6,19 +6,33 @@ Gemicro allows you to explore and interact with different AI agent patterns thro
 
 ## Features
 
-- 🔬 **Agent Pattern Exploration**: Experiment with Deep Research, ReAct, Reflexion, and other agent patterns
+- 🔬 **Deep Research Agent**: Query decomposition with parallel sub-query execution and synthesis
 - 📊 **Real-time Observability**: Streaming updates show agent execution as it happens
 - 🏗️ **Extensible Architecture**: Soft-typed events allow adding new agent types without protocol changes
-- 📱 **iOS-Ready**: Platform-agnostic core library for future mobile support
-- ⚡ **Parallel Execution**: Deep Research pattern fans out queries for faster results
+- 📱 **Platform-Agnostic Core**: Library designed for future mobile and web support
+- ⚡ **Parallel Execution**: Sub-queries fan out for faster results
 - 🌐 **Google Search Grounding**: Enable real-time web search for current events and live data
+- 📈 **Evaluation Framework**: HotpotQA datasets, scorers (ExactMatch, F1, Contains), and LLM judge support
 
 ## Architecture
 
-### Two-Crate Workspace
+### Four-Crate Workspace
 
-- **gemicro-core**: Platform-agnostic library with Agent trait, streaming updates, and conversation history
-- **gemicro-cli**: Terminal UI with indicatif progress display and rustyline REPL
+```
+gemicro-core (agents, events, LLM)
+    ↓
+gemicro-runner (execution state, metrics, runner)
+    ↓
+gemicro-eval (datasets, scorers, harness)
+gemicro-cli (terminal rendering)
+```
+
+| Crate | Purpose |
+|-------|---------|
+| **gemicro-core** | Platform-agnostic library: Agent trait, AgentUpdate events, LlmClient, conversation history |
+| **gemicro-runner** | Headless execution runtime: ExecutionState, AgentRunner, AgentRegistry, metrics collection |
+| **gemicro-eval** | Evaluation framework: HotpotQA/custom datasets, scorers (ExactMatch, F1, Contains), LlmJudgeAgent |
+| **gemicro-cli** | Terminal UI: indicatif progress display, rustyline REPL, markdown rendering |
 
 ### Design Philosophy
 
@@ -81,6 +95,7 @@ gemicro -i
 
 | Command | Alias | Description |
 |---------|-------|-------------|
+| `/help` | `/?` | Show help message |
 | `/agent [name]` | `/a` | Switch agent or list available agents |
 | `/history` | `/h` | Show conversation history |
 | `/clear` | | Clear conversation history |
@@ -115,19 +130,21 @@ Arguments:
   [QUERY]  Research query (required unless using --interactive)
 
 Options:
-  -i, --interactive          Interactive REPL mode
-      --api-key <KEY>        Gemini API key (or set GEMINI_API_KEY)
-      --min-sub-queries <N>  Minimum sub-queries [default: 3]
-      --max-sub-queries <N>  Maximum sub-queries [default: 5]
-      --max-concurrent <N>   Max parallel executions [default: 5]
-      --timeout <SECS>       Total timeout [default: 180]
-      --llm-timeout <SECS>   Per-request timeout [default: 60]
-      --temperature <F>      Generation temperature 0.0-1.0 [default: 0.7]
-      --google-search        Enable Google Search grounding for real-time data
-      --plain                Use plain text output (no markdown rendering)
-  -v, --verbose              Enable debug logging
-  -h, --help                 Print help
-  -V, --version              Print version
+  -i, --interactive            Interactive REPL mode
+      --api-key <KEY>          Gemini API key (or GEMINI_API_KEY env var)
+      --min-sub-queries <N>    Minimum sub-queries [default: 3]
+      --max-sub-queries <N>    Maximum sub-queries [default: 5]
+      --max-concurrent <N>     Max parallel executions [default: 5]
+      --timeout <SECS>         Total timeout [default: 180]
+      --continue-on-failure    Continue if some sub-queries fail
+      --llm-timeout <SECS>     Per-request timeout [default: 60]
+      --max-tokens <N>         Max tokens per LLM request [default: 16384]
+      --temperature <F>        Temperature 0.0-1.0 [default: 0.7]
+      --google-search          Enable Google Search grounding
+      --plain                  Plain text output (no markdown)
+  -v, --verbose                Enable debug logging
+  -h, --help                   Print help
+  -V, --version                Print version
 ```
 
 ## Development
@@ -166,17 +183,23 @@ cargo fmt --all -- --check
 # Deep research example (non-interactive)
 cargo run -p gemicro-core --example deep_research
 
+# A/B comparison example (requires GEMINI_API_KEY)
+cargo run -p gemicro-eval --example ab_comparison
+
 # REPL demo script
 ./examples/repl_demo.sh
 ```
 
 ## Future Exploration Areas
 
+See [GitHub Issues](https://github.com/evansenter/gemicro/issues) for the full roadmap. Key areas include:
+
+- Additional agent patterns (ReAct with configurable tools)
+- Model Context Protocol (MCP) client support
 - Hot-reload for agent development (`/reload --watch`)
 - Persistent sessions across restarts
-- Additional agent patterns (ReAct, Reflexion, Planning)
-- Tab completion for commands
-- iOS/mobile interface
+- Tab completion for REPL commands and agent names
+- Performance benchmarks with criterion.rs
 
 ## License
 
