@@ -96,6 +96,8 @@ impl ReactAgent {
         try_stream! {
             let start_time = Instant::now();
             let mut scratchpad = String::new();
+            let mut total_tokens: u32 = 0;
+            let mut tokens_unavailable: usize = 0;
 
             yield AgentUpdate::react_started(&query, config.max_iterations);
 
@@ -121,6 +123,13 @@ impl ReactAgent {
                     || timeout_error(start_time, config.total_timeout, "react_step"),
                 ).await?;
 
+                // Track tokens
+                if let Some(tokens) = response.tokens_used {
+                    total_tokens += tokens;
+                } else {
+                    tokens_unavailable += 1;
+                }
+
                 // Parse structured response
                 let step: ReactStep = serde_json::from_str(&response.text)
                     .map_err(|e| AgentError::ParseFailed(format!(
@@ -137,7 +146,18 @@ impl ReactAgent {
 
                 // Check for final answer
                 if step.action.tool == "final_answer" {
-                    yield AgentUpdate::react_complete(iteration, step.action.input);
+                    yield AgentUpdate::react_complete(iteration, step.action.input.clone());
+
+                    // Emit standard final_result for ExecutionState/harness compatibility
+                    use crate::update::ResultMetadata;
+                    let metadata = ResultMetadata {
+                        total_tokens,
+                        tokens_unavailable_count: tokens_unavailable,
+                        duration_ms: start_time.elapsed().as_millis() as u64,
+                        sub_queries_succeeded: 0,
+                        sub_queries_failed: 0,
+                    };
+                    yield AgentUpdate::final_result(step.action.input, metadata);
                     return;
                 }
 
