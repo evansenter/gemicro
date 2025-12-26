@@ -42,6 +42,7 @@ pub mod error;
 pub mod history;
 pub mod llm;
 pub mod update;
+pub mod utils;
 
 // Re-export public API
 pub use agent::{Agent, AgentContext, AgentStream, DeepResearchAgent};
@@ -54,3 +55,4 @@ pub use update::{
     EVENT_DECOMPOSITION_STARTED, EVENT_FINAL_RESULT, EVENT_SUB_QUERY_COMPLETED,
     EVENT_SUB_QUERY_FAILED, EVENT_SUB_QUERY_STARTED, EVENT_SYNTHESIS_STARTED,
 };
+pub use utils::{first_sentence, truncate, truncate_with_count};

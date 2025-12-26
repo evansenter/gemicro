@@ -125,17 +125,6 @@ fn timeout_error(start: Instant, total_timeout: Duration, phase: &str) -> AgentE
     }
 }
 
-/// Truncate text for error messages to prevent huge output
-fn truncate_for_error(text: &str, max_chars: usize) -> String {
-    let char_count = text.chars().count();
-    if char_count <= max_chars {
-        text.to_string()
-    } else {
-        let truncated: String = text.chars().take(max_chars).collect();
-        format!("{}... ({} chars total)", truncated, char_count)
-    }
-}
-
 /// Run an async operation with timeout and cancellation support
 ///
 /// This helper consolidates the common pattern of:
@@ -523,7 +512,7 @@ fn parse_json_array(text: &str) -> Result<Vec<String>, String> {
                 format!(
                     "Invalid JSON: {}. Response was: {}",
                     e,
-                    truncate_for_error(text, 200)
+                    crate::utils::truncate_with_count(text, 200)
                 )
             });
         }
@@ -531,7 +520,7 @@ fn parse_json_array(text: &str) -> Result<Vec<String>, String> {
 
     Err(format!(
         "Invalid JSON: expected array of strings. Response was: {}",
-        truncate_for_error(text, 200)
+        crate::utils::truncate_with_count(text, 200)
     ))
 }
 
@@ -1024,61 +1013,6 @@ mod tests {
         // Allow generous tolerance for CI timing variations
         assert!(remaining > Duration::from_millis(300));
         assert!(remaining < Duration::from_millis(450));
-    }
-
-    // truncate_for_error edge case tests
-
-    #[test]
-    fn test_truncate_for_error_empty_string() {
-        let result = truncate_for_error("", 10);
-        assert_eq!(result, "");
-    }
-
-    #[test]
-    fn test_truncate_for_error_zero_max_chars() {
-        let result = truncate_for_error("hello", 0);
-        assert_eq!(result, "... (5 chars total)");
-    }
-
-    #[test]
-    fn test_truncate_for_error_exact_boundary() {
-        let result = truncate_for_error("hello", 5);
-        assert_eq!(result, "hello"); // No truncation at exact boundary
-    }
-
-    #[test]
-    fn test_truncate_for_error_one_over_boundary() {
-        let result = truncate_for_error("hello!", 5);
-        assert_eq!(result, "hello... (6 chars total)");
-    }
-
-    #[test]
-    fn test_truncate_for_error_unicode_emoji() {
-        // Emoji are single characters for counting purposes
-        let text = "🎉🎊🎁🎂🎈";
-        assert_eq!(text.chars().count(), 5);
-
-        let result = truncate_for_error(text, 3);
-        assert_eq!(result, "🎉🎊🎁... (5 chars total)");
-    }
-
-    #[test]
-    fn test_truncate_for_error_unicode_cjk() {
-        let text = "你好世界";
-        assert_eq!(text.chars().count(), 4);
-
-        let result = truncate_for_error(text, 2);
-        assert_eq!(result, "你好... (4 chars total)");
-    }
-
-    #[test]
-    fn test_truncate_for_error_mixed_unicode() {
-        let text = "Hello 你好 🎉";
-        // 'H','e','l','l','o',' ','你','好',' ','🎉' = 10 chars
-        assert_eq!(text.chars().count(), 10);
-
-        let result = truncate_for_error(text, 8);
-        assert_eq!(result, "Hello 你好... (10 chars total)");
     }
 
     // parse_json_array edge case tests

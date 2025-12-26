@@ -240,7 +240,7 @@ impl Agent for LlmJudgeAgent {
                 .map_err(|e| AgentError::ParseFailed(format!(
                     "Failed to parse judge output: {}. Response: {}",
                     e,
-                    truncate_for_display(&response.text, 200)
+                    gemicro_core::truncate(&response.text, 200)
                 )))?;
 
             // Emit result event
@@ -254,17 +254,6 @@ impl Agent for LlmJudgeAgent {
                 })
             );
         })
-    }
-}
-
-/// Truncate text for display in error messages
-fn truncate_for_display(text: &str, max_chars: usize) -> String {
-    let char_count = text.chars().count();
-    if char_count <= max_chars {
-        text.to_string()
-    } else {
-        let truncated: String = text.chars().take(max_chars).collect();
-        format!("{}...", truncated)
     }
 }
 
@@ -332,20 +321,5 @@ mod tests {
     fn test_llm_judge_agent_description() {
         let agent = LlmJudgeAgent::default_agent();
         assert!(!agent.description().is_empty());
-    }
-
-    #[test]
-    fn test_truncate_for_display_short() {
-        assert_eq!(truncate_for_display("hello", 10), "hello");
-    }
-
-    #[test]
-    fn test_truncate_for_display_long() {
-        assert_eq!(truncate_for_display("hello world", 5), "hello...");
-    }
-
-    #[test]
-    fn test_truncate_for_display_unicode() {
-        assert_eq!(truncate_for_display("héllo wörld", 5), "héllo...");
     }
 }
