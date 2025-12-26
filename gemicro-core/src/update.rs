@@ -59,6 +59,38 @@ pub struct AgentUpdate {
 
 /// Type-safe helper constructors for common Deep Research events
 impl AgentUpdate {
+    /// Create a custom event with any event type
+    ///
+    /// This generic constructor allows new agent types to define their own
+    /// event types without modifying gemicro-core, following
+    /// [Evergreen spec](https://github.com/google-deepmind/evergreen-spec) philosophy.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use gemicro_core::AgentUpdate;
+    /// use serde_json::json;
+    ///
+    /// let update = AgentUpdate::custom(
+    ///     "my_custom_event",
+    ///     "Something happened",
+    ///     json!({"detail": "value"})
+    /// );
+    /// assert_eq!(update.event_type, "my_custom_event");
+    /// ```
+    pub fn custom(
+        event_type: impl Into<String>,
+        message: impl Into<String>,
+        data: serde_json::Value,
+    ) -> Self {
+        Self {
+            event_type: event_type.into(),
+            message: message.into(),
+            timestamp: SystemTime::now(),
+            data,
+        }
+    }
+
     /// Create a decomposition_started event
     pub fn decomposition_started() -> Self {
         Self {

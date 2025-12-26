@@ -91,11 +91,15 @@
 
 pub mod dataset;
 pub mod harness;
+pub mod judge;
 pub mod results;
 pub mod scorer;
 
 // Re-export public API
 pub use dataset::{Dataset, DatasetError, HotpotQA, JsonFileDataset};
 pub use harness::{EvalConfig, EvalError, EvalHarness, EvalProgress};
+pub use judge::{
+    JudgeConfig, JudgeInput, JudgeOutput, LlmJudgeAgent, EVENT_JUDGE_RESULT, EVENT_JUDGE_STARTED,
+};
 pub use results::{EvalQuestion, EvalResult, EvalSummary};
 pub use scorer::{Contains, ExactMatch, F1Score, Scorer, Scorers};

@@ -168,6 +168,13 @@ impl EvalSummary {
         }
     }
 
+    /// Get the average score for a specific scorer.
+    ///
+    /// Returns `None` if the scorer wasn't used or no questions succeeded.
+    pub fn avg_score(&self, scorer_name: &str) -> Option<f64> {
+        self.average_scores.get(scorer_name).copied()
+    }
+
     /// Print a summary to stdout.
     pub fn print_summary(&self) {
         println!();
@@ -208,6 +215,26 @@ impl EvalSummary {
         let json = serde_json::to_string_pretty(self)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         std::fs::write(path, json)
+    }
+
+    /// Recalculate average scores from results.
+    ///
+    /// Call this after manually adding scores to individual results
+    /// (e.g., after running `LlmJudgeAgent` on each result).
+    pub fn recalculate_averages(&mut self) {
+        let mut score_sums: HashMap<String, (f64, usize)> = HashMap::new();
+        for result in self.results.iter().filter(|r| r.is_success()) {
+            for (scorer_name, score) in &result.scores {
+                let entry = score_sums.entry(scorer_name.clone()).or_insert((0.0, 0));
+                entry.0 += score;
+                entry.1 += 1;
+            }
+        }
+
+        self.average_scores = score_sums
+            .into_iter()
+            .map(|(name, (sum, count))| (name, if count > 0 { sum / count as f64 } else { 0.0 }))
+            .collect();
     }
 }
 

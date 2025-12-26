@@ -63,9 +63,9 @@ impl AgentRunner {
     /// # Errors
     ///
     /// Returns `AgentError` if the agent fails during execution.
-    pub async fn execute<A: Agent>(
+    pub async fn execute(
         &self,
-        agent: &A,
+        agent: &dyn Agent,
         query: &str,
         context: AgentContext,
     ) -> Result<ExecutionMetrics, AgentError> {
@@ -108,15 +108,14 @@ impl AgentRunner {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn execute_with_callback<A, F>(
+    pub async fn execute_with_callback<F>(
         &self,
-        agent: &A,
+        agent: &dyn Agent,
         query: &str,
         context: AgentContext,
         mut on_update: F,
     ) -> Result<ExecutionMetrics, AgentError>
     where
-        A: Agent,
         F: FnMut(&ExecutionState, Option<usize>),
     {
         let mut state = ExecutionState::new();
