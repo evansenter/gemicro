@@ -1,261 +1,91 @@
-//! Agent trait and Deep Research Agent implementation
+//! Deep Research Agent implementation.
 //!
-//! This module provides:
-//! - The `Agent` trait that all agents must implement
-//! - `DeepResearchAgent` which implements the Deep Research pattern
-//!
-//! # Agent Trait
-//!
-//! All agents implement the `Agent` trait, which returns a stream of `AgentUpdate`
-//! events. The stream uses `Pin<Box<dyn Stream>>` to enable trait objects and
-//! dynamic agent switching.
-//!
-//! # Example
-//!
-//! ```no_run
-//! use gemicro_core::{Agent, AgentContext, DeepResearchAgent, ResearchConfig, LlmClient, LlmConfig};
-//! use futures_util::StreamExt;
-//!
-//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! let genai_client = rust_genai::Client::builder("api-key".to_string()).build();
-//! let llm = LlmClient::new(genai_client, LlmConfig::default());
-//!
-//! let context = AgentContext::new(llm);
-//! let agent = DeepResearchAgent::new(ResearchConfig::default())?;
-//!
-//! // Use via Agent trait
-//! let stream = agent.execute("What are the trends in quantum computing?", context);
-//! futures_util::pin_mut!(stream);
-//!
-//! while let Some(update) = stream.next().await {
-//!     let update = update?;
-//!     println!("[{}] {}", update.event_type, update.message);
-//! }
-//! # Ok(())
-//! # }
-//! ```
+//! The Deep Research pattern decomposes complex queries into sub-questions,
+//! executes them in parallel, and synthesizes results into a comprehensive answer.
 
+use super::{remaining_time, timeout_error, with_timeout_and_cancellation, Agent, AgentContext};
+use crate::config::ResearchConfig;
 use crate::error::AgentError;
-use crate::llm::{LlmClient, LlmRequest};
+use crate::llm::LlmRequest;
 use crate::update::{AgentUpdate, ResultMetadata};
-use crate::ResearchConfig;
 
 use async_stream::try_stream;
-use futures_util::stream::Stream;
-use std::pin::Pin;
+use futures_util::Stream;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, Semaphore};
-use tokio_util::sync::CancellationToken;
 
-/// Type alias for boxed agent streams
+/// Buffer size for the channel collecting parallel sub-query results.
 ///
-/// This type is used in the `Agent` trait to enable trait objects.
-/// The `Pin<Box<...>>` wrapper is required because:
-/// 1. `dyn Stream` is not `Sized`, so must be behind a pointer
-/// 2. Many stream implementations are self-referential and require pinning
-pub type AgentStream<'a> = Pin<Box<dyn Stream<Item = Result<AgentUpdate, AgentError>> + Send + 'a>>;
+/// This should be at least as large as max_concurrent_sub_queries to avoid
+/// blocking completed tasks while others are still running. Using 10 as a
+/// reasonable default that works well with the typical 3-5 concurrent limit.
+const PARALLEL_EXECUTION_CHANNEL_BUFFER: usize = 10;
 
-/// Trait for all agents in the gemicro platform
+/// Deep Research Agent.
 ///
-/// Agents process queries and emit a stream of `AgentUpdate` events.
-/// The soft-typed event system (following Evergreen philosophy) means
-/// different agent types can emit different event types without
-/// modifying core infrastructure.
+/// Implements the "decompose → parallel execute → synthesize" pattern:
 ///
-/// # Implementing an Agent
+/// 1. **Decomposition**: Break the query into focused sub-questions
+/// 2. **Parallel Execution**: Answer each sub-question concurrently
+/// 3. **Synthesis**: Combine findings into a comprehensive answer
 ///
-/// ```text
-/// impl Agent for MyAgent {
-///     fn name(&self) -> &str { "my_agent" }
-///     fn description(&self) -> &str { "Does something cool" }
+/// # Events Emitted
 ///
-///     fn execute(&self, query: &str, context: AgentContext) -> AgentStream<'_> {
-///         Box::pin(async_stream::try_stream! {
-///             yield AgentUpdate::decomposition_started();
-///             // ... do work ...
-///             yield AgentUpdate::final_result(answer, metadata);
-///         })
-///     }
-/// }
-/// ```
-pub trait Agent: Send + Sync {
-    /// Machine-readable agent name (e.g., "deep_research", "react")
-    fn name(&self) -> &str;
-
-    /// Human-readable description of agent capabilities
-    fn description(&self) -> &str;
-
-    /// Execute the agent, returning a stream of updates
-    ///
-    /// The stream yields `AgentUpdate` events as work progresses.
-    /// Event types are agent-specific (e.g., "sub_query_completed" for Deep Research).
-    fn execute(&self, query: &str, context: AgentContext) -> AgentStream<'_>;
-}
-
-/// Buffer size for the mpsc channel used in parallel sub-query execution.
-/// Set larger than `max_concurrent_sub_queries` (default: 5) to avoid blocking senders.
-/// Value of 16 handles typical workloads and even unlimited concurrency scenarios.
-const PARALLEL_EXECUTION_CHANNEL_BUFFER: usize = 16;
-
-/// Calculate remaining time from total timeout, returning error if already exceeded
-fn remaining_time(
-    start: Instant,
-    total_timeout: Duration,
-    phase: &str,
-) -> Result<Duration, AgentError> {
-    let elapsed = start.elapsed();
-    if elapsed >= total_timeout {
-        Err(AgentError::Timeout {
-            elapsed_ms: elapsed.as_millis() as u64,
-            timeout_ms: total_timeout.as_millis() as u64,
-            phase: phase.to_string(),
-        })
-    } else {
-        Ok(total_timeout - elapsed)
-    }
-}
-
-/// Convert a tokio timeout error to AgentError::Timeout
-fn timeout_error(start: Instant, total_timeout: Duration, phase: &str) -> AgentError {
-    AgentError::Timeout {
-        elapsed_ms: start.elapsed().as_millis() as u64,
-        timeout_ms: total_timeout.as_millis() as u64,
-        phase: phase.to_string(),
-    }
-}
-
-/// Run an async operation with timeout and cancellation support
-///
-/// This helper consolidates the common pattern of:
-/// - Wrapping an async operation in a timeout
-/// - Racing against a cancellation token
-/// - Returning appropriate errors for each case
-async fn with_timeout_and_cancellation<T, F>(
-    future: F,
-    timeout_duration: Duration,
-    cancellation_token: &CancellationToken,
-    on_timeout: impl FnOnce() -> AgentError,
-) -> Result<T, AgentError>
-where
-    F: std::future::Future<Output = Result<T, AgentError>>,
-{
-    tokio::select! {
-        result = tokio::time::timeout(timeout_duration, future) => {
-            match result {
-                Ok(inner) => inner,
-                Err(_) => Err(on_timeout()),
-            }
-        }
-        _ = cancellation_token.cancelled() => {
-            Err(AgentError::Cancelled)
-        }
-    }
-}
-
-/// Shared resources for agent execution
-///
-/// Following [Evergreen spec](https://github.com/google-deepmind/evergreen-spec) philosophy:
-/// Contains ONLY cross-agent resources. Agent-specific config goes to constructors, not here.
-///
-/// # Cancellation Support
-///
-/// The `cancellation_token` field enables graceful shutdown. When cancelled:
-/// - Spawned sub-query tasks exit early
-/// - The collection loop stops
-/// - The stream yields `AgentError::Cancelled`
+/// - `decomposition_started` / `decomposition_complete`
+/// - `sub_query_started` / `sub_query_completed` / `sub_query_failed`
+/// - `synthesis_started`
+/// - `final_result`
 ///
 /// # Example
 ///
 /// ```no_run
-/// use gemicro_core::{AgentContext, LlmClient, LlmConfig};
-/// use tokio_util::sync::CancellationToken;
+/// use gemicro_core::{AgentContext, DeepResearchAgent, ResearchConfig, LlmClient, LlmConfig};
+/// use futures_util::StreamExt;
 ///
-/// # fn example() {
-/// let token = CancellationToken::new();
-/// let genai_client = rust_genai::Client::builder("key".to_string()).build();
-/// let llm = LlmClient::new(genai_client, LlmConfig::default());
-/// let context = AgentContext::new_with_cancellation(llm, token.clone());
+/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// let genai_client = rust_genai::Client::builder("api-key".to_string()).build();
+/// let context = AgentContext::new(LlmClient::new(genai_client, LlmConfig::default()));
+/// let agent = DeepResearchAgent::new(ResearchConfig::default())?;
 ///
-/// // In another task: token.cancel() to gracefully stop execution
+/// let stream = agent.execute("What is Rust?", context);
+/// futures_util::pin_mut!(stream);
+/// while let Some(update) = stream.next().await {
+///     println!("{:?}", update?);
+/// }
+/// # Ok(())
 /// # }
 /// ```
-#[derive(Clone)]
-pub struct AgentContext {
-    /// LLM client (Arc-wrapped for cloning across parallel tasks)
-    pub llm: Arc<LlmClient>,
-    /// Cancellation token for graceful shutdown
-    pub cancellation_token: CancellationToken,
-}
-
-impl AgentContext {
-    /// Create a new agent context from an LlmClient
-    ///
-    /// Uses a new cancellation token that is never cancelled.
-    pub fn new(llm: LlmClient) -> Self {
-        Self::new_with_cancellation(llm, CancellationToken::new())
-    }
-
-    /// Create a new agent context with a specific cancellation token
-    ///
-    /// Use this when you want to control cancellation from outside,
-    /// such as on Ctrl+C in a CLI application.
-    pub fn new_with_cancellation(llm: LlmClient, cancellation_token: CancellationToken) -> Self {
-        Self {
-            llm: Arc::new(llm),
-            cancellation_token,
-        }
-    }
-
-    /// Create from an existing Arc (useful when sharing across agents)
-    ///
-    /// Uses a new cancellation token that is never cancelled.
-    pub fn from_arc(llm: Arc<LlmClient>) -> Self {
-        Self::from_arc_with_cancellation(llm, CancellationToken::new())
-    }
-
-    /// Create from an existing Arc with a specific cancellation token
-    pub fn from_arc_with_cancellation(
-        llm: Arc<LlmClient>,
-        cancellation_token: CancellationToken,
-    ) -> Self {
-        Self {
-            llm,
-            cancellation_token,
-        }
-    }
-}
-
-/// Deep Research agent
-///
-/// Implements the Deep Research pattern:
-/// 1. **Decomposition**: Break query into N sub-queries (configurable)
-/// 2. **Parallel Execution**: Execute sub-queries concurrently, streaming updates
-/// 3. **Synthesis**: Combine results into comprehensive final answer
-///
-/// # Design
-///
-/// - Agent-specific config (`ResearchConfig`) passed at construction
-/// - Returns a stream of `AgentUpdate` events for real-time observability
-/// - Gracefully handles partial failures (continues if some sub-queries fail)
 pub struct DeepResearchAgent {
     config: ResearchConfig,
 }
 
 impl DeepResearchAgent {
-    /// Create a new Deep Research agent with the given configuration
+    /// Create a new Deep Research agent with the given configuration.
     ///
     /// # Errors
     ///
-    /// Returns `AgentError::InvalidConfig` if the configuration is invalid.
+    /// Returns `AgentError::InvalidConfig` if the configuration is invalid
+    /// (e.g., min_sub_queries > max_sub_queries).
     pub fn new(config: ResearchConfig) -> Result<Self, AgentError> {
-        config.validate()?;
+        // Validate config
+        if config.min_sub_queries > config.max_sub_queries {
+            return Err(AgentError::InvalidConfig(format!(
+                "min_sub_queries ({}) cannot be greater than max_sub_queries ({})",
+                config.min_sub_queries, config.max_sub_queries
+            )));
+        }
         Ok(Self { config })
     }
 
-    /// Execute the research, returning a stream of updates
+    /// Execute the deep research process.
     ///
-    /// The stream yields `AgentUpdate` events as work progresses:
+    /// This is the main entry point that orchestrates:
+    /// 1. Query decomposition into sub-questions
+    /// 2. Parallel execution of sub-queries
+    /// 3. Synthesis of results into a final answer
+    ///
+    /// Returns a stream of [`AgentUpdate`] events:
     /// - `decomposition_started` / `decomposition_complete`
     /// - `sub_query_started` / `sub_query_completed` / `sub_query_failed`
     /// - `synthesis_started`
@@ -393,10 +223,14 @@ impl Agent for DeepResearchAgent {
         "Decomposes queries into sub-questions, executes them in parallel, and synthesizes results"
     }
 
-    fn execute(&self, query: &str, context: AgentContext) -> AgentStream<'_> {
+    fn execute(&self, query: &str, context: AgentContext) -> super::AgentStream<'_> {
         Box::pin(DeepResearchAgent::execute(self, query, context))
     }
 }
+
+// ============================================================================
+// Private implementation details
+// ============================================================================
 
 /// Result of parallel sub-query execution
 struct ExecutionResult {
@@ -856,165 +690,6 @@ mod tests {
         assert!(matches!(agent, Err(AgentError::InvalidConfig(_))));
     }
 
-    #[test]
-    fn test_agent_context_new() {
-        // Just verify it compiles - we can't easily test without a real client
-        let _context_fn = |llm: LlmClient| AgentContext::new(llm);
-    }
-
-    // Timeout enforcement tests
-
-    /// Verifies that remaining_time returns Ok with correct duration when
-    /// sufficient time remains in the total timeout budget.
-    #[test]
-    fn test_remaining_time_not_exceeded() {
-        let start = Instant::now();
-        let total_timeout = Duration::from_secs(10);
-
-        let result = remaining_time(start, total_timeout, "test_phase");
-        assert!(result.is_ok());
-
-        let remaining = result.unwrap();
-        // Should have close to 10 seconds remaining (minus small elapsed time)
-        assert!(remaining > Duration::from_secs(9));
-        assert!(remaining <= Duration::from_secs(10));
-    }
-
-    /// Verifies that remaining_time returns a Timeout error when elapsed time
-    /// exceeds the total timeout budget.
-    #[test]
-    fn test_remaining_time_exceeded() {
-        let start = Instant::now();
-        // Use 10ms timeout with 50ms sleep for reliable CI behavior
-        let total_timeout = Duration::from_millis(10);
-
-        std::thread::sleep(Duration::from_millis(50));
-
-        let result = remaining_time(start, total_timeout, "decomposition");
-        assert!(result.is_err());
-
-        match result.unwrap_err() {
-            AgentError::Timeout {
-                elapsed_ms,
-                timeout_ms,
-                phase,
-            } => {
-                assert!(elapsed_ms >= 50); // At least 50ms elapsed
-                assert_eq!(timeout_ms, 10);
-                assert_eq!(phase, "decomposition");
-            }
-            _ => panic!("Expected Timeout error"),
-        }
-    }
-
-    /// Verifies that the exact boundary condition (elapsed == timeout) triggers
-    /// a timeout error, since we use >= comparison.
-    #[test]
-    fn test_remaining_time_exact_boundary() {
-        let start = Instant::now();
-        let total_timeout = Duration::from_millis(20);
-
-        // Sleep slightly past the timeout to ensure we hit the boundary
-        std::thread::sleep(Duration::from_millis(25));
-
-        let result = remaining_time(start, total_timeout, "boundary_test");
-        // At or past boundary should error
-        assert!(result.is_err());
-
-        match result.unwrap_err() {
-            AgentError::Timeout { phase, .. } => {
-                assert_eq!(phase, "boundary_test");
-            }
-            _ => panic!("Expected Timeout error"),
-        }
-    }
-
-    /// Verifies that the phase name is correctly preserved in timeout errors
-    /// for all agent execution phases.
-    #[test]
-    fn test_remaining_time_phase_name_preserved() {
-        let start = Instant::now();
-        let total_timeout = Duration::from_millis(10);
-        std::thread::sleep(Duration::from_millis(50));
-
-        // Test different phase names
-        for phase in &["decomposition", "parallel execution", "synthesis"] {
-            let result = remaining_time(start, total_timeout, phase);
-            assert!(result.is_err());
-
-            match result.unwrap_err() {
-                AgentError::Timeout {
-                    phase: error_phase, ..
-                } => {
-                    assert_eq!(&error_phase, phase);
-                }
-                _ => panic!("Expected Timeout error for phase: {}", phase),
-            }
-        }
-    }
-
-    /// Verifies that timeout_error correctly constructs a Timeout error with
-    /// accurate elapsed and timeout millisecond values.
-    #[test]
-    fn test_timeout_error_creation() {
-        let start = Instant::now();
-        let total_timeout = Duration::from_secs(5);
-
-        // Sleep a bit so elapsed > 0
-        std::thread::sleep(Duration::from_millis(20));
-
-        let error = timeout_error(start, total_timeout, "synthesis");
-
-        match error {
-            AgentError::Timeout {
-                elapsed_ms,
-                timeout_ms,
-                phase,
-            } => {
-                assert!(elapsed_ms >= 20); // At least 20ms elapsed
-                assert_eq!(timeout_ms, 5000); // 5 seconds = 5000ms
-                assert_eq!(phase, "synthesis");
-            }
-            _ => panic!("Expected Timeout error"),
-        }
-    }
-
-    /// Verifies that the Timeout error Display implementation includes all
-    /// relevant information: elapsed time, timeout limit, and phase name.
-    #[test]
-    fn test_timeout_error_display() {
-        let error = AgentError::Timeout {
-            elapsed_ms: 1500,
-            timeout_ms: 1000,
-            phase: "decomposition".to_string(),
-        };
-
-        let display = error.to_string();
-        assert!(display.contains("1500"));
-        assert!(display.contains("1000"));
-        assert!(display.contains("decomposition"));
-    }
-
-    /// Verifies that remaining_time correctly calculates the difference between
-    /// total timeout and elapsed time.
-    #[test]
-    fn test_remaining_time_calculates_difference() {
-        let start = Instant::now();
-        let total_timeout = Duration::from_millis(500);
-
-        // Sleep for 100ms
-        std::thread::sleep(Duration::from_millis(100));
-
-        let result = remaining_time(start, total_timeout, "test");
-        assert!(result.is_ok());
-
-        let remaining = result.unwrap();
-        // Should have ~400ms remaining (500 - 100)
-        // Allow generous tolerance for CI timing variations
-        assert!(remaining > Duration::from_millis(300));
-        assert!(remaining < Duration::from_millis(450));
-    }
-
     // parse_json_array edge case tests
 
     #[test]
@@ -1079,53 +754,5 @@ mod tests {
             error_msg.contains("invalid json here"),
             "Error should contain the invalid response text"
         );
-    }
-
-    // Error display tests
-
-    #[test]
-    fn test_agent_error_decomposition_failed_display() {
-        let error = AgentError::DecompositionFailed("LLM returned garbage".to_string());
-        let display = error.to_string();
-        assert!(display.contains("decompose"));
-        assert!(display.contains("LLM returned garbage"));
-    }
-
-    #[test]
-    fn test_agent_error_parse_failed_display() {
-        let error = AgentError::ParseFailed("invalid JSON".to_string());
-        let display = error.to_string();
-        assert!(display.contains("parse"));
-        assert!(display.contains("invalid JSON"));
-    }
-
-    #[test]
-    fn test_agent_error_synthesis_failed_display() {
-        let error = AgentError::SynthesisFailed("empty response".to_string());
-        let display = error.to_string();
-        assert!(display.contains("synthesize"));
-        assert!(display.contains("empty response"));
-    }
-
-    #[test]
-    fn test_agent_error_all_sub_queries_failed_display() {
-        let error = AgentError::AllSubQueriesFailed;
-        let display = error.to_string();
-        assert!(display.contains("sub-queries failed"));
-    }
-
-    #[test]
-    fn test_agent_error_cancelled_display() {
-        let error = AgentError::Cancelled;
-        let display = error.to_string();
-        assert!(display.contains("cancelled"));
-    }
-
-    #[test]
-    fn test_agent_error_invalid_config_display() {
-        let error = AgentError::InvalidConfig("min > max".to_string());
-        let display = error.to_string();
-        assert!(display.contains("configuration"));
-        assert!(display.contains("min > max"));
     }
 }
