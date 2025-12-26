@@ -94,11 +94,19 @@ jobs:
     if: always()
     needs: [check, test, test-integration, fmt, clippy, doc]
     steps:
-      - name: Check all jobs passed
+      - name: Check required jobs passed
         run: |
-          # Check if any job failed (not skipped, actually failed)
-          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" ]]; then
-            echo "One or more jobs failed"
+          # Integration tests are informational (external API dependency)
+          # Only fail on core job failures: check, test, fmt, clippy, doc
+          CORE_RESULTS="${{ needs.check.result }},${{ needs.test.result }},${{ needs.fmt.result }},${{ needs.clippy.result }},${{ needs.doc.result }}"
+          if [[ "$CORE_RESULTS" == *"failure"* ]]; then
+            echo "One or more core jobs failed"
             exit 1
           fi
-          echo "All jobs passed or were skipped"
+
+          # Report integration test status but don't block
+          if [[ "${{ needs.test-integration.result }}" == "failure" ]]; then
+            echo "⚠️ Integration tests failed (informational - external API dependency)"
+          fi
+
+          echo "All required jobs passed or were skipped"
