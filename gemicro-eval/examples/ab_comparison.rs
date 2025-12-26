@@ -161,13 +161,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 futures_util::pin_mut!(stream);
 
                 // Collect the judge result
-                while let Some(update) = stream.next().await {
-                    if let Ok(update) = update {
-                        if update.event_type == "judge_result" {
-                            let correct = update.data["correct"].as_bool().unwrap_or(false);
-                            result
-                                .scores
-                                .insert("llm_judge".to_string(), if correct { 1.0 } else { 0.0 });
+                while let Some(update_result) = stream.next().await {
+                    match update_result {
+                        Ok(update) => {
+                            if update.event_type == "judge_result" {
+                                let correct = update.data["correct"].as_bool().unwrap_or(false);
+                                result.scores.insert(
+                                    "llm_judge".to_string(),
+                                    if correct { 1.0 } else { 0.0 },
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("   ⚠ Judge error: {}", e);
                         }
                     }
                 }
