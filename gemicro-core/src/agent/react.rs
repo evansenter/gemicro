@@ -488,13 +488,12 @@ mod tests {
         assert_eq!(truncate_for_error(s, 2), "你好...");
     }
 
-    // Scratchpad truncation tests
-    #[test]
-    fn test_scratchpad_max_size_constant() {
-        // Verify the constant is reasonable (20KB allows ~50-100 iterations)
+    // Compile-time assertion that MAX_SCRATCHPAD_CHARS is within reasonable bounds
+    // (20KB allows ~50-100 iterations without excessive context growth)
+    const _: () = {
         assert!(MAX_SCRATCHPAD_CHARS >= 10_000);
         assert!(MAX_SCRATCHPAD_CHARS <= 100_000);
-    }
+    };
 
     // Unknown tool handling test
     // Note: execute_tool is async and requires AgentContext, but the unknown tool
