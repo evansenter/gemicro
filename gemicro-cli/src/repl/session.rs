@@ -4,6 +4,7 @@
 
 use super::commands::Command;
 use crate::display::{ExecutionState, IndicatifRenderer, Phase, Renderer};
+use crate::error::ErrorFormatter;
 use crate::format::truncate;
 use anyhow::{Context, Result};
 use futures_util::StreamExt;
@@ -36,10 +37,17 @@ pub struct Session {
     /// LLM client (shared across agents)
     llm: Arc<LlmClient>,
 
-    /// Path to the CLI binary (for mtime checking)
+    /// Path to the CLI binary (for mtime checking).
+    ///
+    /// Used to detect when the binary has been recompiled, showing a [stale]
+    /// indicator in the prompt. This enables future hot-reload functionality.
+    /// See: https://github.com/evansenter/gemicro/issues/36
     binary_path: Option<PathBuf>,
 
-    /// Last known mtime of the binary
+    /// Last known mtime of the binary.
+    ///
+    /// Compared against current mtime to detect staleness.
+    /// TODO(#36): Implement actual hot-reload when binary changes.
     binary_mtime: Option<SystemTime>,
 
     /// Whether to use plain text output (no markdown rendering)
@@ -300,26 +308,9 @@ impl Session {
     }
 }
 
-/// Format an AgentError with helpful suggestions
+/// Format an AgentError with helpful suggestions (plain, no emoji).
 fn format_agent_error(e: AgentError) -> anyhow::Error {
-    let suggestion = match &e {
-        AgentError::Timeout { phase, .. } => Some(format!(
-            "Timeout during {}. Try increasing timeout settings.",
-            phase
-        )),
-        AgentError::AllSubQueriesFailed => {
-            Some("All sub-queries failed. Check your API key and network connection.".to_string())
-        }
-        AgentError::InvalidConfig(msg) => Some(format!("Configuration error: {}", msg)),
-        AgentError::Llm(llm_err) => Some(format!("LLM error: {}", llm_err)),
-        _ => None,
-    };
-
-    let err = anyhow::anyhow!("Agent error: {}", e);
-    if let Some(hint) = suggestion {
-        eprintln!("{}", hint);
-    }
-    err
+    ErrorFormatter::plain().format(e)
 }
 
 #[cfg(test)]
