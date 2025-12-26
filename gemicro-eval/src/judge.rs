@@ -79,13 +79,15 @@ impl Default for JudgeConfig {
 }
 
 impl JudgeConfig {
-    /// Create a new config with a custom system instruction
+    /// Create a new config with a custom system instruction.
+    #[must_use]
     pub fn with_system_instruction(mut self, instruction: impl Into<String>) -> Self {
         self.system_instruction = instruction.into();
         self
     }
 
-    /// Set the timeout
+    /// Set the timeout.
+    #[must_use]
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
         self
