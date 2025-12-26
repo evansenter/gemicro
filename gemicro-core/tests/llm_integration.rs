@@ -265,3 +265,75 @@ async fn test_google_search_grounding() {
         }
     }
 }
+
+#[tokio::test]
+async fn test_structured_output_response_format() {
+    let Some(api_key) = get_api_key() else {
+        eprintln!("Skipping test: GEMINI_API_KEY not set");
+        return;
+    };
+
+    let client = create_test_client(&api_key);
+
+    // Define a simple JSON schema for structured output
+    let schema = serde_json::json!({
+        "type": "object",
+        "properties": {
+            "answer": {
+                "type": "string",
+                "description": "The answer to the question"
+            },
+            "confidence": {
+                "type": "number",
+                "description": "Confidence level from 0 to 1"
+            }
+        },
+        "required": ["answer", "confidence"]
+    });
+
+    let request = LlmRequest::new("What is the capital of France? Respond with high confidence.")
+        .with_response_format(schema);
+
+    let response = client.generate(request).await;
+
+    match response {
+        Ok(resp) => {
+            println!("Structured response: {}", resp.text);
+
+            // Parse the response as JSON
+            let parsed: Result<serde_json::Value, _> = serde_json::from_str(&resp.text);
+            assert!(
+                parsed.is_ok(),
+                "Response should be valid JSON, got: {}",
+                resp.text
+            );
+
+            let json = parsed.unwrap();
+            assert!(
+                json.get("answer").is_some(),
+                "Response should have 'answer' field"
+            );
+            assert!(
+                json.get("confidence").is_some(),
+                "Response should have 'confidence' field"
+            );
+
+            // Check the answer mentions Paris
+            let answer = json["answer"].as_str().unwrap_or("");
+            assert!(
+                answer.to_lowercase().contains("paris"),
+                "Answer should mention Paris, got: {}",
+                answer
+            );
+
+            // Check confidence is a number
+            assert!(
+                json["confidence"].is_number(),
+                "Confidence should be a number"
+            );
+        }
+        Err(e) => {
+            panic!("Structured output request failed: {:?}", e);
+        }
+    }
+}

@@ -227,6 +227,11 @@ impl Scorers {
         Self { scorers }
     }
 
+    /// Add a scorer to the collection.
+    pub fn add(&mut self, scorer: impl Scorer + 'static) {
+        self.scorers.push(Box::new(scorer));
+    }
+
     /// Score a prediction against ground truth using all scorers.
     ///
     /// Returns a map of scorer_name -> score.

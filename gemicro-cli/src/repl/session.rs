@@ -3,12 +3,12 @@
 //! Handles the interactive session loop, command processing, and agent execution.
 
 use super::commands::Command;
-use super::registry::AgentRegistry;
 use crate::display::{ExecutionState, IndicatifRenderer, Phase, Renderer};
 use crate::format::truncate;
 use anyhow::{Context, Result};
 use futures_util::StreamExt;
 use gemicro_core::{AgentContext, AgentError, ConversationHistory, HistoryEntry, LlmClient};
+use gemicro_runner::AgentRegistry;
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 use std::path::PathBuf;
@@ -26,6 +26,9 @@ const HISTORY_PREVIEW_CHARS: usize = 256;
 pub struct Session {
     /// Agent registry
     pub registry: AgentRegistry,
+
+    /// Currently selected agent name
+    current_agent_name: String,
 
     /// Conversation history
     pub history: ConversationHistory,
@@ -56,12 +59,35 @@ impl Session {
 
         Self {
             registry: AgentRegistry::new(),
+            current_agent_name: String::new(),
             history: ConversationHistory::new(),
             llm: Arc::new(llm),
             binary_path,
             binary_mtime,
             plain,
         }
+    }
+
+    /// Set the current agent by name.
+    ///
+    /// This should be called after registering agents to set the initial selection.
+    /// Returns `Ok(())` if the agent exists, `Err` with message otherwise.
+    pub fn set_current_agent(&mut self, name: &str) -> Result<(), String> {
+        if self.registry.contains(name) {
+            self.current_agent_name = name.to_string();
+            Ok(())
+        } else {
+            Err(format!(
+                "Unknown agent '{}'. Available: {}",
+                name,
+                self.registry.list().join(", ")
+            ))
+        }
+    }
+
+    /// Get the current agent name.
+    pub fn current_agent_name(&self) -> &str {
+        &self.current_agent_name
     }
 
     /// Check if the binary has been modified since session started
@@ -101,10 +127,13 @@ impl Session {
 
     /// Run a query through the current agent
     pub async fn run_query(&mut self, query: &str) -> Result<()> {
+        if self.current_agent_name.is_empty() {
+            anyhow::bail!("No agent selected. Register agents and call set_current_agent() first.");
+        }
         let agent = self
             .registry
-            .current_agent()
-            .context("No agent available")?;
+            .get(&self.current_agent_name)
+            .context("Selected agent no longer available")?;
 
         let agent_name = agent.name().to_string();
 
@@ -172,7 +201,12 @@ impl Session {
         loop {
             // Build prompt with stale indicator
             let stale_indicator = if self.is_stale() { " [stale]" } else { "" };
-            let prompt = format!("[{}{}] > ", self.registry.current_name(), stale_indicator);
+            let agent_display = if self.current_agent_name.is_empty() {
+                "no agent"
+            } else {
+                &self.current_agent_name
+            };
+            let prompt = format!("[{}{}] > ", agent_display, stale_indicator);
 
             match rl.readline(&prompt) {
                 Ok(line) => {
@@ -185,7 +219,7 @@ impl Session {
                             }
                         }
                         Command::Agent(name) => {
-                            if let Err(e) = self.registry.switch(&name) {
+                            if let Err(e) = self.set_current_agent(&name) {
                                 eprintln!("{}", e);
                             } else {
                                 println!("Switched to agent: {}", name);
@@ -194,7 +228,7 @@ impl Session {
                         Command::ListAgents => {
                             println!("Available agents:");
                             for name in self.registry.list() {
-                                let marker = if name == self.registry.current_name() {
+                                let marker = if name == self.current_agent_name() {
                                     " *"
                                 } else {
                                     ""

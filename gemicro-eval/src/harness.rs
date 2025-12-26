@@ -152,16 +152,15 @@ impl EvalHarness {
     /// # Returns
     ///
     /// An `EvalSummary` with aggregated results and per-question details.
-    pub async fn evaluate<A, D>(
+    pub async fn evaluate<D>(
         &self,
-        agent: &A,
+        agent: &dyn Agent,
         dataset: &D,
         sample_size: Option<usize>,
         scorers: Scorers,
         llm: LlmClient,
     ) -> Result<EvalSummary, EvalError>
     where
-        A: Agent,
         D: Dataset,
     {
         let start_time = Instant::now();
@@ -247,9 +246,9 @@ impl EvalHarness {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn evaluate_with_progress<A, D, F>(
+    pub async fn evaluate_with_progress<D, F>(
         &self,
-        agent: &A,
+        agent: &dyn Agent,
         dataset: &D,
         sample_size: Option<usize>,
         scorers: Scorers,
@@ -257,7 +256,6 @@ impl EvalHarness {
         on_progress: F,
     ) -> Result<EvalSummary, EvalError>
     where
-        A: Agent,
         D: Dataset,
         F: Fn(EvalProgress) + Send + Sync,
     {
@@ -338,8 +336,8 @@ impl Default for EvalHarness {
 }
 
 /// Evaluate a single question with retries.
-async fn evaluate_question<A: Agent>(
-    agent: &A,
+async fn evaluate_question(
+    agent: &dyn Agent,
     question: EvalQuestion,
     scorers: &Scorers,
     llm: &Arc<LlmClient>,

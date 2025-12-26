@@ -4,7 +4,6 @@
 //! and testing agents with real-time streaming output.
 
 mod commands;
-mod registry;
 mod session;
 
 // Re-exports for internal use

@@ -49,12 +49,14 @@
 //! ```
 
 pub mod metrics;
+pub mod registry;
 pub mod runner;
 pub mod state;
 pub mod utils;
 
 // Re-export public API
 pub use metrics::{ExecutionMetrics, SubQueryTiming};
+pub use registry::{AgentFactory, AgentRegistry};
 pub use runner::AgentRunner;
 pub use state::{ExecutionState, FinalResultData, Phase, SubQueryState, SubQueryStatus};
 pub use utils::{first_sentence, format_duration, truncate};

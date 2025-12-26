@@ -68,6 +68,11 @@ async fn run_interactive(args: &cli::Args) -> Result<()> {
         Box::new(DeepResearchAgent::new(research_config.clone()).expect("Invalid research config"))
     });
 
+    // Set the initial agent
+    session
+        .set_current_agent("deep_research")
+        .expect("deep_research agent should be registered");
+
     session.run().await
 }
 
