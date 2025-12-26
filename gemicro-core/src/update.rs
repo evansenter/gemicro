@@ -11,6 +11,14 @@ pub const EVENT_SUB_QUERY_FAILED: &str = "sub_query_failed";
 pub const EVENT_SYNTHESIS_STARTED: &str = "synthesis_started";
 pub const EVENT_FINAL_RESULT: &str = "final_result";
 
+// ReAct agent event types
+pub const EVENT_REACT_STARTED: &str = "react_started";
+pub const EVENT_REACT_THOUGHT: &str = "react_thought";
+pub const EVENT_REACT_ACTION: &str = "react_action";
+pub const EVENT_REACT_OBSERVATION: &str = "react_observation";
+pub const EVENT_REACT_COMPLETE: &str = "react_complete";
+pub const EVENT_REACT_MAX_ITERATIONS: &str = "react_max_iterations";
+
 /// Flexible event structure for agent updates.
 ///
 /// Inspired by [Evergreen protocol](https://github.com/google-deepmind/evergreen-spec)'s
@@ -164,6 +172,100 @@ impl AgentUpdate {
             data: json!({
                 "answer": answer,
                 "metadata": metadata,
+            }),
+        }
+    }
+
+    // =========================================================================
+    // ReAct Agent Events
+    // =========================================================================
+
+    /// Create a react_started event
+    pub fn react_started(query: &str, max_iterations: usize) -> Self {
+        Self {
+            event_type: EVENT_REACT_STARTED.into(),
+            message: "Starting ReAct reasoning loop".into(),
+            timestamp: SystemTime::now(),
+            data: json!({
+                "query": query,
+                "max_iterations": max_iterations,
+            }),
+        }
+    }
+
+    /// Create a react_thought event
+    pub fn react_thought(iteration: usize, thought: String) -> Self {
+        Self {
+            event_type: EVENT_REACT_THOUGHT.into(),
+            message: format!("Thought at iteration {}", iteration),
+            timestamp: SystemTime::now(),
+            data: json!({
+                "iteration": iteration,
+                "thought": thought,
+            }),
+        }
+    }
+
+    /// Create a react_action event
+    pub fn react_action(iteration: usize, tool: String, input: String) -> Self {
+        Self {
+            event_type: EVENT_REACT_ACTION.into(),
+            message: format!("Action: {}", tool),
+            timestamp: SystemTime::now(),
+            data: json!({
+                "iteration": iteration,
+                "tool": tool,
+                "input": input,
+            }),
+        }
+    }
+
+    /// Create a react_observation event
+    pub fn react_observation(
+        iteration: usize,
+        tool: String,
+        result: String,
+        is_error: bool,
+    ) -> Self {
+        Self {
+            event_type: EVENT_REACT_OBSERVATION.into(),
+            message: if is_error {
+                format!("Observation (error) from {}", tool)
+            } else {
+                format!("Observation from {}", tool)
+            },
+            timestamp: SystemTime::now(),
+            data: json!({
+                "iteration": iteration,
+                "tool": tool,
+                "result": result,
+                "is_error": is_error,
+            }),
+        }
+    }
+
+    /// Create a react_complete event
+    pub fn react_complete(iterations_used: usize, final_answer: String) -> Self {
+        Self {
+            event_type: EVENT_REACT_COMPLETE.into(),
+            message: format!("ReAct complete after {} iterations", iterations_used),
+            timestamp: SystemTime::now(),
+            data: json!({
+                "iterations_used": iterations_used,
+                "final_answer": final_answer,
+            }),
+        }
+    }
+
+    /// Create a react_max_iterations event
+    pub fn react_max_iterations(max_iterations: usize, last_thought: String) -> Self {
+        Self {
+            event_type: EVENT_REACT_MAX_ITERATIONS.into(),
+            message: format!("Reached max iterations ({})", max_iterations),
+            timestamp: SystemTime::now(),
+            data: json!({
+                "max_iterations": max_iterations,
+                "last_thought": last_thought,
             }),
         }
     }
