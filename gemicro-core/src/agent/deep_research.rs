@@ -17,10 +17,10 @@ use tokio::sync::{mpsc, Semaphore};
 
 /// Buffer size for the channel collecting parallel sub-query results.
 ///
-/// This should be at least as large as max_concurrent_sub_queries to avoid
-/// blocking completed tasks while others are still running. Using 10 as a
-/// reasonable default that works well with the typical 3-5 concurrent limit.
-const PARALLEL_EXECUTION_CHANNEL_BUFFER: usize = 10;
+/// This should be at least as large as max_sub_queries (default: 5) to avoid
+/// blocking completed tasks while others are still running. Using 16 provides
+/// headroom for configs with larger max_sub_queries values.
+const PARALLEL_EXECUTION_CHANNEL_BUFFER: usize = 16;
 
 /// Deep Research Agent.
 ///
@@ -66,15 +66,9 @@ impl DeepResearchAgent {
     /// # Errors
     ///
     /// Returns `AgentError::InvalidConfig` if the configuration is invalid
-    /// (e.g., min_sub_queries > max_sub_queries).
+    /// (e.g., min_sub_queries > max_sub_queries, zero timeout, empty prompts).
     pub fn new(config: ResearchConfig) -> Result<Self, AgentError> {
-        // Validate config
-        if config.min_sub_queries > config.max_sub_queries {
-            return Err(AgentError::InvalidConfig(format!(
-                "min_sub_queries ({}) cannot be greater than max_sub_queries ({})",
-                config.min_sub_queries, config.max_sub_queries
-            )));
-        }
+        config.validate()?;
         Ok(Self { config })
     }
 
