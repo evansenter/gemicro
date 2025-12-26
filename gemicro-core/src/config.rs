@@ -472,6 +472,7 @@ impl LlmConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rstest::rstest;
 
     #[test]
     fn test_model_constant() {
@@ -888,59 +889,48 @@ mod tests {
         assert!(prompts.validate().is_ok());
     }
 
-    #[test]
-    fn test_research_prompts_validation_missing_min_placeholder() {
-        let prompts = ResearchPrompts {
-            decomposition_template: "Query: {query}, max: {max}".to_string(),
-            ..Default::default()
+    // Parameterized tests for missing individual placeholders
+    #[rstest]
+    #[case::missing_min_in_decomposition(
+        "decomposition_template",
+        "Query: {query}, max: {max}",
+        "{min}"
+    )]
+    #[case::missing_max_in_decomposition(
+        "decomposition_template",
+        "Query: {query}, min: {min}",
+        "{max}"
+    )]
+    #[case::missing_query_in_decomposition(
+        "decomposition_template",
+        "Generate {min}-{max} sub-queries",
+        "{query}"
+    )]
+    #[case::missing_query_in_synthesis("synthesis_template", "Findings: {findings}", "{query}")]
+    #[case::missing_findings_in_synthesis("synthesis_template", "Query: {query}", "{findings}")]
+    fn test_missing_placeholder(
+        #[case] field: &str,
+        #[case] template: &str,
+        #[case] expected_missing: &str,
+    ) {
+        let prompts = match field {
+            "decomposition_template" => ResearchPrompts {
+                decomposition_template: template.to_string(),
+                ..Default::default()
+            },
+            "synthesis_template" => ResearchPrompts {
+                synthesis_template: template.to_string(),
+                ..Default::default()
+            },
+            _ => panic!("Unknown field: {}", field),
         };
         let result = prompts.validate();
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("{min}"));
-    }
-
-    #[test]
-    fn test_research_prompts_validation_missing_max_placeholder() {
-        let prompts = ResearchPrompts {
-            decomposition_template: "Query: {query}, min: {min}".to_string(),
-            ..Default::default()
-        };
-        let result = prompts.validate();
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("{max}"));
-    }
-
-    #[test]
-    fn test_research_prompts_validation_missing_query_in_decomposition() {
-        let prompts = ResearchPrompts {
-            decomposition_template: "Generate {min}-{max} sub-queries".to_string(),
-            ..Default::default()
-        };
-        let result = prompts.validate();
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("{query}"));
-    }
-
-    #[test]
-    fn test_research_prompts_validation_missing_query_in_synthesis() {
-        let prompts = ResearchPrompts {
-            synthesis_template: "Findings: {findings}".to_string(),
-            ..Default::default()
-        };
-        let result = prompts.validate();
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("{query}"));
-    }
-
-    #[test]
-    fn test_research_prompts_validation_missing_findings_placeholder() {
-        let prompts = ResearchPrompts {
-            synthesis_template: "Query: {query}".to_string(),
-            ..Default::default()
-        };
-        let result = prompts.validate();
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("{findings}"));
+        assert!(result.is_err(), "Expected validation to fail");
+        assert!(
+            result.unwrap_err().to_string().contains(expected_missing),
+            "Error should mention {}",
+            expected_missing
+        );
     }
 
     #[test]

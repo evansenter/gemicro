@@ -266,6 +266,7 @@ impl Default for Scorers {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rstest::rstest;
 
     #[test]
     fn test_normalize() {
@@ -281,112 +282,50 @@ mod tests {
         assert_eq!(words(""), Vec::<String>::new());
     }
 
-    // ExactMatch tests
-    #[test]
-    fn test_exact_match_identical() {
-        let scorer = ExactMatch;
-        assert_eq!(scorer.score("Paris", "Paris"), 1.0);
+    // Parameterized ExactMatch tests
+    #[rstest]
+    #[case::identical("Paris", "Paris", 1.0)]
+    #[case::case_insensitive("PARIS", "paris", 1.0)]
+    #[case::mixed_case("PaRiS", "paris", 1.0)]
+    #[case::whitespace_pred("  Paris  ", "Paris", 1.0)]
+    #[case::whitespace_collapse("New   York", "new york", 1.0)]
+    #[case::different("London", "Paris", 0.0)]
+    #[case::both_empty("", "", 1.0)]
+    #[case::pred_only("Paris", "", 0.0)]
+    #[case::truth_only("", "Paris", 0.0)]
+    fn test_exact_match(#[case] pred: &str, #[case] truth: &str, #[case] expected: f64) {
+        assert_eq!(ExactMatch.score(pred, truth), expected);
     }
 
-    #[test]
-    fn test_exact_match_case_insensitive() {
-        let scorer = ExactMatch;
-        assert_eq!(scorer.score("PARIS", "paris"), 1.0);
-        assert_eq!(scorer.score("PaRiS", "paris"), 1.0);
-    }
-
-    #[test]
-    fn test_exact_match_whitespace() {
-        let scorer = ExactMatch;
-        assert_eq!(scorer.score("  Paris  ", "Paris"), 1.0);
-        assert_eq!(scorer.score("New   York", "new york"), 1.0);
-    }
-
-    #[test]
-    fn test_exact_match_different() {
-        let scorer = ExactMatch;
-        assert_eq!(scorer.score("London", "Paris"), 0.0);
-    }
-
-    #[test]
-    fn test_exact_match_empty() {
-        let scorer = ExactMatch;
-        assert_eq!(scorer.score("", ""), 1.0);
-        assert_eq!(scorer.score("Paris", ""), 0.0);
-        assert_eq!(scorer.score("", "Paris"), 0.0);
-    }
-
-    // F1 tests
-    #[test]
-    fn test_f1_identical() {
-        let scorer = F1Score;
-        assert_eq!(scorer.score("the cat sat", "the cat sat"), 1.0);
-    }
-
-    #[test]
-    fn test_f1_partial_overlap() {
-        let scorer = F1Score;
-        // pred: [cat, dog], truth: [cat, sat]
-        // overlap: [cat] = 1
-        // precision = 1/2, recall = 1/2, F1 = 0.5
-        let score = scorer.score("cat dog", "cat sat");
-        assert!((score - 0.5).abs() < 0.001);
-    }
-
-    #[test]
-    fn test_f1_no_overlap() {
-        let scorer = F1Score;
-        assert_eq!(scorer.score("apple banana", "cat dog"), 0.0);
-    }
-
-    #[test]
-    fn test_f1_empty() {
-        let scorer = F1Score;
-        assert_eq!(scorer.score("", ""), 1.0);
-        assert_eq!(scorer.score("word", ""), 0.0);
-        assert_eq!(scorer.score("", "word"), 0.0);
-    }
-
-    #[test]
-    fn test_f1_case_insensitive() {
-        let scorer = F1Score;
-        assert_eq!(scorer.score("THE CAT", "the cat"), 1.0);
-    }
-
-    // Contains tests
-    #[test]
-    fn test_contains_exact() {
-        let scorer = Contains;
-        assert_eq!(scorer.score("Paris", "Paris"), 1.0);
-    }
-
-    #[test]
-    fn test_contains_substring() {
-        let scorer = Contains;
-        assert_eq!(
-            scorer.score("The capital of France is Paris.", "Paris"),
-            1.0
+    // Parameterized F1 tests
+    #[rstest]
+    #[case::identical("the cat sat", "the cat sat", 1.0)]
+    #[case::partial_overlap("cat dog", "cat sat", 0.5)] // overlap=1, pred=2, truth=2
+    #[case::no_overlap("apple banana", "cat dog", 0.0)]
+    #[case::both_empty("", "", 1.0)]
+    #[case::pred_only("word", "", 0.0)]
+    #[case::truth_only("", "word", 0.0)]
+    #[case::case_insensitive("THE CAT", "the cat", 1.0)]
+    fn test_f1_score(#[case] pred: &str, #[case] truth: &str, #[case] expected: f64) {
+        let score = F1Score.score(pred, truth);
+        assert!(
+            (score - expected).abs() < 0.001,
+            "Expected {}, got {}",
+            expected,
+            score
         );
     }
 
-    #[test]
-    fn test_contains_case_insensitive() {
-        let scorer = Contains;
-        assert_eq!(scorer.score("PARIS is great", "paris"), 1.0);
-    }
-
-    #[test]
-    fn test_contains_not_found() {
-        let scorer = Contains;
-        assert_eq!(scorer.score("London is great", "Paris"), 0.0);
-    }
-
-    #[test]
-    fn test_contains_empty() {
-        let scorer = Contains;
-        // Empty ground truth is always contained
-        assert_eq!(scorer.score("anything", ""), 1.0);
-        assert_eq!(scorer.score("", "Paris"), 0.0);
+    // Parameterized Contains tests
+    #[rstest]
+    #[case::exact("Paris", "Paris", 1.0)]
+    #[case::substring("The capital of France is Paris.", "Paris", 1.0)]
+    #[case::case_insensitive("PARIS is great", "paris", 1.0)]
+    #[case::not_found("London is great", "Paris", 0.0)]
+    #[case::empty_truth("anything", "", 1.0)] // empty truth always contained
+    #[case::empty_pred("", "Paris", 0.0)]
+    fn test_contains(#[case] pred: &str, #[case] truth: &str, #[case] expected: f64) {
+        assert_eq!(Contains.score(pred, truth), expected);
     }
 
     // Scorers collection tests

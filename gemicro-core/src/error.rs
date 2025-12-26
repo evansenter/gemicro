@@ -102,12 +102,43 @@ pub enum LlmError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rstest::rstest;
 
-    #[test]
-    fn test_agent_error_display() {
-        let err = AgentError::DecompositionFailed("Invalid JSON".to_string());
-        assert!(err.to_string().contains("decompose"));
-        assert!(err.to_string().contains("Invalid JSON"));
+    // Parameterized test for AgentError display messages
+    #[rstest]
+    #[case::decomposition_failed(
+        AgentError::DecompositionFailed("Invalid JSON".into()),
+        &["decompose", "Invalid JSON"]
+    )]
+    #[case::parse_failed(
+        AgentError::ParseFailed("bad format".into()),
+        &["parse", "bad format"]
+    )]
+    #[case::synthesis_failed(
+        AgentError::SynthesisFailed("Empty response".into()),
+        &["synthesize", "Empty response"]
+    )]
+    #[case::all_sub_queries_failed(
+        AgentError::AllSubQueriesFailed,
+        &["sub-queries failed"]
+    )]
+    #[case::cancelled(
+        AgentError::Cancelled,
+        &["cancelled"]
+    )]
+    #[case::timeout(
+        AgentError::Timeout { elapsed_ms: 5000, timeout_ms: 3000, phase: "decomposition".into() },
+        &["5000", "3000", "decomposition"]
+    )]
+    #[case::invalid_config(
+        AgentError::InvalidConfig("min > max".into()),
+        &["configuration", "min > max"]
+    )]
+    fn test_agent_error_display(#[case] error: AgentError, #[case] expected: &[&str]) {
+        let display = error.to_string();
+        for s in expected {
+            assert!(display.contains(s), "Expected '{}' in '{}'", s, display);
+        }
     }
 
     #[test]
@@ -125,55 +156,5 @@ mod tests {
 
         let gemicro_err: GemicroError = agent_err.into();
         assert!(matches!(gemicro_err, GemicroError::Agent(_)));
-    }
-
-    #[test]
-    fn test_all_sub_queries_failed() {
-        let err = AgentError::AllSubQueriesFailed;
-        assert!(err.to_string().contains("All sub-queries failed"));
-    }
-
-    #[test]
-    fn test_parse_failed_display() {
-        let err = AgentError::ParseFailed("Invalid JSON".to_string());
-        let display = err.to_string();
-        assert!(display.contains("parse"));
-        assert!(display.contains("Invalid JSON"));
-    }
-
-    #[test]
-    fn test_synthesis_failed_display() {
-        let err = AgentError::SynthesisFailed("Empty response".to_string());
-        let display = err.to_string();
-        assert!(display.contains("synthesize"));
-        assert!(display.contains("Empty response"));
-    }
-
-    #[test]
-    fn test_cancelled_display() {
-        let err = AgentError::Cancelled;
-        let display = err.to_string();
-        assert!(display.contains("cancelled"));
-    }
-
-    #[test]
-    fn test_timeout_display() {
-        let err = AgentError::Timeout {
-            elapsed_ms: 5000,
-            timeout_ms: 3000,
-            phase: "decomposition".to_string(),
-        };
-        let display = err.to_string();
-        assert!(display.contains("5000"));
-        assert!(display.contains("3000"));
-        assert!(display.contains("decomposition"));
-    }
-
-    #[test]
-    fn test_invalid_config_display() {
-        let err = AgentError::InvalidConfig("min > max".to_string());
-        let display = err.to_string();
-        assert!(display.contains("Invalid configuration"));
-        assert!(display.contains("min > max"));
     }
 }
