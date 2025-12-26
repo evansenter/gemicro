@@ -174,6 +174,9 @@ impl ReactAgent {
                     if let Some(break_pos) = scratchpad[keep_from..].find("\n\n") {
                         let new_start = keep_from + break_pos + 2;
                         scratchpad = format!("[Earlier iterations truncated]\n\n{}", &scratchpad[new_start..]);
+                    } else {
+                        // Fallback: hard truncate if no paragraph boundary found
+                        scratchpad = format!("[Earlier iterations truncated]\n\n{}", &scratchpad[keep_from..]);
                     }
                 }
             }
@@ -516,5 +519,69 @@ mod tests {
         assert!(error_msg.contains("Unknown tool: 'magic_wand'"));
         assert!(error_msg.contains("calculator"));
         assert!(error_msg.contains("web_search"));
+    }
+
+    // Scratchpad truncation tests
+    #[test]
+    fn test_scratchpad_truncation_with_paragraph_boundary() {
+        // Simulate scratchpad truncation logic with paragraph boundary
+        // Structure: 100 old chars + \n\n + "Final iteration" (within last 100 chars)
+        let max_chars = 100;
+        let old_content = "x".repeat(100);
+        let new_content = "Final iteration content";
+        let mut scratchpad = format!("{}\n\n{}", old_content, new_content);
+
+        // scratchpad len = 100 + 2 + 23 = 125
+        // keep_from = 125 - 100 = 25, so \n\n at position 100-101 is in search range
+        if scratchpad.len() > max_chars {
+            let keep_from = scratchpad.len() - max_chars;
+            if let Some(break_pos) = scratchpad[keep_from..].find("\n\n") {
+                let new_start = keep_from + break_pos + 2;
+                scratchpad = format!(
+                    "[Earlier iterations truncated]\n\n{}",
+                    &scratchpad[new_start..]
+                );
+            } else {
+                scratchpad = format!(
+                    "[Earlier iterations truncated]\n\n{}",
+                    &scratchpad[keep_from..]
+                );
+            }
+        }
+
+        assert!(scratchpad.starts_with("[Earlier iterations truncated]"));
+        assert!(scratchpad.contains("Final iteration content"));
+        assert!(!scratchpad.contains(&"x".repeat(50)));
+    }
+
+    #[test]
+    fn test_scratchpad_truncation_without_paragraph_boundary() {
+        // Simulate scratchpad truncation when no \n\n paragraph boundary exists
+        let max_chars = 50;
+        // No paragraph boundaries in this text
+        let mut scratchpad = "a".repeat(100);
+
+        if scratchpad.len() > max_chars {
+            let keep_from = scratchpad.len() - max_chars;
+            if let Some(break_pos) = scratchpad[keep_from..].find("\n\n") {
+                let new_start = keep_from + break_pos + 2;
+                scratchpad = format!(
+                    "[Earlier iterations truncated]\n\n{}",
+                    &scratchpad[new_start..]
+                );
+            } else {
+                // Fallback: hard truncate
+                scratchpad = format!(
+                    "[Earlier iterations truncated]\n\n{}",
+                    &scratchpad[keep_from..]
+                );
+            }
+        }
+
+        assert!(scratchpad.starts_with("[Earlier iterations truncated]"));
+        // Should have truncated to max_chars of 'a's
+        assert!(scratchpad.contains(&"a".repeat(50)));
+        // Should NOT be the original 100 chars
+        assert!(!scratchpad.contains(&"a".repeat(100)));
     }
 }
