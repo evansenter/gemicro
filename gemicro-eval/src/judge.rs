@@ -240,7 +240,7 @@ impl Agent for LlmJudgeAgent {
                 .map_err(|e| AgentError::ParseFailed(format!(
                     "Failed to parse judge output: {}. Response: {}",
                     e,
-                    gemicro_core::truncate(&response.text, 200)
+                    gemicro_core::truncate_with_count(&response.text, 200)
                 )))?;
 
             // Emit result event
