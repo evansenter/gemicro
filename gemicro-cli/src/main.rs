@@ -2,6 +2,7 @@
 
 mod cli;
 mod display;
+mod error;
 mod format;
 mod repl;
 
@@ -201,24 +202,7 @@ async fn run_research(args: &cli::Args, query: &str) -> Result<()> {
     Ok(())
 }
 
-/// Format an AgentError with helpful suggestions.
+/// Format an AgentError with helpful suggestions (with emoji hints).
 fn format_agent_error(e: AgentError) -> anyhow::Error {
-    let suggestion = match &e {
-        AgentError::Timeout { phase, .. } => Some(format!(
-            "💡 Timeout during {}. Try increasing --timeout or --llm-timeout",
-            phase
-        )),
-        AgentError::AllSubQueriesFailed => {
-            Some("💡 All sub-queries failed. Check your API key and network connection".to_string())
-        }
-        AgentError::InvalidConfig(msg) => Some(format!("💡 Configuration error: {}", msg)),
-        AgentError::Llm(llm_err) => Some(format!("💡 LLM error: {}", llm_err)),
-        _ => None,
-    };
-
-    let err = anyhow::anyhow!("Research failed: {}", e);
-    if let Some(hint) = suggestion {
-        eprintln!("\n{}", hint);
-    }
-    err
+    error::ErrorFormatter::with_emoji().format(e)
 }
