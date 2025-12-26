@@ -17,14 +17,14 @@ pub fn get_api_key() -> Option<String> {
     env::var("GEMINI_API_KEY").ok()
 }
 
-/// Create a test LlmClient with appropriate timeouts for testing.
+/// Create a test LlmClient with appropriate settings for testing.
 ///
-/// Uses shorter timeouts and lower token counts to keep tests fast.
+/// Uses shorter timeouts and sufficient token limits for reliable responses.
 pub fn create_test_client(api_key: &str) -> LlmClient {
     let genai_client = rust_genai::Client::builder(api_key.to_string()).build();
     let config = LlmConfig {
         timeout: Duration::from_secs(60),
-        max_tokens: 256,
+        max_tokens: 4096,
         temperature: 0.0, // Deterministic for testing
         max_retries: 1,
         retry_base_delay_ms: 500,
@@ -32,14 +32,14 @@ pub fn create_test_client(api_key: &str) -> LlmClient {
     LlmClient::new(genai_client, config)
 }
 
-/// Create a test AgentContext with appropriate timeouts for testing.
+/// Create a test AgentContext with appropriate settings for testing.
 ///
-/// Uses slightly higher token limit than `create_test_client` for agent tests.
+/// Uses sufficient token limits to avoid truncated responses during agent execution.
 pub fn create_test_context(api_key: &str) -> AgentContext {
     let genai_client = rust_genai::Client::builder(api_key.to_string()).build();
     let config = LlmConfig {
         timeout: Duration::from_secs(60),
-        max_tokens: 512,
+        max_tokens: 4096,
         temperature: 0.7,
         max_retries: 1,
         retry_base_delay_ms: 500,
@@ -58,7 +58,7 @@ pub fn create_test_context_with_cancellation(
     let genai_client = rust_genai::Client::builder(api_key.to_string()).build();
     let config = LlmConfig {
         timeout: Duration::from_secs(60),
-        max_tokens: 512,
+        max_tokens: 4096,
         temperature: 0.7,
         max_retries: 1,
         retry_base_delay_ms: 500,
