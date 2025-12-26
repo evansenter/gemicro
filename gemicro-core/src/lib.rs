@@ -45,7 +45,10 @@ pub mod update;
 pub mod utils;
 
 // Re-export public API
-pub use agent::{Agent, AgentContext, AgentStream, DeepResearchAgent};
+pub use agent::{
+    Agent, AgentContext, AgentStream, DeepResearchAgent, SimpleQaAgent, SimpleQaConfig,
+    EVENT_SIMPLE_QA_RESULT, EVENT_SIMPLE_QA_STARTED,
+};
 pub use config::{GemicroConfig, LlmConfig, ResearchConfig, ResearchPrompts, MODEL};
 pub use error::{AgentError, GemicroError, LlmError};
 pub use history::{ConversationHistory, HistoryEntry};

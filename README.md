@@ -7,6 +7,7 @@ Gemicro allows you to explore and interact with different AI agent patterns thro
 ## Features
 
 - 🔬 **Deep Research Agent**: Query decomposition with parallel sub-query execution and synthesis
+- 🎯 **Simple QA Agent**: Minimal reference implementation for agent authoring
 - 📊 **Real-time Observability**: Streaming updates show agent execution as it happens
 - 🏗️ **Extensible Architecture**: Soft-typed events allow adding new agent types without protocol changes
 - 📱 **Platform-Agnostic Core**: Library designed for future mobile and web support
@@ -204,6 +205,11 @@ See [GitHub Issues](https://github.com/evansenter/gemicro/issues) for the full r
 ## License
 
 MIT
+
+## Documentation
+
+- [Agent Authoring Guide](docs/AGENT_AUTHORING.md) - Complete walkthrough for implementing new agents
+- [CLAUDE.md](CLAUDE.md) - Project design philosophy and architecture decisions
 
 ## Contributing
 
