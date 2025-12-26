@@ -6,7 +6,7 @@
 //! - Timeout and cancellation handling
 //! - Streaming execution with `async_stream`
 //!
-//! See [`docs/AGENT_AUTHORING.md`] for a detailed walkthrough of these patterns.
+//! See `docs/AGENT_AUTHORING.md` for a detailed walkthrough of these patterns.
 
 use crate::agent::{remaining_time, timeout_error, with_timeout_and_cancellation};
 use crate::agent::{Agent, AgentContext, AgentStream};
