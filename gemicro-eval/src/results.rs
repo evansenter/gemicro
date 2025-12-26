@@ -337,6 +337,57 @@ mod tests {
         assert_eq!(parsed.total_duration.as_secs(), 5);
     }
 
+    #[test]
+    fn test_recalculate_averages_after_adding_scores() {
+        let question = sample_question();
+        let mut scores = HashMap::new();
+        scores.insert("exact_match".to_string(), 1.0);
+
+        let results = vec![
+            EvalResult::success(
+                &question,
+                "4".to_string(),
+                scores.clone(),
+                create_mock_metrics(),
+                0,
+            ),
+            EvalResult::success(
+                &question,
+                "four".to_string(),
+                scores.clone(),
+                create_mock_metrics(),
+                0,
+            ),
+        ];
+
+        let mut summary = EvalSummary::from_results(
+            "test".to_string(),
+            "agent".to_string(),
+            results,
+            std::time::Duration::from_secs(5),
+        );
+
+        // Verify initial state
+        assert_eq!(summary.avg_score("exact_match"), Some(1.0));
+        assert_eq!(summary.avg_score("llm_judge"), None);
+
+        // Add llm_judge scores after the fact (simulating LlmJudgeAgent)
+        summary.results[0]
+            .scores
+            .insert("llm_judge".to_string(), 1.0);
+        summary.results[1]
+            .scores
+            .insert("llm_judge".to_string(), 0.0);
+
+        // Recalculate averages
+        summary.recalculate_averages();
+
+        // Verify new score is included
+        assert_eq!(summary.avg_score("llm_judge"), Some(0.5));
+        // Existing scores are preserved
+        assert_eq!(summary.avg_score("exact_match"), Some(1.0));
+    }
+
     fn create_mock_metrics() -> ExecutionMetrics {
         use gemicro_runner::Phase;
 
