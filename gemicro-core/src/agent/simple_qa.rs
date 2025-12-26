@@ -13,6 +13,7 @@ use crate::agent::{Agent, AgentContext, AgentStream};
 use crate::error::AgentError;
 use crate::llm::LlmRequest;
 use crate::update::AgentUpdate;
+use crate::utils::truncate;
 
 use async_stream::try_stream;
 use serde_json::json;
@@ -220,15 +221,6 @@ impl Agent for SimpleQaAgent {
     }
 }
 
-/// Truncate a string to a maximum length, adding ellipsis if truncated.
-fn truncate(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_string()
-    } else {
-        format!("{}...", &s[..max_len.saturating_sub(3)])
-    }
-}
-
 // ============================================================================
 // Unit Tests
 // ============================================================================
@@ -303,21 +295,6 @@ mod tests {
         let agent = SimpleQaAgent::new(SimpleQaConfig::default()).unwrap();
         assert_eq!(agent.name(), "simple_qa");
         assert!(!agent.description().is_empty());
-    }
-
-    #[test]
-    fn test_truncate_short_string() {
-        assert_eq!(truncate("hello", 10), "hello");
-    }
-
-    #[test]
-    fn test_truncate_long_string() {
-        assert_eq!(truncate("hello world", 8), "hello...");
-    }
-
-    #[test]
-    fn test_truncate_exact_length() {
-        assert_eq!(truncate("hello", 5), "hello");
     }
 
     #[test]
