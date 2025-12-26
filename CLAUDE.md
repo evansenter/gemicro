@@ -51,6 +51,24 @@ cargo test -p gemicro-eval
 export GEMINI_API_KEY="your-api-key"  # Required for integration tests and examples
 ```
 
+## CLI Quick Reference
+
+```bash
+# Single query mode
+gemicro "What are the latest developments in quantum computing?"
+
+# Interactive REPL mode
+gemicro --interactive
+
+# With Google Search grounding for real-time web data
+gemicro "What AI news happened this week?" --google-search
+
+# Custom configuration
+gemicro "Compare async runtimes" --min-sub-queries 3 --max-sub-queries 7 --timeout 120
+```
+
+REPL commands: `/help`, `/agent [name]`, `/history`, `/clear`, `/quit`
+
 ## Crate Layers
 
 ```text
@@ -64,7 +82,7 @@ gemicro-cli (terminal rendering)
 
 | Crate | Purpose |
 |-------|---------|
-| **gemicro-core** | Platform-agnostic library: Agent trait, AgentUpdate events, LlmClient, conversation history |
+| **gemicro-core** | Platform-agnostic library: Agent trait, AgentUpdate events, LlmClient, conversation history. Agents: DeepResearchAgent, ReActAgent, SimpleQaAgent |
 | **gemicro-runner** | Headless execution runtime: ExecutionState, AgentRunner, AgentRegistry, metrics collection |
 | **gemicro-eval** | Evaluation framework: HotpotQA/custom datasets, scorers (ExactMatch, F1, Contains), LlmJudgeAgent |
 | **gemicro-cli** | Terminal UI: indicatif progress display, rustyline REPL, markdown rendering |
@@ -188,24 +206,6 @@ Use strong typing for:
 - **Cross-agent configuration**: Settings shared by all agents (like `LlmConfig`)
 - **Internal implementation**: Agent internals can use whatever structure they want
 
-### Future Evolution
-
-If we later need more structure, these are easy to add non-breaking:
-
-```rust
-// Option 1: Soft-typed agent config registry
-pub struct GemicroConfig {
-    pub llm: LlmConfig,
-    pub agent_configs: HashMap<String, serde_json::Value>,
-}
-
-// Option 2: Trait with associated config type (when we implement Agent trait)
-trait Agent {
-    type Config: Default + DeserializeOwned;
-    fn new(config: Self::Config) -> Self;
-}
-```
-
 ## File Structure
 
 ```
@@ -213,16 +213,22 @@ gemicro/
 ├── Cargo.toml                    # Workspace manifest
 ├── CLAUDE.md                     # This file
 ├── README.md                     # Public documentation
+├── docs/AGENT_AUTHORING.md       # Guide for implementing new agents
 │
 ├── gemicro-core/                 # Platform-agnostic library
 │   ├── src/
 │   │   ├── lib.rs                # Public API exports
-│   │   ├── agent.rs              # Agent trait + DeepResearchAgent
+│   │   ├── agent/                # Agent implementations
+│   │   │   ├── mod.rs            # Agent trait, AgentContext, helpers
+│   │   │   ├── deep_research.rs  # DeepResearchAgent (decompose → parallel → synthesize)
+│   │   │   ├── react.rs          # ReActAgent (Thought → Action → Observation loops)
+│   │   │   └── simple_qa.rs      # SimpleQaAgent (reference implementation)
 │   │   ├── update.rs             # Soft-typed AgentUpdate
 │   │   ├── error.rs              # Error types (#[non_exhaustive])
-│   │   ├── config.rs             # Cross-agent config only
+│   │   ├── config.rs             # LlmConfig + agent-specific configs
 │   │   ├── llm.rs                # LLM client (buffered + streaming)
-│   │   └── history.rs            # Conversation history
+│   │   ├── history.rs            # ConversationHistory, HistoryEntry
+│   │   └── utils.rs              # Shared utilities (truncation, etc.)
 │   ├── tests/
 │   │   ├── llm_integration.rs    # LLM integration tests (#[ignore])
 │   │   ├── agent_integration.rs  # Agent integration tests (#[ignore])
@@ -249,6 +255,19 @@ gemicro/
 │       └── judge.rs              # LlmJudgeAgent for evaluation
 │
 └── gemicro-cli/                  # Terminal UI binary
+    └── src/
+        ├── main.rs               # Entry point, stream orchestration
+        ├── cli.rs                # Clap argument parsing, OutputConfig
+        ├── format.rs             # Text utilities, markdown rendering
+        ├── error.rs              # CLI-specific error handling
+        ├── display/              # State-renderer pattern
+        │   ├── mod.rs
+        │   ├── state.rs          # DisplayState (terminal-agnostic)
+        │   └── indicatif.rs      # IndicatifRenderer implementation
+        └── repl/                 # Interactive REPL mode
+            ├── mod.rs
+            ├── session.rs        # REPL session management
+            └── commands.rs       # /help, /agent, /history, etc.
 ```
 
 ## Key Architectural Decisions
