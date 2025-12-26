@@ -272,11 +272,16 @@ gemicro/
 
 ### Adding a New Agent Type
 
-1. Create agent-specific config struct (e.g., `ReactConfig`)
-2. Define new event types (e.g., `"react_step_started"`, `"react_action_completed"`)
-3. Add helper constructors to `AgentUpdate` (optional but recommended)
-4. Implement agent using existing `Agent` trait
-5. **NO CHANGES TO CORE TYPES REQUIRED** ✅
+See [`docs/AGENT_AUTHORING.md`](docs/AGENT_AUTHORING.md) for a complete walkthrough. Reference implementation: `SimpleQaAgent` in `gemicro-core/src/agent/simple_qa.rs`.
+
+Quick checklist:
+1. Create agent-specific config struct (e.g., `ReactConfig`) with `validate()` method
+2. Define event type constants (e.g., `pub const EVENT_REACT_STEP: &str = "react_step"`)
+3. Implement `Agent` trait using `async_stream::try_stream!`
+4. Handle timeouts via `remaining_time()` and `with_timeout_and_cancellation()`
+5. Add unit tests for config, integration tests (`#[ignore]`) for execution
+6. Export from `mod.rs` and `lib.rs`
+7. **NO CHANGES TO CORE TYPES REQUIRED** ✅
 
 ### Adding a New Event Type
 
