@@ -739,6 +739,15 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_json_array_special_characters() {
+        // Test newlines and tabs in JSON strings
+        let input = r#"["Line1\nLine2", "Tab\there"]"#;
+        let result = parse_json_array(input).unwrap();
+        assert_eq!(result[0], "Line1\nLine2");
+        assert_eq!(result[1], "Tab\there");
+    }
+
+    #[test]
     fn test_parse_json_array_error_message_contains_response() {
         let input = "invalid json here";
         let result = parse_json_array(input);
