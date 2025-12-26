@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Gemicro is a CLI agent exploration platform for experimenting with AI agent implementation patterns, powered by the Gemini API via the rust-genai library.
 
-**Key Architecture**: Two-crate workspace (gemicro-core library + gemicro-cli binary)
+**Key Architecture**: Four-crate workspace with layered dependencies
 
 **Current Status**: Core implementation complete. Remaining work tracked in [GitHub Issues](https://github.com/evansenter/gemicro/issues).
 
@@ -39,6 +39,10 @@ cargo doc --workspace --no-deps
 
 # Run the deep research example
 cargo run -p gemicro-core --example deep_research
+
+# Run specific crate tests
+cargo test -p gemicro-runner
+cargo test -p gemicro-eval
 ```
 
 ## Environment Setup
@@ -46,6 +50,24 @@ cargo run -p gemicro-core --example deep_research
 ```bash
 export GEMINI_API_KEY="your-api-key"  # Required for integration tests and examples
 ```
+
+## Crate Layers
+
+```text
+gemicro-core (agents, events, LLM)
+    ↓
+gemicro-runner (execution state, metrics, runner)
+    ↓
+gemicro-eval (datasets, scorers, harness)
+gemicro-cli (terminal rendering)
+```
+
+| Crate | Purpose |
+|-------|---------|
+| **gemicro-core** | Platform-agnostic library: Agent trait, AgentUpdate events, LlmClient, conversation history |
+| **gemicro-runner** | Headless execution runtime: ExecutionState, AgentRunner, AgentRegistry, metrics collection |
+| **gemicro-eval** | Evaluation framework: HotpotQA/custom datasets, scorers (ExactMatch, F1, Contains), LlmJudgeAgent |
+| **gemicro-cli** | Terminal UI: indicatif progress display, rustyline REPL, markdown rendering |
 
 ## Core Design Philosophy: Evergreen-Inspired Soft-Typing
 
@@ -195,11 +217,12 @@ gemicro/
 ├── gemicro-core/                 # Platform-agnostic library
 │   ├── src/
 │   │   ├── lib.rs                # Public API exports
+│   │   ├── agent.rs              # Agent trait + DeepResearchAgent
 │   │   ├── update.rs             # Soft-typed AgentUpdate
 │   │   ├── error.rs              # Error types (#[non_exhaustive])
 │   │   ├── config.rs             # Cross-agent config only
 │   │   ├── llm.rs                # LLM client (buffered + streaming)
-│   │   └── agent.rs              # DeepResearchAgent implementation
+│   │   └── history.rs            # Conversation history
 │   ├── tests/
 │   │   ├── llm_integration.rs    # LLM integration tests (#[ignore])
 │   │   ├── agent_integration.rs  # Agent integration tests (#[ignore])
@@ -207,7 +230,25 @@ gemicro/
 │   └── examples/
 │       └── deep_research.rs      # Full agent example with progress display
 │
-└── gemicro-cli/                  # CLI binary
+├── gemicro-runner/               # Headless execution runtime
+│   └── src/
+│       ├── lib.rs
+│       ├── state.rs              # ExecutionState, Phase tracking
+│       ├── metrics.rs            # ExecutionMetrics, SubQueryTiming
+│       ├── runner.rs             # AgentRunner for headless execution
+│       ├── registry.rs           # AgentRegistry, AgentFactory
+│       └── utils.rs              # Formatting utilities
+│
+├── gemicro-eval/                 # Evaluation framework
+│   └── src/
+│       ├── lib.rs
+│       ├── dataset.rs            # HotpotQA, JsonFileDataset
+│       ├── scorer.rs             # ExactMatch, F1Score, Contains
+│       ├── harness.rs            # EvalHarness, EvalConfig
+│       ├── results.rs            # EvalSummary, EvalResult
+│       └── judge.rs              # LlmJudgeAgent for evaluation
+│
+└── gemicro-cli/                  # Terminal UI binary
 ```
 
 ## Key Architectural Decisions
@@ -272,43 +313,6 @@ match update.event_type.as_str() {
 - **tokio**: Async runtime
 - **async-stream**: For streaming agent implementations
 - **serde/serde_json**: Soft-typed data serialization
-
-## Contributing Guidelines
-
-1. **Follow Evergreen philosophy**: If adding something requires changing core types, rethink the design
-2. **Write tests**: All new code needs comprehensive unit tests
-3. **Document public APIs**: Use rustdoc for all public items
-4. **Keep it simple**: Avoid premature abstraction; solve today's problem simply
-
-## Claude Code Permissions
-
-The `.claude/settings.local.json` file defines permissions for Claude Code automation. These are developer-specific settings.
-
-### Current Permissions
-
-| Permission | Purpose | Risk Level |
-|------------|---------|------------|
-| `cargo check:*` | Type checking | Low (read-only) |
-| `gh api:*` | GitHub API calls | Low-Medium |
-| `gh pr checks:*` | View PR CI status | Low (read-only) |
-| `gh pr comment:*` | Comment on PRs | Low |
-| `gh pr create:*` | Create pull requests | Low |
-| `gh pr merge:*` | Merge pull requests | Medium |
-| `gh pr view:*` | View PR details | Low (read-only) |
-| `gh repo create:*` | Create repositories | Low |
-| `gh run watch:*` | Monitor GitHub Actions | Low (read-only) |
-| `git commit:*` | Create commits | Low |
-| `git init:*` | Initialize repos | Low |
-| `git ls-remote:*` | Check remote refs | Low (read-only) |
-| `git push:*` | Push to remote | Medium |
-| `git stash:*` | All stash operations (includes destructive: drop, clear) | Low-Medium |
-
-### Security Notes
-
-- **`gh pr merge:*`**: Allows merging any PR. **Branch protection rules are required** to prevent merging unreviewed or failing PRs. Ensure your repository has appropriate protections enabled.
-- **`git stash:*`**: Includes destructive operations (`git stash drop`, `git stash clear`) that permanently delete stashed changes. Use with awareness.
-- Wildcard patterns (`:*`) allow any arguments to the command.
-- These are local settings and should be reviewed per-developer based on workflow needs.
 
 ## Known Limitations & Tracked Issues
 
