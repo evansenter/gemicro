@@ -13,8 +13,10 @@ use gemicro_runner::AgentRegistry;
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::SystemTime;
+use tokio_util::sync::CancellationToken;
 
 /// Maximum characters for answer previews in the `/history` command.
 ///
@@ -122,9 +124,12 @@ impl Session {
         false
     }
 
-    /// Get the current agent context
-    fn agent_context(&self) -> AgentContext {
-        AgentContext::from_arc(self.llm.clone())
+    /// Get the current agent context with cancellation support
+    fn agent_context(&self, cancellation_token: CancellationToken) -> AgentContext {
+        AgentContext {
+            llm: self.llm.clone(),
+            cancellation_token,
+        }
     }
 
     /// Build prompt prefix with context
@@ -134,6 +139,9 @@ impl Session {
     }
 
     /// Run a query through the current agent
+    ///
+    /// Supports Ctrl+C cancellation - pressing Ctrl+C during execution will
+    /// cancel the query gracefully and return to the prompt with partial results.
     pub async fn run_query(&mut self, query: &str) -> Result<()> {
         if self.current_agent_name.is_empty() {
             anyhow::bail!("No agent selected. Register agents and call set_current_agent() first.");
@@ -152,18 +160,59 @@ impl Session {
             format!("{}\n\nCurrent query: {}", self.build_prompt_prefix(), query)
         };
 
+        // Set up cancellation infrastructure for this query
+        let cancellation_token = CancellationToken::new();
+        let interrupt_count = Arc::new(AtomicU8::new(0));
+
+        // Spawn signal handler task for Ctrl+C
+        let signal_task = tokio::spawn({
+            let interrupt_count = interrupt_count.clone();
+            let cancellation_token = cancellation_token.clone();
+            async move {
+                loop {
+                    if tokio::signal::ctrl_c().await.is_err() {
+                        log::error!("Failed to listen for Ctrl+C signal in REPL");
+                        return;
+                    }
+                    let count = interrupt_count.fetch_add(1, Ordering::SeqCst) + 1;
+                    if count == 1 {
+                        eprintln!("\nCancelling query...");
+                        cancellation_token.cancel();
+                    } else {
+                        eprintln!("\nAlready cancelling... please wait");
+                    }
+                }
+            }
+        });
+
+        // Helper to check if interrupted
+        let is_interrupted = || interrupt_count.load(Ordering::SeqCst) > 0;
+
         // Initialize state and renderer
         let mut state = ExecutionState::new();
         let mut renderer = IndicatifRenderer::new(self.plain);
         let mut events = Vec::new();
+        let mut interrupted = false;
 
         // Execute and stream
-        let stream = agent.execute(&full_query, self.agent_context());
+        let stream = agent.execute(&full_query, self.agent_context(cancellation_token));
         futures_util::pin_mut!(stream);
 
         while let Some(result) = stream.next().await {
+            // Check for interrupt before processing
+            if is_interrupted() {
+                interrupted = true;
+                break;
+            }
+
             match result {
                 Ok(update) => {
+                    // Check again after receiving update
+                    if is_interrupted() {
+                        interrupted = true;
+                        break;
+                    }
+
                     let prev_phase = state.phase();
                     let updated_id = state.update(&update);
 
@@ -171,26 +220,50 @@ impl Session {
                     events.push(update);
 
                     if state.phase() != prev_phase {
-                        renderer.on_phase_change(&state)?;
+                        renderer
+                            .on_phase_change(&state)
+                            .context("Renderer phase change failed")?;
                     }
 
                     if let Some(id) = updated_id {
-                        renderer.on_sub_query_update(&state, id)?;
+                        renderer
+                            .on_sub_query_update(&state, id)
+                            .context("Renderer sub-query update failed")?;
                     }
                 }
+                Err(AgentError::Cancelled) => {
+                    interrupted = true;
+                    break;
+                }
                 Err(e) => {
-                    renderer.finish().ok();
+                    signal_task.abort();
+                    if let Err(finish_err) = renderer.finish() {
+                        log::warn!("Failed to clean up renderer during error: {}", finish_err);
+                    }
                     return Err(format_agent_error(e));
                 }
             }
         }
 
-        // Render final result
-        if state.phase() == Phase::Complete {
-            renderer.on_final_result(&state)?;
+        // Clean up signal handler
+        signal_task.abort();
+
+        // Handle interruption
+        if interrupted {
+            renderer
+                .on_interrupted(&state)
+                .context("Renderer interrupted state failed")?;
+            return Ok(()); // Cancellation is not an error
         }
 
-        renderer.finish()?;
+        // Render final result
+        if state.phase() == Phase::Complete {
+            renderer
+                .on_final_result(&state)
+                .context("Renderer final result failed")?;
+        }
+
+        renderer.finish().context("Renderer cleanup failed")?;
 
         // Store in history
         self.history
