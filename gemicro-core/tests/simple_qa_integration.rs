@@ -160,9 +160,10 @@ async fn test_simple_qa_timeout() {
 
     let context = create_test_context(&api_key);
 
-    // Use an impossibly short timeout
+    // Use a very short timeout (10ms) to trigger timeout behavior
+    // Note: 1ms could be flaky on slow CI, 10ms is more reliable
     let config = SimpleQaConfig {
-        timeout: Duration::from_millis(1),
+        timeout: Duration::from_millis(10),
         system_prompt: "You are a helpful assistant.".to_string(),
     };
 

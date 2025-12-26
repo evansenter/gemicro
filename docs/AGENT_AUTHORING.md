@@ -181,8 +181,16 @@ impl Agent for SimpleQaAgent {
 
             let request = LlmRequest::with_system(&query, &config.system_prompt);
 
+            // Wrap LLM call to convert LlmError -> AgentError
+            let generate_future = async {
+                context.llm
+                    .generate(request)
+                    .await
+                    .map_err(|e| AgentError::Other(format!("LLM error: {}", e)))
+            };
+
             let response = with_timeout_and_cancellation(
-                context.llm.generate(request),
+                generate_future,
                 timeout,
                 &context.cancellation_token,
                 || timeout_error(start, config.timeout, "query"),
@@ -191,9 +199,9 @@ impl Agent for SimpleQaAgent {
             // Emit result event
             yield AgentUpdate::custom(
                 EVENT_SIMPLE_QA_RESULT,
-                response.content.clone(),
+                response.text.clone(),
                 json!({
-                    "answer": response.content,
+                    "answer": response.text,
                     "tokens_used": response.tokens_used,
                     "duration_ms": start.elapsed().as_millis() as u64,
                 }),
@@ -400,6 +408,7 @@ use gemicro_runner::AgentRegistry;
 let mut registry = AgentRegistry::new();
 
 registry.register("simple_qa", || {
+    // unwrap() is safe here: SimpleQaConfig::default() is always valid
     Box::new(SimpleQaAgent::new(SimpleQaConfig::default()).unwrap())
 });
 
