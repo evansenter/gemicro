@@ -39,9 +39,9 @@ pub struct Session {
 
     /// Path to the CLI binary (for mtime checking).
     ///
-    /// Used to detect when the binary has been recompiled, showing a [stale]
+    /// Used to detect when the binary has been recompiled, showing a `[stale]`
     /// indicator in the prompt. This enables future hot-reload functionality.
-    /// See: https://github.com/evansenter/gemicro/issues/36
+    /// See: <https://github.com/evansenter/gemicro/issues/36>
     binary_path: Option<PathBuf>,
 
     /// Last known mtime of the binary.
