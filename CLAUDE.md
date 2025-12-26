@@ -67,7 +67,7 @@ gemicro "What AI news happened this week?" --google-search
 gemicro "Compare async runtimes" --min-sub-queries 3 --max-sub-queries 7 --timeout 120
 ```
 
-REPL commands: `/help`, `/agent [name]`, `/history`, `/clear`, `/quit`
+REPL commands: `/help`, `/agent [name]`, `/history`, `/clear`, `/reload`, `/quit`
 
 ## Crate Layers
 
@@ -262,7 +262,7 @@ gemicro/
         ├── error.rs              # CLI-specific error handling
         ├── display/              # State-renderer pattern
         │   ├── mod.rs
-        │   ├── state.rs          # DisplayState (terminal-agnostic)
+        │   ├── renderer.rs       # Renderer trait for swappable backends
         │   └── indicatif.rs      # IndicatifRenderer implementation
         └── repl/                 # Interactive REPL mode
             ├── mod.rs
