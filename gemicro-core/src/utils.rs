@@ -114,6 +114,24 @@ mod tests {
     }
 
     #[test]
+    fn test_truncate_with_count_exact_length() {
+        assert_eq!(truncate_with_count("hello", 5), "hello");
+    }
+
+    #[test]
+    fn test_truncate_with_count_empty_string() {
+        assert_eq!(truncate_with_count("", 10), "");
+    }
+
+    #[test]
+    fn test_truncate_with_count_zero_max() {
+        // Edge case: max_chars = 0 should still work
+        let result = truncate_with_count("hello", 0);
+        assert!(result.contains("..."));
+        assert!(result.contains("5 chars total"));
+    }
+
+    #[test]
     fn test_truncate_with_count_long_string() {
         let long = "a".repeat(100);
         let result = truncate_with_count(&long, 20);

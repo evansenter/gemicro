@@ -132,4 +132,48 @@ mod tests {
         let err = AgentError::AllSubQueriesFailed;
         assert!(err.to_string().contains("All sub-queries failed"));
     }
+
+    #[test]
+    fn test_parse_failed_display() {
+        let err = AgentError::ParseFailed("Invalid JSON".to_string());
+        let display = err.to_string();
+        assert!(display.contains("parse"));
+        assert!(display.contains("Invalid JSON"));
+    }
+
+    #[test]
+    fn test_synthesis_failed_display() {
+        let err = AgentError::SynthesisFailed("Empty response".to_string());
+        let display = err.to_string();
+        assert!(display.contains("synthesize"));
+        assert!(display.contains("Empty response"));
+    }
+
+    #[test]
+    fn test_cancelled_display() {
+        let err = AgentError::Cancelled;
+        let display = err.to_string();
+        assert!(display.contains("cancelled"));
+    }
+
+    #[test]
+    fn test_timeout_display() {
+        let err = AgentError::Timeout {
+            elapsed_ms: 5000,
+            timeout_ms: 3000,
+            phase: "decomposition".to_string(),
+        };
+        let display = err.to_string();
+        assert!(display.contains("5000"));
+        assert!(display.contains("3000"));
+        assert!(display.contains("decomposition"));
+    }
+
+    #[test]
+    fn test_invalid_config_display() {
+        let err = AgentError::InvalidConfig("min > max".to_string());
+        let display = err.to_string();
+        assert!(display.contains("Invalid configuration"));
+        assert!(display.contains("min > max"));
+    }
 }
