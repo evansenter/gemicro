@@ -175,39 +175,62 @@ impl EvalSummary {
         self.average_scores.get(scorer_name).copied()
     }
 
-    /// Print a summary to stdout.
-    pub fn print_summary(&self) {
-        println!();
-        println!("=== Evaluation Summary ===");
-        println!("Dataset: {}", self.dataset_name);
-        println!("Agent: {}", self.agent_name);
-        println!();
-        println!(
+    /// Format the summary as a string.
+    ///
+    /// Returns the summary formatted for display. Use this when you need
+    /// the summary as a string (e.g., for logging, testing, or custom output).
+    pub fn format_summary(&self) -> String {
+        use std::fmt::Write;
+
+        let mut output = String::new();
+        writeln!(output).unwrap();
+        writeln!(output, "=== Evaluation Summary ===").unwrap();
+        writeln!(output, "Dataset: {}", self.dataset_name).unwrap();
+        writeln!(output, "Agent: {}", self.agent_name).unwrap();
+        writeln!(output).unwrap();
+        writeln!(
+            output,
             "Questions: {} total, {} succeeded, {} failed",
             self.total_questions, self.succeeded, self.failed
-        );
-        println!(
+        )
+        .unwrap();
+        writeln!(
+            output,
             "Success rate: {:.1}%",
             if self.total_questions > 0 {
                 (self.succeeded as f64 / self.total_questions as f64) * 100.0
             } else {
                 0.0
             }
-        );
-        println!();
+        )
+        .unwrap();
+        writeln!(output).unwrap();
 
         if !self.average_scores.is_empty() {
-            println!("Scores:");
+            writeln!(output, "Scores:").unwrap();
             let mut scores: Vec<_> = self.average_scores.iter().collect();
             scores.sort_by(|a, b| a.0.cmp(b.0));
             for (scorer, avg) in scores {
-                println!("  {}: {:.3}", scorer, avg);
+                writeln!(output, "  {}: {:.3}", scorer, avg).unwrap();
             }
-            println!();
+            writeln!(output).unwrap();
         }
 
-        println!("Tokens: {}", self.total_tokens);
-        println!("Duration: {:.1}s", self.total_duration.as_secs_f64());
+        writeln!(output, "Tokens: {}", self.total_tokens).unwrap();
+        write!(
+            output,
+            "Duration: {:.1}s",
+            self.total_duration.as_secs_f64()
+        )
+        .unwrap();
+        output
+    }
+
+    /// Print a summary to stdout.
+    ///
+    /// Convenience wrapper around [`format_summary`](Self::format_summary).
+    pub fn print_summary(&self) {
+        println!("{}", self.format_summary());
     }
 
     /// Write the summary to a JSON file.
@@ -404,5 +427,39 @@ mod tests {
             final_answer: Some("4".to_string()),
             completion_phase: Phase::Complete,
         }
+    }
+
+    #[test]
+    fn test_format_summary() {
+        let question = sample_question();
+        let mut scores = HashMap::new();
+        scores.insert("exact_match".to_string(), 1.0);
+
+        let results = vec![EvalResult::success(
+            &question,
+            "4".to_string(),
+            scores,
+            create_mock_metrics(),
+            0,
+        )];
+
+        let summary = EvalSummary::from_results(
+            "test_dataset".to_string(),
+            "test_agent".to_string(),
+            results,
+            std::time::Duration::from_secs(10),
+        );
+
+        let formatted = summary.format_summary();
+
+        assert!(formatted.contains("=== Evaluation Summary ==="));
+        assert!(formatted.contains("Dataset: test_dataset"));
+        assert!(formatted.contains("Agent: test_agent"));
+        assert!(formatted.contains("Questions: 1 total, 1 succeeded, 0 failed"));
+        assert!(formatted.contains("Success rate: 100.0%"));
+        assert!(formatted.contains("Scores:"));
+        assert!(formatted.contains("exact_match: 1.000"));
+        assert!(formatted.contains("Tokens: 100"));
+        assert!(formatted.contains("Duration: 10.0s"));
     }
 }
