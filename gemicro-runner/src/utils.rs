@@ -26,20 +26,20 @@ pub fn format_duration(duration: Duration) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rstest::rstest;
 
-    #[test]
-    fn test_format_duration_milliseconds() {
-        assert_eq!(format_duration(Duration::from_millis(500)), "500ms");
-    }
-
-    #[test]
-    fn test_format_duration_seconds_under_10() {
-        assert_eq!(format_duration(Duration::from_secs_f64(2.5)), "2.50s");
-    }
-
-    #[test]
-    fn test_format_duration_seconds_over_10() {
-        assert_eq!(format_duration(Duration::from_secs_f64(12.5)), "12.5s");
+    // Parameterized test for duration formatting with boundary cases
+    #[rstest]
+    #[case::zero(Duration::ZERO, "0ms")]
+    #[case::milliseconds(Duration::from_millis(500), "500ms")]
+    #[case::just_under_one_sec(Duration::from_millis(999), "999ms")]
+    #[case::exactly_one_sec(Duration::from_secs(1), "1.00s")]
+    #[case::seconds_under_10(Duration::from_secs_f64(2.5), "2.50s")]
+    #[case::just_under_10_sec(Duration::from_secs_f64(9.99), "9.99s")]
+    #[case::exactly_10_sec(Duration::from_secs(10), "10.0s")]
+    #[case::seconds_over_10(Duration::from_secs_f64(12.5), "12.5s")]
+    fn test_format_duration(#[case] input: Duration, #[case] expected: &str) {
+        assert_eq!(format_duration(input), expected);
     }
 
     // Verify re-exports work

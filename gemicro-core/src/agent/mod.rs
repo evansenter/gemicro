@@ -378,51 +378,5 @@ mod tests {
         let _context_fn = |llm: LlmClient| AgentContext::new(llm);
     }
 
-    // Error display tests
-
-    #[test]
-    fn test_agent_error_decomposition_failed_display() {
-        let error = AgentError::DecompositionFailed("LLM returned garbage".to_string());
-        let display = error.to_string();
-        assert!(display.contains("decompose"));
-        assert!(display.contains("LLM returned garbage"));
-    }
-
-    #[test]
-    fn test_agent_error_parse_failed_display() {
-        let error = AgentError::ParseFailed("invalid JSON".to_string());
-        let display = error.to_string();
-        assert!(display.contains("parse"));
-        assert!(display.contains("invalid JSON"));
-    }
-
-    #[test]
-    fn test_agent_error_synthesis_failed_display() {
-        let error = AgentError::SynthesisFailed("empty response".to_string());
-        let display = error.to_string();
-        assert!(display.contains("synthesize"));
-        assert!(display.contains("empty response"));
-    }
-
-    #[test]
-    fn test_agent_error_all_sub_queries_failed_display() {
-        let error = AgentError::AllSubQueriesFailed;
-        let display = error.to_string();
-        assert!(display.contains("sub-queries failed"));
-    }
-
-    #[test]
-    fn test_agent_error_cancelled_display() {
-        let error = AgentError::Cancelled;
-        let display = error.to_string();
-        assert!(display.contains("cancelled"));
-    }
-
-    #[test]
-    fn test_agent_error_invalid_config_display() {
-        let error = AgentError::InvalidConfig("min > max".to_string());
-        let display = error.to_string();
-        assert!(display.contains("configuration"));
-        assert!(display.contains("min > max"));
-    }
+    // Note: AgentError display tests are in error.rs to avoid duplication
 }

@@ -16,3 +16,4 @@ log = { workspace = true }
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros"] }
 rust-genai = { workspace = true }
+rstest = "0.23"
