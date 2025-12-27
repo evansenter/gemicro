@@ -5,11 +5,11 @@
 use clap::Parser;
 use gemicro_core::{
     DeepResearchAgent, LlmClient, LlmConfig, ReactAgent, ReactConfig, ResearchConfig,
-    SimpleQaAgent, SimpleQaConfig,
+    SimpleQaAgent, SimpleQaConfig, ToolAgent, ToolAgentConfig,
 };
 use gemicro_eval::{
     Contains, Dataset, EvalConfig, EvalHarness, EvalProgress, EvalSummary, HotpotQA,
-    JsonFileDataset, LlmJudgeScorer, Scorers,
+    JsonFileDataset, LlmJudgeScorer, Scorers, GSM8K,
 };
 use gemicro_runner::AgentRegistry;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -23,7 +23,7 @@ use std::time::Duration;
 #[command(about = "Run evaluations against HotpotQA or custom datasets")]
 #[command(version)]
 struct Args {
-    /// Dataset to use: "hotpotqa" or path to a JSON file
+    /// Dataset to use: "hotpotqa", "gsm8k", or path to a JSON file
     #[arg(long, short = 'd')]
     dataset: String,
 
@@ -35,7 +35,7 @@ struct Args {
     #[arg(long, default_value = "contains,llm_judge")]
     scorer: String,
 
-    /// Agent to evaluate: deep_research, react, simple_qa
+    /// Agent to evaluate: deep_research, react, simple_qa, tool_agent
     #[arg(long, short = 'a', default_value = "deep_research")]
     agent: String,
 
@@ -99,9 +99,9 @@ impl Args {
         }
 
         // Validate agent
-        if !["deep_research", "react", "simple_qa"].contains(&self.agent.as_str()) {
+        if !["deep_research", "react", "simple_qa", "tool_agent"].contains(&self.agent.as_str()) {
             return Err(format!(
-                "Invalid agent '{}'. Use deep_research, react, or simple_qa.",
+                "Invalid agent '{}'. Use deep_research, react, simple_qa, or tool_agent.",
                 self.agent
             ));
         }
@@ -172,6 +172,10 @@ fn create_registry() -> AgentRegistry {
         Box::new(SimpleQaAgent::new(SimpleQaConfig::default()).unwrap())
     });
 
+    registry.register("tool_agent", || {
+        Box::new(ToolAgent::new(ToolAgentConfig::default()).unwrap())
+    });
+
     registry
 }
 
@@ -196,32 +200,48 @@ async fn run_evaluation(args: &Args) -> Result<EvalSummary, String> {
     let scorers = args.scorers(scorer_llm);
 
     // Load dataset and run evaluation based on dataset type
-    if args.dataset.to_lowercase() == "hotpotqa" {
-        let dataset = HotpotQA::new().map_err(|e| format!("Failed to create HotpotQA: {}", e))?;
-        run_with_progress(
-            &harness,
-            agent.as_ref(),
-            &dataset,
-            args.sample,
-            scorers,
-            llm,
-        )
-        .await
-    } else {
-        let path = PathBuf::from(&args.dataset);
-        if !path.exists() {
-            return Err(format!("Dataset file not found: {}", args.dataset));
+    match args.dataset.to_lowercase().as_str() {
+        "hotpotqa" => {
+            let dataset =
+                HotpotQA::new().map_err(|e| format!("Failed to create HotpotQA: {}", e))?;
+            run_with_progress(
+                &harness,
+                agent.as_ref(),
+                &dataset,
+                args.sample,
+                scorers,
+                llm,
+            )
+            .await
         }
-        let dataset = JsonFileDataset::new(path);
-        run_with_progress(
-            &harness,
-            agent.as_ref(),
-            &dataset,
-            args.sample,
-            scorers,
-            llm,
-        )
-        .await
+        "gsm8k" => {
+            let dataset = GSM8K::new().map_err(|e| format!("Failed to create GSM8K: {}", e))?;
+            run_with_progress(
+                &harness,
+                agent.as_ref(),
+                &dataset,
+                args.sample,
+                scorers,
+                llm,
+            )
+            .await
+        }
+        _ => {
+            let path = PathBuf::from(&args.dataset);
+            if !path.exists() {
+                return Err(format!("Dataset file not found: {}", args.dataset));
+            }
+            let dataset = JsonFileDataset::new(path);
+            run_with_progress(
+                &harness,
+                agent.as_ref(),
+                &dataset,
+                args.sample,
+                scorers,
+                llm,
+            )
+            .await
+        }
     }
 }
 
@@ -426,6 +446,7 @@ mod tests {
         assert!(registry.contains("deep_research"));
         assert!(registry.contains("react"));
         assert!(registry.contains("simple_qa"));
+        assert!(registry.contains("tool_agent"));
     }
 
     #[test]
