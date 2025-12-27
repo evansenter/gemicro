@@ -41,6 +41,16 @@ pub struct LlmClient {
     config: LlmConfig,
 }
 
+impl std::fmt::Debug for LlmClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LlmClient")
+            .field("model", &MODEL)
+            .field("client", &"[REDACTED]")
+            .field("config", &self.config)
+            .finish()
+    }
+}
+
 /// Request to the LLM
 #[derive(Debug, Clone)]
 pub struct LlmRequest {
@@ -793,5 +803,37 @@ mod tests {
         assert_eq!(client.config.temperature, 0.5);
         assert_eq!(client.config.max_tokens, 1024);
         assert_eq!(client.config.max_retries, 3);
+    }
+
+    #[test]
+    fn test_llm_client_debug_redacts_api_key() {
+        // Create client with a secret API key
+        let genai_client = rust_genai::Client::builder("secret-api-key-12345".to_string()).build();
+        let client = LlmClient::new(genai_client, LlmConfig::default());
+
+        // Get debug output
+        let debug_output = format!("{:?}", client);
+
+        // Should contain model name for debugging
+        assert!(
+            debug_output.contains("gemini"),
+            "Debug output should contain model name"
+        );
+
+        // Should contain REDACTED marker
+        assert!(
+            debug_output.contains("[REDACTED]"),
+            "Debug output should contain [REDACTED]"
+        );
+
+        // Should NOT leak the API key
+        assert!(
+            !debug_output.contains("secret-api-key"),
+            "Debug output must not contain API key"
+        );
+        assert!(
+            !debug_output.contains("12345"),
+            "Debug output must not contain API key suffix"
+        );
     }
 }
