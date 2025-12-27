@@ -8,8 +8,8 @@ mod common;
 use common::{create_test_context, get_api_key};
 use futures_util::StreamExt;
 use gemicro_core::{
-    AgentError, ReactAgent, ReactConfig, EVENT_REACT_ACTION, EVENT_REACT_COMPLETE,
-    EVENT_REACT_OBSERVATION, EVENT_REACT_STARTED, EVENT_REACT_THOUGHT,
+    AgentError, ReactAgent, ReactConfig, EVENT_FINAL_RESULT, EVENT_REACT_ACTION,
+    EVENT_REACT_COMPLETE, EVENT_REACT_OBSERVATION, EVENT_REACT_STARTED, EVENT_REACT_THOUGHT,
 };
 use std::time::Duration;
 
@@ -211,11 +211,17 @@ async fn test_react_event_ordering() {
         "First event should be react_started"
     );
 
-    // Verify react_complete is last (assuming no error)
+    // Verify react_complete is present (followed by final_result)
+    assert!(
+        events.contains(&EVENT_REACT_COMPLETE.to_string()),
+        "Events should contain react_complete"
+    );
+
+    // Verify final_result is last (emitted after react_complete for harness compatibility)
     assert_eq!(
         events.last(),
-        Some(&EVENT_REACT_COMPLETE.to_string()),
-        "Last event should be react_complete"
+        Some(&EVENT_FINAL_RESULT.to_string()),
+        "Last event should be final_result"
     );
 
     // Verify thought comes before action in each iteration
