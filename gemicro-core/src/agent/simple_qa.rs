@@ -13,7 +13,7 @@ use crate::agent::{Agent, AgentContext, AgentStream};
 use crate::error::AgentError;
 use crate::llm::LlmRequest;
 use crate::update::AgentUpdate;
-use crate::utils::truncate;
+use crate::utils::{extract_total_tokens, truncate};
 
 use async_stream::try_stream;
 use serde_json::json;
@@ -203,8 +203,8 @@ impl Agent for SimpleQaAgent {
             )
             .await?;
 
-            let answer = response.text;
-            let tokens_used = response.tokens_used;
+            let answer = response.text().unwrap_or("").to_string();
+            let tokens_used = extract_total_tokens(&response);
             let duration_ms = start.elapsed().as_millis() as u64;
 
             // Emit agent-specific result event

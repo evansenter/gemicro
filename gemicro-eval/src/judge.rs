@@ -45,6 +45,7 @@
 
 use gemicro_core::agent::{Agent, AgentContext, AgentStream};
 use gemicro_core::error::AgentError;
+use gemicro_core::extract_total_tokens;
 use gemicro_core::llm::LlmRequest;
 use gemicro_core::update::AgentUpdate;
 
@@ -238,12 +239,16 @@ impl Agent for LlmJudgeAgent {
                 .map_err(AgentError::Llm)?;
 
             // Parse structured output
-            let output: JudgeOutput = serde_json::from_str(&response.text)
+            let response_text = response.text().unwrap_or("");
+            let output: JudgeOutput = serde_json::from_str(response_text)
                 .map_err(|e| AgentError::ParseFailed(format!(
                     "Failed to parse judge output: {}. Response: {}",
                     e,
-                    gemicro_core::truncate_with_count(&response.text, 200)
+                    gemicro_core::truncate_with_count(response_text, 200)
                 )))?;
+
+            // Extract token count
+            let tokens_used = extract_total_tokens(&response);
 
             // Emit result event
             yield AgentUpdate::custom(
@@ -252,7 +257,7 @@ impl Agent for LlmJudgeAgent {
                 json!({
                     "correct": output.correct,
                     "reasoning": output.reasoning,
-                    "tokens_used": response.tokens_used
+                    "tokens_used": tokens_used
                 })
             );
         })

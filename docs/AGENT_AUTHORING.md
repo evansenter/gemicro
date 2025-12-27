@@ -196,13 +196,17 @@ impl Agent for SimpleQaAgent {
                 || timeout_error(start, config.timeout, "query"),
             ).await?;
 
+            // Extract text and token count from InteractionResponse
+            let answer = response.text().unwrap_or("").to_string();
+            let tokens_used = extract_total_tokens(&response);
+
             // Emit result event
             yield AgentUpdate::custom(
                 EVENT_SIMPLE_QA_RESULT,
-                response.text.clone(),
+                answer.clone(),
                 json!({
-                    "answer": response.text,
-                    "tokens_used": response.tokens_used,
+                    "answer": answer,
+                    "tokens_used": tokens_used,
                     "duration_ms": start.elapsed().as_millis() as u64,
                 }),
             );

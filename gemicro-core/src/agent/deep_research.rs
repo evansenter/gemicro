@@ -8,6 +8,7 @@ use crate::config::ResearchConfig;
 use crate::error::AgentError;
 use crate::llm::LlmRequest;
 use crate::update::{AgentUpdate, ResultMetadata};
+use crate::utils::extract_total_tokens;
 
 use async_stream::try_stream;
 use futures_util::Stream;
@@ -261,7 +262,14 @@ async fn decompose(
             .prompts
             .render_decomposition(config.min_sub_queries, config.max_sub_queries, query);
 
-    let request = LlmRequest::with_system(prompt, &config.prompts.decomposition_system);
+    // Use structured output to guarantee valid JSON array
+    let schema = serde_json::json!({
+        "type": "array",
+        "items": { "type": "string" }
+    });
+
+    let request = LlmRequest::with_system(prompt, &config.prompts.decomposition_system)
+        .with_response_format(schema);
 
     let response = context
         .llm
@@ -269,11 +277,12 @@ async fn decompose(
         .await
         .map_err(|e| AgentError::DecompositionFailed(e.to_string()))?;
 
-    // Extract token count before consuming response text for parsing
-    let tokens_used = response.tokens_used;
+    // Extract token count
+    let tokens_used = extract_total_tokens(&response);
 
-    // Parse JSON response
-    let sub_queries: Vec<String> = parse_json_array(&response.text)
+    // Parse JSON response (guaranteed valid by response_format)
+    let response_text = response.text().unwrap_or("");
+    let sub_queries: Vec<String> = serde_json::from_str(response_text)
         .map_err(|e| AgentError::ParseFailed(format!("Failed to parse decomposition: {}", e)))?;
 
     // Validate bounds
@@ -306,50 +315,6 @@ async fn decompose(
     }
 
     Ok((sub_queries, tokens_used))
-}
-
-/// Parse a JSON array from LLM response, handling common formatting issues
-fn parse_json_array(text: &str) -> Result<Vec<String>, String> {
-    // Fast path: try direct parse first (avoids allocations for well-formed JSON)
-    if let Ok(arr) = serde_json::from_str::<Vec<String>>(text) {
-        return Ok(arr);
-    }
-
-    // Try with trimmed whitespace
-    let trimmed = text.trim();
-    if let Ok(arr) = serde_json::from_str::<Vec<String>>(trimmed) {
-        return Ok(arr);
-    }
-
-    // Slow path: only extract from markdown code block if markers are present
-    if trimmed.starts_with("```") {
-        let lines: Vec<&str> = trimmed.lines().collect();
-        if lines.len() >= 2 {
-            let start = if lines[0].starts_with("```json") || lines[0] == "```" {
-                1
-            } else {
-                0
-            };
-            let end = if lines.last() == Some(&"```") {
-                lines.len() - 1
-            } else {
-                lines.len()
-            };
-            let json_text = lines[start..end].join("\n");
-            return serde_json::from_str::<Vec<String>>(&json_text).map_err(|e| {
-                format!(
-                    "Invalid JSON: {}. Response was: {}",
-                    e,
-                    crate::utils::truncate_with_count(text, 200)
-                )
-            });
-        }
-    }
-
-    Err(format!(
-        "Invalid JSON: expected array of strings. Response was: {}",
-        crate::utils::truncate_with_count(text, 200)
-    ))
 }
 
 /// Execute sub-queries in parallel, collecting results
@@ -410,7 +375,11 @@ async fn execute_parallel(
                 .generate_with_cancellation(request, &cancellation_token)
                 .await
             {
-                Ok(response) => Ok((response.text, response.tokens_used)),
+                Ok(response) => {
+                    let text = response.text().unwrap_or("").to_string();
+                    let tokens = extract_total_tokens(&response);
+                    Ok((text, tokens))
+                }
                 Err(crate::LlmError::Cancelled) => {
                     log::debug!("Sub-query {} cancelled", id);
                     return; // Exit early, don't send result
@@ -583,86 +552,21 @@ async fn synthesize(
         .await
         .map_err(|e| AgentError::SynthesisFailed(e.to_string()))?;
 
-    if response.text.trim().is_empty() {
+    let response_text = response.text().unwrap_or("");
+    if response_text.trim().is_empty() {
         return Err(AgentError::SynthesisFailed(
             "Empty synthesis response".to_string(),
         ));
     }
 
-    Ok((response.text, response.tokens_used))
+    let tokens_used = extract_total_tokens(&response);
+
+    Ok((response_text.to_string(), tokens_used))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_parse_json_array_simple() {
-        let input = r#"["Question 1?", "Question 2?"]"#;
-        let result = parse_json_array(input).unwrap();
-        assert_eq!(result, vec!["Question 1?", "Question 2?"]);
-    }
-
-    #[test]
-    fn test_parse_json_array_with_markdown() {
-        let input = r#"```json
-["Question 1?", "Question 2?"]
-```"#;
-        let result = parse_json_array(input).unwrap();
-        assert_eq!(result, vec!["Question 1?", "Question 2?"]);
-    }
-
-    #[test]
-    fn test_parse_json_array_with_plain_markdown() {
-        let input = r#"```
-["Question 1?", "Question 2?"]
-```"#;
-        let result = parse_json_array(input).unwrap();
-        assert_eq!(result, vec!["Question 1?", "Question 2?"]);
-    }
-
-    #[test]
-    fn test_parse_json_array_invalid() {
-        let input = "Not JSON at all";
-        let result = parse_json_array(input);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_parse_json_array_empty() {
-        let input = "[]";
-        let result = parse_json_array(input).unwrap();
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn test_parse_json_array_with_whitespace() {
-        let input = r#"  [  "Question 1?"  ,  "Question 2?"  ]  "#;
-        let result = parse_json_array(input).unwrap();
-        assert_eq!(result, vec!["Question 1?", "Question 2?"]);
-    }
-
-    #[test]
-    fn test_parse_json_array_single_item() {
-        let input = r#"["Only one question?"]"#;
-        let result = parse_json_array(input).unwrap();
-        assert_eq!(result, vec!["Only one question?"]);
-    }
-
-    #[test]
-    fn test_parse_json_array_wrong_type() {
-        // Array of numbers instead of strings
-        let input = "[1, 2, 3]";
-        let result = parse_json_array(input);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_parse_json_array_object_instead() {
-        let input = r#"{"question": "What?"}"#;
-        let result = parse_json_array(input);
-        assert!(result.is_err());
-    }
 
     #[test]
     fn test_agent_creation_valid_config() {
@@ -682,80 +586,5 @@ mod tests {
         let agent = DeepResearchAgent::new(config);
         assert!(agent.is_err());
         assert!(matches!(agent, Err(AgentError::InvalidConfig(_))));
-    }
-
-    // parse_json_array edge case tests
-
-    #[test]
-    fn test_parse_json_array_nested_arrays() {
-        // Nested arrays should fail (we expect Vec<String>, not Vec<Vec<...>>)
-        let input = r#"[["nested"]]"#;
-        let result = parse_json_array(input);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_parse_json_array_mixed_types() {
-        // Mixed strings and numbers should fail
-        let input = r#"["question", 42, "another"]"#;
-        let result = parse_json_array(input);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_parse_json_array_null_values() {
-        // Null values in array should fail
-        let input = r#"["question", null, "another"]"#;
-        let result = parse_json_array(input);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_parse_json_array_large_array() {
-        // Large array should work
-        let items: Vec<String> = (0..100).map(|i| format!("Question {}?", i)).collect();
-        let input = serde_json::to_string(&items).unwrap();
-        let result = parse_json_array(&input).unwrap();
-        assert_eq!(result.len(), 100);
-        assert_eq!(result[0], "Question 0?");
-        assert_eq!(result[99], "Question 99?");
-    }
-
-    #[test]
-    fn test_parse_json_array_unicode_content() {
-        let input = r#"["你好吗?", "こんにちは?", "🤔 What?"]"#;
-        let result = parse_json_array(input).unwrap();
-        assert_eq!(result, vec!["你好吗?", "こんにちは?", "🤔 What?"]);
-    }
-
-    #[test]
-    fn test_parse_json_array_escaped_quotes() {
-        let input = r#"["Question with \"quotes\"?", "Normal question?"]"#;
-        let result = parse_json_array(input).unwrap();
-        assert_eq!(
-            result,
-            vec!["Question with \"quotes\"?", "Normal question?"]
-        );
-    }
-
-    #[test]
-    fn test_parse_json_array_special_characters() {
-        // Test newlines and tabs in JSON strings
-        let input = r#"["Line1\nLine2", "Tab\there"]"#;
-        let result = parse_json_array(input).unwrap();
-        assert_eq!(result[0], "Line1\nLine2");
-        assert_eq!(result[1], "Tab\there");
-    }
-
-    #[test]
-    fn test_parse_json_array_error_message_contains_response() {
-        let input = "invalid json here";
-        let result = parse_json_array(input);
-        assert!(result.is_err());
-        let error_msg = result.unwrap_err();
-        assert!(
-            error_msg.contains("invalid json here"),
-            "Error should contain the invalid response text"
-        );
     }
 }

@@ -54,7 +54,9 @@ pub use config::{
 };
 pub use error::{AgentError, GemicroError, LlmError};
 pub use history::{ConversationHistory, HistoryEntry};
-pub use llm::{LlmClient, LlmRequest, LlmResponse, LlmStreamChunk};
+pub use llm::{LlmClient, LlmRequest, LlmStreamChunk};
+// Re-export rust-genai types for convenience
+pub use rust_genai::{InteractionResponse, UsageMetadata};
 pub use update::{
     AgentUpdate, FinalResult, ResultMetadata, SubQueryResult, EVENT_DECOMPOSITION_COMPLETE,
     EVENT_DECOMPOSITION_STARTED, EVENT_FINAL_RESULT, EVENT_REACT_ACTION, EVENT_REACT_COMPLETE,
@@ -62,4 +64,4 @@ pub use update::{
     EVENT_SUB_QUERY_COMPLETED, EVENT_SUB_QUERY_FAILED, EVENT_SUB_QUERY_STARTED,
     EVENT_SYNTHESIS_STARTED,
 };
-pub use utils::{first_sentence, truncate, truncate_with_count};
+pub use utils::{extract_total_tokens, first_sentence, truncate, truncate_with_count};

@@ -2,7 +2,7 @@
 //!
 //! Provides a simplified interface to the rust-genai Interactions API with:
 //! - Automatic timeout enforcement from config
-//! - Optional token counting (`None` if unavailable from API)
+//! - Full access to `InteractionResponse` including `UsageMetadata`
 //! - Both buffered (`generate`) and streaming (`generate_stream`) modes
 //! - Automatic retry with exponential backoff on transient failures
 //!
@@ -18,9 +18,9 @@
 //! let request = LlmRequest::new("What is the capital of France?");
 //! let response = client.generate(request).await?;
 //!
-//! println!("Response: {}", response.text);
-//! if let Some(tokens) = response.tokens_used {
-//!     println!("Tokens used: {}", tokens);
+//! println!("Response: {}", response.text().unwrap_or(""));
+//! if let Some(usage) = &response.usage {
+//!     println!("Tokens used: {:?}", usage.total_tokens);
 //! }
 //! # Ok(())
 //! # }
@@ -93,22 +93,6 @@ pub struct LlmRequest {
     ///     .with_response_format(schema);
     /// ```
     pub response_format: Option<serde_json::Value>,
-}
-
-/// Response from the LLM (buffered mode)
-#[derive(Debug, Clone)]
-pub struct LlmResponse {
-    /// Generated text
-    pub text: String,
-
-    /// Number of tokens used, if available from the API
-    ///
-    /// `None` indicates the API did not return token usage information.
-    /// This is distinct from `Some(0)` which would mean zero tokens were used.
-    pub tokens_used: Option<u32>,
-
-    /// Interaction ID for tracking
-    pub interaction_id: String,
 }
 
 /// Chunk from streaming LLM response
@@ -191,6 +175,12 @@ impl LlmClient {
     /// This method waits for the full response before returning.
     /// Use `generate_stream()` for real-time token-by-token output.
     ///
+    /// Returns the full [`rust_genai::InteractionResponse`] with access to:
+    /// - `response.text()` - the generated text
+    /// - `response.usage` - full token usage metadata
+    /// - `response.id` - interaction ID for tracking
+    /// - `response.grounding_metadata` - Google Search sources (if enabled)
+    ///
     /// # Retry Behavior
     ///
     /// Transient failures (timeouts, rate limits, temporary API errors) are
@@ -213,11 +203,14 @@ impl LlmClient {
     /// let client = LlmClient::new(genai_client, LlmConfig::default());
     /// let request = LlmRequest::new("Explain quantum computing");
     /// let response = client.generate(request).await?;
-    /// println!("{}", response.text);
+    /// println!("{}", response.text().unwrap_or(""));
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn generate(&self, request: LlmRequest) -> Result<LlmResponse, LlmError> {
+    pub async fn generate(
+        &self,
+        request: LlmRequest,
+    ) -> Result<rust_genai::InteractionResponse, LlmError> {
         self.validate_request(&request)?;
 
         let mut last_error = None;
@@ -270,7 +263,7 @@ impl LlmClient {
         &self,
         request: LlmRequest,
         cancellation_token: &CancellationToken,
-    ) -> Result<LlmResponse, LlmError> {
+    ) -> Result<rust_genai::InteractionResponse, LlmError> {
         self.validate_request(&request)?;
 
         // Check cancellation before starting
@@ -322,7 +315,10 @@ impl LlmClient {
     }
 
     /// Execute a single generate request (no retries)
-    async fn generate_once(&self, request: &LlmRequest) -> Result<LlmResponse, LlmError> {
+    async fn generate_once(
+        &self,
+        request: &LlmRequest,
+    ) -> Result<rust_genai::InteractionResponse, LlmError> {
         let interaction = self.build_interaction(request);
 
         // Execute with timeout
@@ -332,20 +328,12 @@ impl LlmClient {
             .map_err(|_| LlmError::Timeout(timeout_duration.as_millis() as u64))?
             .map_err(LlmError::from)?;
 
-        // Extract text
-        let text = response.text().ok_or(LlmError::NoContent)?.to_string();
+        // Validate response has content
+        if response.text().is_none() {
+            return Err(LlmError::NoContent);
+        }
 
-        // Extract tokens (graceful degradation)
-        let tokens_used = Self::extract_token_count(&response);
-
-        // Extract interaction ID
-        let interaction_id = response.id.clone();
-
-        Ok(LlmResponse {
-            text,
-            tokens_used,
-            interaction_id,
-        })
+        Ok(response)
     }
 
     /// Determine if an error is retryable
@@ -580,30 +568,6 @@ impl LlmClient {
 
         interaction
     }
-
-    /// Extract token count from response, returning None if unavailable
-    fn extract_token_count(response: &rust_genai::InteractionResponse) -> Option<u32> {
-        let result = response
-            .usage
-            .as_ref()
-            .and_then(|u| u.total_tokens)
-            .and_then(|t| {
-                u32::try_from(t).ok().or_else(|| {
-                    log::warn!(
-                        "Token count {} exceeds u32::MAX for interaction {}",
-                        t,
-                        response.id
-                    );
-                    None
-                })
-            });
-
-        if result.is_none() {
-            log::debug!("Token count unavailable for interaction {}", response.id);
-        }
-
-        result
-    }
 }
 
 #[cfg(test)]
@@ -687,31 +651,6 @@ mod tests {
         );
         assert!(req.use_google_search);
         assert_eq!(req.response_format, Some(schema));
-    }
-
-    #[test]
-    fn test_llm_response_creation() {
-        let response = LlmResponse {
-            text: "Generated text".to_string(),
-            tokens_used: Some(42),
-            interaction_id: "test-123".to_string(),
-        };
-
-        assert_eq!(response.text, "Generated text");
-        assert_eq!(response.tokens_used, Some(42));
-        assert_eq!(response.interaction_id, "test-123");
-    }
-
-    #[test]
-    fn test_llm_response_with_no_tokens() {
-        let response = LlmResponse {
-            text: "Generated text".to_string(),
-            tokens_used: None,
-            interaction_id: "test-456".to_string(),
-        };
-
-        assert_eq!(response.text, "Generated text");
-        assert!(response.tokens_used.is_none());
     }
 
     #[test]
