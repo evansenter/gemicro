@@ -14,9 +14,6 @@
 use futures_util::StreamExt;
 use gemicro_core::{
     AgentContext, AgentError, DeepResearchAgent, LlmClient, LlmConfig, ResearchConfig,
-    EVENT_DECOMPOSITION_COMPLETE, EVENT_DECOMPOSITION_STARTED, EVENT_FINAL_RESULT,
-    EVENT_SUB_QUERY_COMPLETED, EVENT_SUB_QUERY_FAILED, EVENT_SUB_QUERY_STARTED,
-    EVENT_SYNTHESIS_STARTED,
 };
 use std::collections::HashMap;
 use std::env;
@@ -126,10 +123,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     while let Some(result) = stream.next().await {
         match result {
             Ok(update) => match update.event_type.as_str() {
-                EVENT_DECOMPOSITION_STARTED => {
+                "decomposition_started" => {
                     println!("🔍 Analyzing query and generating research plan...");
                 }
-                EVENT_DECOMPOSITION_COMPLETE => {
+                "decomposition_complete" => {
                     if let Some(queries) = update.as_decomposition_complete() {
                         sub_queries = queries.clone();
                         println!();
@@ -155,7 +152,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         println!();
                     }
                 }
-                EVENT_SUB_QUERY_STARTED => {
+                "sub_query_started" => {
                     if let Some(id) = update.data.get("id").and_then(|v| v.as_u64()) {
                         sub_query_start_times.insert(id as usize, Instant::now());
                         let query_text = sub_queries
@@ -165,7 +162,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         println!("   ⏳ [{}] {}", id + 1, query_text);
                     }
                 }
-                EVENT_SUB_QUERY_COMPLETED => {
+                "sub_query_completed" => {
                     if let Some(result) = update.as_sub_query_completed() {
                         let duration = sub_query_start_times
                             .get(&result.id)
@@ -185,7 +182,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         findings.push((result.id, result.result.clone(), duration));
                     }
                 }
-                EVENT_SUB_QUERY_FAILED => {
+                "sub_query_failed" => {
                     if let Some(id) = update.data.get("id").and_then(|v| v.as_u64()) {
                         let duration = sub_query_start_times
                             .get(&(id as usize))
@@ -206,7 +203,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         );
                     }
                 }
-                EVENT_SYNTHESIS_STARTED => {
+                "synthesis_started" => {
                     println!();
 
                     // Show findings summary before synthesis
@@ -257,7 +254,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         findings.len()
                     );
                 }
-                EVENT_FINAL_RESULT => {
+                "final_result" => {
                     if let Some(result) = update.as_final_result() {
                         let total_duration = overall_start.elapsed();
 

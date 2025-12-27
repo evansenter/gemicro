@@ -46,12 +46,8 @@ mod tool_agent;
 
 pub use deep_research::DeepResearchAgent;
 pub use react::ReactAgent;
-pub use simple_qa::{
-    SimpleQaAgent, SimpleQaConfig, EVENT_SIMPLE_QA_RESULT, EVENT_SIMPLE_QA_STARTED,
-};
-pub use tool_agent::{
-    ToolAgent, ToolAgentConfig, ToolType, EVENT_TOOL_AGENT_COMPLETE, EVENT_TOOL_AGENT_STARTED,
-};
+pub use simple_qa::{SimpleQaAgent, SimpleQaConfig};
+pub use tool_agent::{ToolAgent, ToolAgentConfig, ToolType};
 
 use crate::error::AgentError;
 use crate::llm::LlmClient;

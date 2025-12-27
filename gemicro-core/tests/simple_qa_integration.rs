@@ -7,10 +7,7 @@ mod common;
 
 use common::{create_test_context, create_test_context_with_cancellation, get_api_key};
 use futures_util::StreamExt;
-use gemicro_core::{
-    Agent, AgentError, SimpleQaAgent, SimpleQaConfig, EVENT_FINAL_RESULT, EVENT_SIMPLE_QA_RESULT,
-    EVENT_SIMPLE_QA_STARTED,
-};
+use gemicro_core::{Agent, AgentError, SimpleQaAgent, SimpleQaConfig};
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
@@ -44,7 +41,7 @@ async fn test_simple_qa_full_flow() {
                 println!("[{}] {}", update.event_type, update.message);
                 events.push(update.event_type.clone());
 
-                if update.event_type == EVENT_SIMPLE_QA_RESULT {
+                if update.event_type == "simple_qa_result" {
                     final_answer = update.message.clone();
                 }
             }
@@ -56,9 +53,9 @@ async fn test_simple_qa_full_flow() {
 
     // Verify event ordering
     assert_eq!(events.len(), 3, "Should have exactly 3 events");
-    assert_eq!(events[0], EVENT_SIMPLE_QA_STARTED);
-    assert_eq!(events[1], EVENT_SIMPLE_QA_RESULT);
-    assert_eq!(events[2], EVENT_FINAL_RESULT);
+    assert_eq!(events[0], "simple_qa_started");
+    assert_eq!(events[1], "simple_qa_result");
+    assert_eq!(events[2], "final_result");
 
     // Verify we got an answer
     assert!(!final_answer.is_empty(), "Should have a final answer");
@@ -90,7 +87,7 @@ async fn test_simple_qa_respects_system_prompt() {
 
     while let Some(result) = stream.next().await {
         if let Ok(update) = result {
-            if update.event_type == EVENT_SIMPLE_QA_RESULT {
+            if update.event_type == "simple_qa_result" {
                 final_answer = update.message.clone();
             }
         }
@@ -216,14 +213,14 @@ async fn test_simple_qa_event_data() {
     while let Some(result) = stream.next().await {
         if let Ok(update) = result {
             match update.event_type.as_str() {
-                EVENT_SIMPLE_QA_STARTED => {
+                "simple_qa_started" => {
                     // Should have query in data
                     assert!(
                         update.data.get("query").is_some(),
                         "Should have query field"
                     );
                 }
-                EVENT_SIMPLE_QA_RESULT => {
+                "simple_qa_result" => {
                     // Should have answer, duration, and optionally tokens
                     assert!(
                         update.data.get("answer").is_some(),

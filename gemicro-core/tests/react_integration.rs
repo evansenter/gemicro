@@ -7,10 +7,7 @@ mod common;
 
 use common::{create_test_context, get_api_key};
 use futures_util::StreamExt;
-use gemicro_core::{
-    AgentError, ReactAgent, ReactConfig, EVENT_FINAL_RESULT, EVENT_REACT_ACTION,
-    EVENT_REACT_COMPLETE, EVENT_REACT_OBSERVATION, EVENT_REACT_STARTED, EVENT_REACT_THOUGHT,
-};
+use gemicro_core::{AgentError, ReactAgent, ReactConfig};
 use std::time::Duration;
 
 /// Test the full ReAct flow with a calculator query
@@ -47,7 +44,7 @@ async fn test_react_calculator_query() {
                 events.push(update.event_type.clone());
 
                 match update.event_type.as_str() {
-                    EVENT_REACT_ACTION => {
+                    "react_action" => {
                         let tool = update.data.get("tool").and_then(|v| v.as_str());
                         if tool == Some("calculator") {
                             used_calculator = true;
@@ -58,13 +55,13 @@ async fn test_react_calculator_query() {
                             update.data.get("input").and_then(|v| v.as_str())
                         );
                     }
-                    EVENT_REACT_OBSERVATION => {
+                    "react_observation" => {
                         println!(
                             "  Observation: {:?}",
                             update.data.get("result").and_then(|v| v.as_str())
                         );
                     }
-                    EVENT_REACT_COMPLETE => {
+                    "react_complete" => {
                         if let Some(answer) =
                             update.data.get("final_answer").and_then(|v| v.as_str())
                         {
@@ -84,15 +81,15 @@ async fn test_react_calculator_query() {
 
     // Verify event sequence
     assert!(
-        events.contains(&EVENT_REACT_STARTED.to_string()),
+        events.contains(&"react_started".to_string()),
         "Should have react_started"
     );
     assert!(
-        events.contains(&EVENT_REACT_THOUGHT.to_string()),
+        events.contains(&"react_thought".to_string()),
         "Should have at least one thought"
     );
     assert!(
-        events.contains(&EVENT_REACT_COMPLETE.to_string()),
+        events.contains(&"react_complete".to_string()),
         "Should have react_complete"
     );
 
@@ -140,14 +137,14 @@ async fn test_react_multi_step_calculation() {
             Ok(update) => {
                 println!("[{}] {}", update.event_type, update.message);
 
-                if update.event_type == EVENT_REACT_ACTION {
+                if update.event_type == "react_action" {
                     let tool = update.data.get("tool").and_then(|v| v.as_str());
                     if tool == Some("calculator") {
                         calculator_uses += 1;
                     }
                 }
 
-                if update.event_type == EVENT_REACT_COMPLETE {
+                if update.event_type == "react_complete" {
                     if let Some(answer) = update.data.get("final_answer").and_then(|v| v.as_str()) {
                         final_answer = answer.to_string();
                     }
@@ -207,20 +204,20 @@ async fn test_react_event_ordering() {
     // Verify react_started is first
     assert_eq!(
         events.first(),
-        Some(&EVENT_REACT_STARTED.to_string()),
+        Some(&"react_started".to_string()),
         "First event should be react_started"
     );
 
     // Verify react_complete is present (followed by final_result)
     assert!(
-        events.contains(&EVENT_REACT_COMPLETE.to_string()),
+        events.contains(&"react_complete".to_string()),
         "Events should contain react_complete"
     );
 
     // Verify final_result is last (emitted after react_complete for harness compatibility)
     assert_eq!(
         events.last(),
-        Some(&EVENT_FINAL_RESULT.to_string()),
+        Some(&"final_result".to_string()),
         "Last event should be final_result"
     );
 
@@ -228,14 +225,14 @@ async fn test_react_event_ordering() {
     let thought_positions: Vec<_> = events
         .iter()
         .enumerate()
-        .filter(|(_, e)| *e == EVENT_REACT_THOUGHT)
+        .filter(|(_, e)| *e == "react_thought")
         .map(|(i, _)| i)
         .collect();
 
     let action_positions: Vec<_> = events
         .iter()
         .enumerate()
-        .filter(|(_, e)| *e == EVENT_REACT_ACTION)
+        .filter(|(_, e)| *e == "react_action")
         .map(|(i, _)| i)
         .collect();
 
