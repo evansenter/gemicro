@@ -155,6 +155,19 @@ impl Default for Scorers {
 /// correct compared to the ground truth. More flexible than exact matching
 /// but slower and requires API calls.
 ///
+/// # Returns
+///
+/// - `1.0` if the LLM judges the prediction as semantically correct
+/// - `0.0` if the LLM judges the prediction as incorrect
+/// - `NaN` if the evaluation itself failed (LLM error, timeout, etc.)
+///
+/// Use [`f64::is_nan()`] to check for evaluation failures.
+///
+/// # Panics
+///
+/// Panics if called outside a tokio multi-threaded runtime. This scorer
+/// must be used within the evaluation harness or another async context.
+///
 /// # Example
 ///
 /// ```no_run
@@ -162,12 +175,14 @@ impl Default for Scorers {
 /// use gemicro_core::{LlmClient, LlmConfig};
 /// use std::sync::Arc;
 ///
+/// // Must be called within a tokio runtime
 /// let genai = rust_genai::Client::builder("api-key".to_string()).build();
 /// let llm = Arc::new(LlmClient::new(genai, LlmConfig::default()));
 /// let scorer = LlmJudgeScorer::new(llm);
 ///
-/// // Score is 1.0 if LLM judges semantically correct, 0.0 otherwise
+/// // Returns 1.0 (correct), 0.0 (incorrect), or NaN (evaluation failed)
 /// // let score = scorer.score("The capital is Paris", "Paris");
+/// // if score.is_nan() { /* handle evaluation failure */ }
 /// ```
 pub struct LlmJudgeScorer {
     llm: std::sync::Arc<gemicro_core::LlmClient>,
@@ -195,36 +210,48 @@ impl Scorer for LlmJudgeScorer {
         let input = JudgeInput::new(predicted, ground_truth);
         let context = AgentContext::from_arc(self.llm.clone());
 
-        // Run async agent from sync context using block_in_place
-        // This is safe because we're in a tokio multi-threaded runtime
-        let result = tokio::task::block_in_place(|| {
+        // Run async agent from sync context using block_in_place.
+        // Panics if called outside a tokio multi-threaded runtime.
+        tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
                 let stream = agent.execute(&input.to_query(), context);
                 futures_util::pin_mut!(stream);
 
-                while let Some(update) = stream.next().await {
-                    if let Ok(update) = update {
-                        if update.event_type == "judge_result" {
-                            if let Some(correct) =
-                                update.data.get("correct").and_then(|v| v.as_bool())
-                            {
-                                return if correct { 1.0 } else { 0.0 };
+                while let Some(result) = stream.next().await {
+                    match result {
+                        Ok(update) => {
+                            if update.event_type == "judge_result" {
+                                match update.data.get("correct") {
+                                    Some(value) => match value.as_bool() {
+                                        Some(correct) => return if correct { 1.0 } else { 0.0 },
+                                        None => {
+                                            log::error!(
+                                                "LLM judge 'correct' field is not a boolean: {:?}",
+                                                value
+                                            );
+                                            return f64::NAN;
+                                        }
+                                    },
+                                    None => {
+                                        log::error!("LLM judge result missing 'correct' field");
+                                        return f64::NAN;
+                                    }
+                                }
                             }
+                        }
+                        Err(e) => {
+                            log::error!("LLM judge failed: {:?}", e);
+                            return f64::NAN;
                         }
                     }
                 }
-                0.0 // Default to incorrect if no result
+                // Stream ended without producing a judge_result
+                log::error!("LLM judge did not produce a result");
+                f64::NAN
             })
-        });
-
-        result
+        })
     }
 }
-
-// Note: LlmJudgeScorer is Send but not Sync due to internal async machinery.
-// However, the Scorer trait requires Send + Sync. Since we use block_in_place
-// which handles the synchronization, this is safe.
-unsafe impl Sync for LlmJudgeScorer {}
 
 #[cfg(test)]
 mod tests {
