@@ -11,7 +11,7 @@ use crate::update::{AgentUpdate, ResultMetadata};
 
 use async_stream::try_stream;
 use futures_util::Stream;
-use rust_genai::{CallableFunction, FunctionDeclaration, InteractionResponse};
+use rust_genai::{AutoFunctionResult, CallableFunction, FunctionDeclaration};
 use rust_genai_macros::tool;
 use serde_json::json;
 use std::time::{Duration, Instant};
@@ -352,7 +352,7 @@ impl ToolAgent {
             // Execute with auto function calling and timeout
             let response_future = interaction.create_with_auto_functions();
 
-            let response: InteractionResponse = with_timeout_and_cancellation(
+            let result: AutoFunctionResult = with_timeout_and_cancellation(
                 async {
                     response_future.await.map_err(|e| AgentError::Other(format!("Function calling failed: {}", e)))
                 },
@@ -361,8 +361,11 @@ impl ToolAgent {
                 || timeout_error(start_time, config.timeout, "tool_agent"),
             ).await?;
 
+            // Extract the response from AutoFunctionResult
+            let response = result.response;
+
             // Extract the response text, logging if empty
-            let answer = match response.text() {
+            let answer: String = match response.text() {
                 Some(text) if !text.is_empty() => text.to_string(),
                 Some(_) => {
                     log::warn!("LLM returned empty text response for tool agent query");
