@@ -207,6 +207,10 @@ See [GitHub Issues](https://github.com/evansenter/gemicro/issues) for the full r
 
 MIT
 
+## Security
+
+See [SECURITY.md](SECURITY.md) for security policy, vulnerability reporting, and best practices.
+
 ## Documentation
 
 - [Agent Authoring Guide](docs/AGENT_AUTHORING.md) - Complete walkthrough for implementing new agents

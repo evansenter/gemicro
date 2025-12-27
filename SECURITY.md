@@ -13,7 +13,9 @@ We take the security of this project seriously. If you discover a security vulne
 
 **Do not file a public issue.**
 
-Instead, please report it via email to [maintainer email placeholder] or use GitHub's private vulnerability reporting feature if enabled.
+Instead, please report it via GitHub's private vulnerability reporting:
+1. Navigate to **Security** > **Advisories** > **Report a vulnerability**
+2. Provide a detailed description of the issue
 
 ## Security Best Practices
 

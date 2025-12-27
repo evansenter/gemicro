@@ -44,6 +44,7 @@ pub struct LlmClient {
 impl std::fmt::Debug for LlmClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LlmClient")
+            .field("model", &MODEL)
             .field("client", &"[REDACTED]")
             .field("config", &self.config)
             .finish()
