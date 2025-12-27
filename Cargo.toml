@@ -4,6 +4,7 @@ resolver = "2"
 
 [workspace.dependencies]
 rust-genai = { git = "https://github.com/evansenter/rust-genai", branch = "main" }
+rust-genai-macros = { git = "https://github.com/evansenter/rust-genai", branch = "main" }
 tokio = { version = "1.48", features = ["full"] }
 tokio-util = "0.7"
 async-trait = "0.1"
@@ -14,5 +15,10 @@ serde_json = "1.0"
 futures-util = "0.3"
 anyhow = "1.0"
 log = "0.4"
+indicatif = "0.18"
+termimad = "0.34"
+rustyline = "17.0"
+rstest = "0.26"
+tempfile = "3.24"
 
 # Workspace-level metadata

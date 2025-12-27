@@ -47,7 +47,8 @@ pub mod utils;
 // Re-export public API
 pub use agent::{
     Agent, AgentContext, AgentStream, DeepResearchAgent, ReactAgent, SimpleQaAgent, SimpleQaConfig,
-    EVENT_SIMPLE_QA_RESULT, EVENT_SIMPLE_QA_STARTED,
+    ToolAgent, ToolAgentConfig, ToolType, EVENT_SIMPLE_QA_RESULT, EVENT_SIMPLE_QA_STARTED,
+    EVENT_TOOL_AGENT_COMPLETE, EVENT_TOOL_AGENT_STARTED,
 };
 pub use config::{
     GemicroConfig, LlmConfig, ReactConfig, ReactPrompts, ResearchConfig, ResearchPrompts, MODEL,

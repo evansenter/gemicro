@@ -17,6 +17,7 @@
 //! - [`DeepResearchAgent`]: Decomposes queries, executes sub-queries in parallel, synthesizes results
 //! - [`SimpleQaAgent`]: Minimal single-call agent for reference/demonstration
 //! - [`ReactAgent`]: Reasoning + Acting pattern with iterative tool use
+//! - [`ToolAgent`]: Native function calling via rust-genai's `#[tool]` macro
 //!
 //! ## Example
 //!
@@ -41,11 +42,15 @@
 mod deep_research;
 mod react;
 mod simple_qa;
+mod tool_agent;
 
 pub use deep_research::DeepResearchAgent;
 pub use react::ReactAgent;
 pub use simple_qa::{
     SimpleQaAgent, SimpleQaConfig, EVENT_SIMPLE_QA_RESULT, EVENT_SIMPLE_QA_STARTED,
+};
+pub use tool_agent::{
+    ToolAgent, ToolAgentConfig, ToolType, EVENT_TOOL_AGENT_COMPLETE, EVENT_TOOL_AGENT_STARTED,
 };
 
 use crate::error::AgentError;
