@@ -10,7 +10,9 @@ use anyhow::{bail, Context, Result};
 use clap::Parser;
 use display::{ExecutionState, IndicatifRenderer, Phase, Renderer};
 use futures_util::StreamExt;
-use gemicro_core::{AgentContext, AgentError, DeepResearchAgent, LlmClient};
+use gemicro_core::{
+    AgentContext, AgentError, DeepResearchAgent, LlmClient, ToolAgent, ToolAgentConfig,
+};
 use repl::Session;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
@@ -67,6 +69,10 @@ async fn run_interactive(args: &cli::Args) -> Result<()> {
     let research_config = args.research_config();
     session.registry.register("deep_research", move || {
         Box::new(DeepResearchAgent::new(research_config.clone()).expect("Invalid research config"))
+    });
+
+    session.registry.register("tool_agent", || {
+        Box::new(ToolAgent::new(ToolAgentConfig::default()).expect("Invalid tool agent config"))
     });
 
     // Set the initial agent

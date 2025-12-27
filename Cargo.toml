@@ -4,6 +4,7 @@ resolver = "2"
 
 [workspace.dependencies]
 rust-genai = { git = "https://github.com/evansenter/rust-genai", branch = "main" }
+rust-genai-macros = { git = "https://github.com/evansenter/rust-genai", branch = "main" }
 tokio = { version = "1.48", features = ["full"] }
 tokio-util = "0.7"
 async-trait = "0.1"

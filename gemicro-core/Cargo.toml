@@ -9,6 +9,7 @@ path = "examples/deep_research.rs"
 
 [dependencies]
 rust-genai = { workspace = true }
+rust-genai-macros = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 async-trait = { workspace = true }
@@ -21,4 +22,4 @@ log = { workspace = true }
 meval = "0.2"
 
 [dev-dependencies]
-rstest = "0.23"
+rstest = "0.26"

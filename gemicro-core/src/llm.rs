@@ -170,6 +170,19 @@ impl LlmClient {
         Self { client, config }
     }
 
+    /// Get a reference to the underlying rust-genai client.
+    ///
+    /// Use this for advanced operations like function calling that require
+    /// direct access to the client.
+    pub fn client(&self) -> &rust_genai::Client {
+        &self.client
+    }
+
+    /// Get a reference to the LLM configuration.
+    pub fn config(&self) -> &LlmConfig {
+        &self.config
+    }
+
     /// Generate a complete response (buffered mode)
     ///
     /// This method waits for the full response before returning.
