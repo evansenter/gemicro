@@ -30,6 +30,9 @@ pub const EVENT_TOOL_AGENT_COMPLETE: &str = "tool_agent_complete";
 // Tool Definitions using #[tool] macro
 // ============================================================================
 
+/// Maximum allowed length for calculator expressions to prevent abuse.
+const MAX_EXPRESSION_LENGTH: usize = 1000;
+
 /// Calculator tool for evaluating mathematical expressions.
 ///
 /// Supports basic arithmetic (+, -, *, /), exponents (^), parentheses,
@@ -38,6 +41,15 @@ pub const EVENT_TOOL_AGENT_COMPLETE: &str = "tool_agent_complete";
     description = "A mathematical expression to evaluate, e.g., '2 + 2', 'sqrt(16)', '3.14 * 2^3'"
 ))]
 fn calculator(expression: String) -> String {
+    // Validate input length to prevent abuse
+    if expression.len() > MAX_EXPRESSION_LENGTH {
+        return format!(
+            "Error: Expression too long ({} chars, max {})",
+            expression.len(),
+            MAX_EXPRESSION_LENGTH
+        );
+    }
+
     match meval::eval_str(&expression) {
         Ok(result) => {
             if result.is_nan() {
@@ -54,21 +66,28 @@ fn calculator(expression: String) -> String {
     }
 }
 
-/// Gets the current date and time in a specified timezone.
+/// Gets the current date and time in UTC.
 ///
-/// Note: This is a simplified implementation that returns UTC time.
-/// In production, you might use chrono-tz for proper timezone handling.
+/// Note: Only UTC timezone is currently supported.
 #[tool(timezone(
-    description = "The timezone to get the time for (e.g., 'UTC', 'EST', 'PST', 'JST'). Currently returns UTC regardless of input."
+    description = "The timezone to get the time for. Currently only 'UTC' is supported."
 ))]
 fn current_datetime(timezone: String) -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    // Only UTC is supported
+    if !timezone.eq_ignore_ascii_case("utc") {
+        return format!(
+            r#"{{"error": "Only UTC timezone is currently supported, got '{}'"}}"#,
+            timezone
+        );
+    }
 
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
 
-    // Simple date/time calculation (UTC only for now)
+    // Calculate time components
     let total_secs = now.as_secs();
     let days_since_epoch = total_secs / 86400;
     let secs_today = total_secs % 86400;
@@ -77,10 +96,21 @@ fn current_datetime(timezone: String) -> String {
     let minutes = (secs_today % 3600) / 60;
     let seconds = secs_today % 60;
 
-    // Approximate date calculation (not accounting for leap seconds)
-    let mut year = 1970;
-    let mut remaining_days = days_since_epoch as i64;
+    // Calculate date from days since epoch
+    let (year, month, day) = days_to_ymd(days_since_epoch);
 
+    format!(
+        r#"{{"timezone": "UTC", "date": "{:04}-{:02}-{:02}", "time": "{:02}:{:02}:{:02}"}}"#,
+        year, month, day, hours, minutes, seconds
+    )
+}
+
+/// Convert days since Unix epoch to (year, month, day).
+fn days_to_ymd(days_since_epoch: u64) -> (i64, u32, u32) {
+    let mut remaining_days = days_since_epoch as i64;
+    let mut year: i64 = 1970;
+
+    // Find the year
     loop {
         let days_in_year = if is_leap_year(year) { 366 } else { 365 };
         if remaining_days < days_in_year {
@@ -90,26 +120,26 @@ fn current_datetime(timezone: String) -> String {
         year += 1;
     }
 
+    // Find the month
     let days_in_months: [i64; 12] = if is_leap_year(year) {
         [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
     } else {
         [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
     };
 
-    let mut month = 1;
-    for days in days_in_months.iter() {
-        if remaining_days < *days {
+    let mut month: u32 = 1;
+    for &days_in_month in &days_in_months {
+        if remaining_days < days_in_month {
             break;
         }
-        remaining_days -= *days;
+        remaining_days -= days_in_month;
         month += 1;
     }
-    let day = remaining_days + 1;
 
-    format!(
-        r#"{{"timezone": "{}", "date": "{:04}-{:02}-{:02}", "time": "{:02}:{:02}:{:02}", "note": "Times are in UTC regardless of requested timezone"}}"#,
-        timezone, year, month, day, hours, minutes, seconds
-    )
+    // remaining_days is now days within the month (0-indexed), add 1 for day of month
+    let day = (remaining_days + 1) as u32;
+
+    (year, month, day)
 }
 
 fn is_leap_year(year: i64) -> bool {
@@ -361,8 +391,10 @@ impl ToolAgent {
                 }),
             );
 
-            // Emit standard final_result for ExecutionState/harness compatibility
-            // Note: Tool call counts are not available with create_with_auto_functions() API
+            // Emit standard final_result for ExecutionState/harness compatibility.
+            // Note: sub_queries_succeeded/failed are set to 0 because ToolAgent doesn't use
+            // sub-queries (those fields are for DeepResearchAgent). Tool call counts are not
+            // tracked because create_with_auto_functions() abstracts away individual tool calls.
             let metadata = ResultMetadata {
                 total_tokens,
                 tokens_unavailable_count: tokens_unavailable,
@@ -502,11 +534,78 @@ mod tests {
     }
 
     #[test]
+    fn test_calculator_rejects_long_expressions() {
+        let long_expr = "1+".repeat(600); // 1200 chars, exceeds MAX_EXPRESSION_LENGTH
+        let result = calculator(long_expr);
+        assert!(result.contains("Error: Expression too long"));
+        assert!(result.contains("max 1000"));
+    }
+
+    #[test]
     fn test_current_datetime_tool_directly() {
         let result = current_datetime("UTC".to_string());
         assert!(result.contains("timezone"));
         assert!(result.contains("date"));
         assert!(result.contains("time"));
+
+        // Verify it's valid JSON
+        let json: serde_json::Value = serde_json::from_str(&result).expect("Should be valid JSON");
+        assert_eq!(json["timezone"], "UTC");
+    }
+
+    #[test]
+    fn test_current_datetime_rejects_non_utc() {
+        let result = current_datetime("EST".to_string());
+        assert!(result.contains("error"));
+        assert!(result.contains("Only UTC timezone is currently supported"));
+
+        let result = current_datetime("PST".to_string());
+        assert!(result.contains("error"));
+    }
+
+    #[test]
+    fn test_current_datetime_accepts_utc_case_insensitive() {
+        // All case variations should work
+        for tz in &["UTC", "utc", "Utc", "uTc"] {
+            let result = current_datetime(tz.to_string());
+            assert!(!result.contains("error"), "Should accept {} as UTC", tz);
+            assert!(result.contains("timezone"));
+        }
+    }
+
+    #[test]
+    fn test_days_to_ymd_known_dates() {
+        // Unix epoch: Jan 1, 1970
+        assert_eq!(days_to_ymd(0), (1970, 1, 1));
+
+        // Jan 2, 1970
+        assert_eq!(days_to_ymd(1), (1970, 1, 2));
+
+        // Feb 1, 1970 (31 days after epoch)
+        assert_eq!(days_to_ymd(31), (1970, 2, 1));
+
+        // Jan 1, 1971 (365 days after epoch)
+        assert_eq!(days_to_ymd(365), (1971, 1, 1));
+
+        // Dec 31, 2024 (known date for validation)
+        // Days from 1970-01-01 to 2024-12-31:
+        // 55 years, accounting for leap years (1972, 1976, ..., 2024)
+        // Leap years from 1970-2024: 1972, 1976, 1980, 1984, 1988, 1992, 1996, 2000, 2004, 2008, 2012, 2016, 2020, 2024 = 14
+        // Regular years: 55 - 14 = 41
+        // Days: 41*365 + 14*366 = 14965 + 5124 = 20089, then + 365 days in 2024 = 20089, minus 1 for Dec 31 = 20088
+        // Actually: let's compute more carefully
+        // 2024-12-31 is day 20088 since epoch (can verify with online calculator)
+        // But since 2024 is a leap year with 366 days, Dec 31 is the 366th day of 2024
+        // Let me use a simpler known date: 2000-03-01 (after Feb 29 in leap year 2000)
+        // Days from 1970-01-01 to 2000-03-01:
+        // 30 years from 1970 to 2000
+        // Leap years: 1972, 1976, 1980, 1984, 1988, 1992, 1996 = 7 leap years in 1970-1999
+        // 2000 is also a leap year (divisible by 400)
+        // Days through 1999: 23*365 + 7*366 = 8395 + 2562 = 10957
+        // Days in Jan 2000: 31
+        // Days in Feb 2000: 29 (leap year)
+        // Total: 10957 + 31 + 29 = 11017
+        assert_eq!(days_to_ymd(11017), (2000, 3, 1));
     }
 
     #[test]
