@@ -1,7 +1,39 @@
-//! Text utilities for the gemicro platform.
+//! Utilities for the gemicro platform.
 //!
 //! These are pure functions with no external dependencies, providing
-//! common text manipulation operations used across crates.
+//! common text manipulation and response handling operations used across crates.
+
+use rust_genai::InteractionResponse;
+
+/// Extract total token count from an LLM response.
+///
+/// Safely converts from `i32` to `u32`, returning `None` on negative values
+/// or if usage metadata is unavailable. This centralizes the token extraction
+/// pattern used across all agents.
+///
+/// # Example
+///
+/// ```no_run
+/// use gemicro_core::{LlmClient, LlmConfig, LlmRequest, extract_total_tokens};
+///
+/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// let client = LlmClient::new(
+///     rust_genai::Client::builder("api-key".to_string()).build(),
+///     LlmConfig::default(),
+/// );
+/// let response = client.generate(LlmRequest::new("Hello")).await?;
+/// let tokens = extract_total_tokens(&response);
+/// println!("Tokens used: {:?}", tokens);
+/// # Ok(())
+/// # }
+/// ```
+pub fn extract_total_tokens(response: &InteractionResponse) -> Option<u32> {
+    response
+        .usage
+        .as_ref()
+        .and_then(|u| u.total_tokens)
+        .and_then(|t| u32::try_from(t).ok())
+}
 
 /// Truncate text to a maximum character count, adding ellipsis if needed.
 ///
@@ -79,6 +111,58 @@ pub fn first_sentence(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_response(usage: Option<rust_genai::UsageMetadata>) -> InteractionResponse {
+        InteractionResponse {
+            id: "test".to_string(),
+            model: None,
+            agent: None,
+            input: vec![],
+            outputs: vec![],
+            status: rust_genai::InteractionStatus::Completed,
+            usage,
+            tools: None,
+            grounding_metadata: None,
+            url_context_metadata: None,
+            previous_interaction_id: None,
+        }
+    }
+
+    #[test]
+    fn test_extract_total_tokens_none_usage() {
+        let response = test_response(None);
+        assert_eq!(extract_total_tokens(&response), None);
+    }
+
+    #[test]
+    fn test_extract_total_tokens_none_total() {
+        let response = test_response(Some(rust_genai::UsageMetadata {
+            total_tokens: None,
+            total_input_tokens: Some(10),
+            total_output_tokens: Some(20),
+            ..Default::default()
+        }));
+        assert_eq!(extract_total_tokens(&response), None);
+    }
+
+    #[test]
+    fn test_extract_total_tokens_valid() {
+        let response = test_response(Some(rust_genai::UsageMetadata {
+            total_tokens: Some(100),
+            ..Default::default()
+        }));
+        assert_eq!(extract_total_tokens(&response), Some(100));
+    }
+
+    #[test]
+    fn test_extract_total_tokens_negative() {
+        let response = test_response(Some(rust_genai::UsageMetadata {
+            total_tokens: Some(-1),
+            ..Default::default()
+        }));
+        // Should return None on negative values
+        assert_eq!(extract_total_tokens(&response), None);
+    }
 
     #[test]
     fn test_truncate_short_string() {

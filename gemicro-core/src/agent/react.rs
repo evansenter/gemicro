@@ -8,6 +8,7 @@ use crate::config::ReactConfig;
 use crate::error::AgentError;
 use crate::llm::LlmRequest;
 use crate::update::AgentUpdate;
+use crate::utils::extract_total_tokens;
 
 use async_stream::try_stream;
 use futures_util::Stream;
@@ -124,18 +125,19 @@ impl ReactAgent {
                 ).await?;
 
                 // Track tokens
-                if let Some(tokens) = response.tokens_used {
+                if let Some(tokens) = extract_total_tokens(&response) {
                     total_tokens += tokens;
                 } else {
                     tokens_unavailable += 1;
                 }
 
                 // Parse structured response
-                let step: ReactStep = serde_json::from_str(&response.text)
+                let response_text = response.text().unwrap_or("");
+                let step: ReactStep = serde_json::from_str(response_text)
                     .map_err(|e| AgentError::ParseFailed(format!(
                         "Failed to parse ReAct step: {}. Response: {}",
                         e,
-                        truncate_for_error(&response.text, 200)
+                        truncate_for_error(response_text, 200)
                     )))?;
 
                 // Emit thought event
@@ -287,7 +289,7 @@ impl ReactAgent {
         .with_google_search();
 
         match tokio::time::timeout(timeout, context.llm.generate(request)).await {
-            Ok(Ok(response)) => (response.text, false),
+            Ok(Ok(response)) => (response.text().unwrap_or("").to_string(), false),
             Ok(Err(e)) => (format!("Web search failed: {}", e), true),
             Err(_) => ("Web search timed out".to_string(), true),
         }

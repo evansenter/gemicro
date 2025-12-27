@@ -23,21 +23,20 @@ async fn test_generate_simple_prompt() {
 
     match response {
         Ok(resp) => {
-            println!("Response: {}", resp.text);
-            println!("Tokens used: {:?}", resp.tokens_used);
-            println!("Interaction ID: {}", resp.interaction_id);
+            let text = resp.text().unwrap_or("");
+            let tokens_used = resp.usage.as_ref().and_then(|u| u.total_tokens);
+            println!("Response: {}", text);
+            println!("Tokens used: {:?}", tokens_used);
+            println!("Interaction ID: {}", resp.id);
 
             // Basic assertions
-            assert!(!resp.text.is_empty(), "Response text should not be empty");
+            assert!(!text.is_empty(), "Response text should not be empty");
             assert!(
-                resp.text.contains('4'),
+                text.contains('4'),
                 "Response should contain '4', got: {}",
-                resp.text
+                text
             );
-            assert!(
-                !resp.interaction_id.is_empty(),
-                "Interaction ID should not be empty"
-            );
+            assert!(!resp.id.is_empty(), "Interaction ID should not be empty");
         }
         Err(e) => {
             panic!("Generate failed: {:?}", e);
@@ -62,14 +61,15 @@ async fn test_generate_with_system_instruction() {
 
     match response {
         Ok(resp) => {
-            println!("Response: {}", resp.text);
+            let text = resp.text().unwrap_or("");
+            println!("Response: {}", text);
 
-            assert!(!resp.text.is_empty(), "Response text should not be empty");
+            assert!(!text.is_empty(), "Response text should not be empty");
             // The response should mention Paris
             assert!(
-                resp.text.to_lowercase().contains("paris"),
+                text.to_lowercase().contains("paris"),
                 "Response should mention Paris, got: {}",
-                resp.text
+                text
             );
         }
         Err(e) => {
@@ -242,22 +242,24 @@ async fn test_google_search_grounding() {
 
     match response {
         Ok(resp) => {
-            println!("Grounded response: {}", resp.text);
-            println!("Tokens used: {:?}", resp.tokens_used);
+            let text = resp.text().unwrap_or("");
+            let tokens_used = resp.usage.as_ref().and_then(|u| u.total_tokens);
+            println!("Grounded response: {}", text);
+            println!("Tokens used: {:?}", tokens_used);
 
             // Basic assertions - response should not be empty
-            assert!(!resp.text.is_empty(), "Response text should not be empty");
+            assert!(!text.is_empty(), "Response text should not be empty");
 
             // The grounded response should contain date-related content
             // (we can't check for exact date since it may vary)
             assert!(
-                resp.text.to_lowercase().contains("2024")
-                    || resp.text.to_lowercase().contains("2025")
-                    || resp.text.to_lowercase().contains("december")
-                    || resp.text.to_lowercase().contains("january")
-                    || resp.text.to_lowercase().contains("today"),
+                text.to_lowercase().contains("2024")
+                    || text.to_lowercase().contains("2025")
+                    || text.to_lowercase().contains("december")
+                    || text.to_lowercase().contains("january")
+                    || text.to_lowercase().contains("today"),
                 "Grounded response should contain date-related content, got: {}",
-                resp.text
+                text
             );
         }
         Err(e) => {
@@ -298,14 +300,15 @@ async fn test_structured_output_response_format() {
 
     match response {
         Ok(resp) => {
-            println!("Structured response: {}", resp.text);
+            let text = resp.text().unwrap_or("");
+            println!("Structured response: {}", text);
 
             // Parse the response as JSON
-            let parsed: Result<serde_json::Value, _> = serde_json::from_str(&resp.text);
+            let parsed: Result<serde_json::Value, _> = serde_json::from_str(text);
             assert!(
                 parsed.is_ok(),
                 "Response should be valid JSON, got: {}",
-                resp.text
+                text
             );
 
             let json = parsed.unwrap();
