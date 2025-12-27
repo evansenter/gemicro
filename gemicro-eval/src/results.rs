@@ -133,10 +133,14 @@ impl EvalSummary {
         let succeeded = results.iter().filter(|r| r.is_success()).count();
         let failed = total_questions - succeeded;
 
-        // Calculate average scores
+        // Calculate average scores (skip NaN values from failed evaluations)
         let mut score_sums: HashMap<String, (f64, usize)> = HashMap::new();
         for result in results.iter().filter(|r| r.is_success()) {
             for (scorer_name, score) in &result.scores {
+                // Skip NaN scores (indicates scorer failure, not incorrect answer)
+                if score.is_nan() {
+                    continue;
+                }
                 let entry = score_sums.entry(scorer_name.clone()).or_insert((0.0, 0));
                 entry.0 += score;
                 entry.1 += 1;
@@ -244,10 +248,16 @@ impl EvalSummary {
     ///
     /// Call this after manually adding scores to individual results
     /// (e.g., after running `LlmJudgeAgent` on each result).
+    ///
+    /// NaN scores are skipped (they indicate scorer failures, not incorrect answers).
     pub fn recalculate_averages(&mut self) {
         let mut score_sums: HashMap<String, (f64, usize)> = HashMap::new();
         for result in self.results.iter().filter(|r| r.is_success()) {
             for (scorer_name, score) in &result.scores {
+                // Skip NaN scores (indicates scorer failure, not incorrect answer)
+                if score.is_nan() {
+                    continue;
+                }
                 let entry = score_sums.entry(scorer_name.clone()).or_insert((0.0, 0));
                 entry.0 += score;
                 entry.1 += 1;
@@ -292,7 +302,7 @@ mod tests {
     fn test_eval_result_success() {
         let question = sample_question();
         let mut scores = HashMap::new();
-        scores.insert("exact_match".to_string(), 1.0);
+        scores.insert("contains".to_string(), 1.0);
 
         let result =
             EvalResult::success(&question, "4".to_string(), scores, create_mock_metrics(), 0);
@@ -316,8 +326,8 @@ mod tests {
     fn test_eval_summary_from_results() {
         let question = sample_question();
         let mut scores = HashMap::new();
-        scores.insert("exact_match".to_string(), 1.0);
-        scores.insert("f1".to_string(), 0.8);
+        scores.insert("contains".to_string(), 1.0);
+        scores.insert("llm_judge".to_string(), 0.8);
 
         let results = vec![
             EvalResult::success(
@@ -340,8 +350,8 @@ mod tests {
         assert_eq!(summary.total_questions, 2);
         assert_eq!(summary.succeeded, 1);
         assert_eq!(summary.failed, 1);
-        assert_eq!(summary.average_scores.get("exact_match"), Some(&1.0));
-        assert_eq!(summary.average_scores.get("f1"), Some(&0.8));
+        assert_eq!(summary.average_scores.get("contains"), Some(&1.0));
+        assert_eq!(summary.average_scores.get("llm_judge"), Some(&0.8));
     }
 
     #[test]
@@ -364,7 +374,7 @@ mod tests {
     fn test_recalculate_averages_after_adding_scores() {
         let question = sample_question();
         let mut scores = HashMap::new();
-        scores.insert("exact_match".to_string(), 1.0);
+        scores.insert("contains".to_string(), 1.0);
 
         let results = vec![
             EvalResult::success(
@@ -391,7 +401,7 @@ mod tests {
         );
 
         // Verify initial state
-        assert_eq!(summary.avg_score("exact_match"), Some(1.0));
+        assert_eq!(summary.avg_score("contains"), Some(1.0));
         assert_eq!(summary.avg_score("llm_judge"), None);
 
         // Add llm_judge scores after the fact (simulating LlmJudgeAgent)
@@ -408,7 +418,7 @@ mod tests {
         // Verify new score is included
         assert_eq!(summary.avg_score("llm_judge"), Some(0.5));
         // Existing scores are preserved
-        assert_eq!(summary.avg_score("exact_match"), Some(1.0));
+        assert_eq!(summary.avg_score("contains"), Some(1.0));
     }
 
     fn create_mock_metrics() -> ExecutionMetrics {
@@ -433,7 +443,7 @@ mod tests {
     fn test_format_summary() {
         let question = sample_question();
         let mut scores = HashMap::new();
-        scores.insert("exact_match".to_string(), 1.0);
+        scores.insert("contains".to_string(), 1.0);
 
         let results = vec![EvalResult::success(
             &question,
@@ -458,8 +468,75 @@ mod tests {
         assert!(formatted.contains("Questions: 1 total, 1 succeeded, 0 failed"));
         assert!(formatted.contains("Success rate: 100.0%"));
         assert!(formatted.contains("Scores:"));
-        assert!(formatted.contains("exact_match: 1.000"));
+        assert!(formatted.contains("contains: 1.000"));
         assert!(formatted.contains("Tokens: 100"));
         assert!(formatted.contains("Duration: 10.0s"));
+    }
+
+    #[test]
+    fn test_eval_summary_skips_nan_scores() {
+        let question = sample_question();
+
+        // First result has valid scores
+        let mut scores1 = HashMap::new();
+        scores1.insert("contains".to_string(), 1.0);
+        scores1.insert("llm_judge".to_string(), 1.0);
+
+        // Second result has NaN for llm_judge (simulating scorer failure)
+        let mut scores2 = HashMap::new();
+        scores2.insert("contains".to_string(), 0.0);
+        scores2.insert("llm_judge".to_string(), f64::NAN);
+
+        // Third result has valid scores
+        let mut scores3 = HashMap::new();
+        scores3.insert("contains".to_string(), 1.0);
+        scores3.insert("llm_judge".to_string(), 0.0);
+
+        let results = vec![
+            EvalResult::success(
+                &question,
+                "4".to_string(),
+                scores1,
+                create_mock_metrics(),
+                0,
+            ),
+            EvalResult::success(
+                &question,
+                "four".to_string(),
+                scores2,
+                create_mock_metrics(),
+                0,
+            ),
+            EvalResult::success(
+                &question,
+                "IV".to_string(),
+                scores3,
+                create_mock_metrics(),
+                0,
+            ),
+        ];
+
+        let summary = EvalSummary::from_results(
+            "test".to_string(),
+            "agent".to_string(),
+            results,
+            std::time::Duration::from_secs(5),
+        );
+
+        // contains: (1.0 + 0.0 + 1.0) / 3 = 0.666...
+        let contains_avg = summary.avg_score("contains").unwrap();
+        assert!(
+            (contains_avg - 0.666).abs() < 0.01,
+            "Expected ~0.666, got {}",
+            contains_avg
+        );
+
+        // llm_judge: (1.0 + 0.0) / 2 = 0.5 (NaN is skipped)
+        let llm_judge_avg = summary.avg_score("llm_judge").unwrap();
+        assert!(
+            (llm_judge_avg - 0.5).abs() < 0.01,
+            "Expected 0.5, got {} (NaN should be skipped)",
+            llm_judge_avg
+        );
     }
 }

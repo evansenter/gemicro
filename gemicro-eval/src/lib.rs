@@ -7,7 +7,7 @@
 //! `gemicro-eval` provides tools for systematic evaluation of AI agents:
 //!
 //! - **Datasets**: Load questions from HotpotQA or custom JSON files
-//! - **Scorers**: Measure performance with Exact Match, F1, Contains metrics
+//! - **Scorers**: Measure performance with Contains and LLM-as-judge metrics
 //! - **Harness**: Batch execution with configurable concurrency and retries
 //! - **Results**: Structured JSON output for analysis
 //!
@@ -102,4 +102,4 @@ pub use judge::{
     JudgeConfig, JudgeInput, JudgeOutput, LlmJudgeAgent, EVENT_JUDGE_RESULT, EVENT_JUDGE_STARTED,
 };
 pub use results::{EvalQuestion, EvalResult, EvalSummary};
-pub use scorer::{Contains, ExactMatch, F1Score, Scorer, Scorers};
+pub use scorer::{Contains, LlmJudgeScorer, Scorer, Scorers};

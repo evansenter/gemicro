@@ -8,7 +8,7 @@ mod common;
 use common::{create_test_context, create_test_context_with_cancellation, get_api_key};
 use futures_util::StreamExt;
 use gemicro_core::{
-    Agent, AgentError, SimpleQaAgent, SimpleQaConfig, EVENT_SIMPLE_QA_RESULT,
+    Agent, AgentError, SimpleQaAgent, SimpleQaConfig, EVENT_FINAL_RESULT, EVENT_SIMPLE_QA_RESULT,
     EVENT_SIMPLE_QA_STARTED,
 };
 use std::time::Duration;
@@ -55,9 +55,10 @@ async fn test_simple_qa_full_flow() {
     }
 
     // Verify event ordering
-    assert_eq!(events.len(), 2, "Should have exactly 2 events");
+    assert_eq!(events.len(), 3, "Should have exactly 3 events");
     assert_eq!(events[0], EVENT_SIMPLE_QA_STARTED);
     assert_eq!(events[1], EVENT_SIMPLE_QA_RESULT);
+    assert_eq!(events[2], EVENT_FINAL_RESULT);
 
     // Verify we got an answer
     assert!(!final_answer.is_empty(), "Should have a final answer");

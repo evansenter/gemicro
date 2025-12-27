@@ -8,8 +8,8 @@ use gemicro_core::{
     SimpleQaAgent, SimpleQaConfig,
 };
 use gemicro_eval::{
-    Contains, Dataset, EvalConfig, EvalHarness, EvalProgress, EvalSummary, ExactMatch, F1Score,
-    HotpotQA, JsonFileDataset, Scorers,
+    Contains, Dataset, EvalConfig, EvalHarness, EvalProgress, EvalSummary, HotpotQA,
+    JsonFileDataset, LlmJudgeScorer, Scorers,
 };
 use gemicro_runner::AgentRegistry;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -31,8 +31,8 @@ struct Args {
     #[arg(long, short = 's')]
     sample: Option<usize>,
 
-    /// Comma-separated list of scorers: f1, exact_match, contains
-    #[arg(long, default_value = "f1,exact_match")]
+    /// Comma-separated list of scorers: contains, llm_judge
+    #[arg(long, default_value = "contains,llm_judge")]
     scorer: String,
 
     /// Agent to evaluate: deep_research, react, simple_qa
@@ -90,9 +90,9 @@ impl Args {
         // Validate scorers
         for scorer in self.scorer.split(',') {
             let scorer = scorer.trim();
-            if !["f1", "exact_match", "contains"].contains(&scorer) {
+            if !["contains", "llm_judge"].contains(&scorer) {
                 return Err(format!(
-                    "Invalid scorer '{}'. Use f1, exact_match, or contains.",
+                    "Invalid scorer '{}'. Use contains or llm_judge.",
                     scorer
                 ));
             }
@@ -141,13 +141,14 @@ impl Args {
     }
 
     /// Build Scorers from CLI arguments.
-    fn scorers(&self) -> Scorers {
+    ///
+    /// Requires an LlmClient for the llm_judge scorer.
+    fn scorers(&self, llm: std::sync::Arc<LlmClient>) -> Scorers {
         let mut scorers = Scorers::new(vec![]);
         for scorer in self.scorer.split(',') {
             match scorer.trim() {
-                "f1" => scorers.add(F1Score),
-                "exact_match" => scorers.add(ExactMatch),
                 "contains" => scorers.add(Contains),
+                "llm_judge" => scorers.add(LlmJudgeScorer::new(llm.clone())),
                 _ => {} // Already validated
             }
         }
@@ -176,9 +177,13 @@ fn create_registry() -> AgentRegistry {
 
 /// Run evaluation with progress display.
 async fn run_evaluation(args: &Args) -> Result<EvalSummary, String> {
-    // Create LLM client
+    // Create LLM client for agent execution
     let genai_client = rust_genai::Client::builder(args.api_key.clone()).build();
     let llm = LlmClient::new(genai_client, args.llm_config());
+
+    // Create separate LLM client for scorer (llm_judge needs its own client)
+    let scorer_genai_client = rust_genai::Client::builder(args.api_key.clone()).build();
+    let scorer_llm = std::sync::Arc::new(LlmClient::new(scorer_genai_client, args.llm_config()));
 
     // Create agent
     let registry = create_registry();
@@ -186,9 +191,9 @@ async fn run_evaluation(args: &Args) -> Result<EvalSummary, String> {
         .get(&args.agent)
         .ok_or_else(|| format!("Agent '{}' not found", args.agent))?;
 
-    // Create harness
+    // Create harness and scorers
     let harness = EvalHarness::new(args.eval_config());
-    let scorers = args.scorers();
+    let scorers = args.scorers(scorer_llm);
 
     // Load dataset and run evaluation based on dataset type
     if args.dataset.to_lowercase() == "hotpotqa" {
@@ -346,7 +351,7 @@ mod tests {
         Args {
             dataset: "hotpotqa".to_string(),
             sample: Some(10),
-            scorer: "f1,exact_match".to_string(),
+            scorer: "contains,llm_judge".to_string(),
             agent: "deep_research".to_string(),
             concurrency: 5,
             retries: 1,
@@ -404,11 +409,15 @@ mod tests {
     #[test]
     fn test_scorers_parsing() {
         let mut args = test_args();
-        args.scorer = "f1, exact_match, contains".to_string();
+        args.scorer = "contains".to_string();
 
-        let scorers = args.scorers();
+        // Create a dummy LlmClient for the scorer (not used for contains scorer)
+        let genai_client = rust_genai::Client::builder("test-key".to_string()).build();
+        let llm = std::sync::Arc::new(LlmClient::new(genai_client, args.llm_config()));
+
+        let scorers = args.scorers(llm);
         // Scorers are opaque, but we can verify no panic occurred
-        assert!(scorers.score_all("test", "test").len() == 3);
+        assert!(scorers.score_all("test", "test").len() == 1);
     }
 
     #[test]

@@ -14,7 +14,7 @@ Gemicro allows you to explore and interact with different AI agent patterns thro
 - 📱 **Platform-Agnostic Core**: Library designed for future mobile and web support
 - ⚡ **Parallel Execution**: Sub-queries fan out for faster results
 - 🌐 **Google Search Grounding**: Enable real-time web search for current events and live data
-- 📈 **Evaluation Framework**: HotpotQA datasets, scorers (ExactMatch, F1, Contains), and LLM judge support
+- 📈 **Evaluation Framework**: HotpotQA datasets, scorers (Contains, LLM Judge), and evaluation harness
 
 ## Architecture
 
@@ -33,7 +33,7 @@ gemicro-cli (terminal rendering)
 |-------|---------|
 | **gemicro-core** | Platform-agnostic library: Agent trait, AgentUpdate events, LlmClient, conversation history. Agents: DeepResearchAgent, ReActAgent, SimpleQaAgent |
 | **gemicro-runner** | Headless execution runtime: ExecutionState, AgentRunner, AgentRegistry, metrics collection |
-| **gemicro-eval** | Evaluation framework: HotpotQA/custom datasets, scorers (ExactMatch, F1, Contains), LlmJudgeAgent |
+| **gemicro-eval** | Evaluation framework: HotpotQA/custom datasets, scorers (Contains, LLM Judge), LlmJudgeAgent |
 | **gemicro-cli** | Terminal UI: indicatif progress display, rustyline REPL, markdown rendering |
 
 ### Design Philosophy

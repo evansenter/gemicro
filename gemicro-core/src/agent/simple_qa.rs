@@ -207,7 +207,7 @@ impl Agent for SimpleQaAgent {
             let tokens_used = response.tokens_used;
             let duration_ms = start.elapsed().as_millis() as u64;
 
-            // Emit result event
+            // Emit agent-specific result event
             yield AgentUpdate::custom(
                 EVENT_SIMPLE_QA_RESULT,
                 answer.clone(),
@@ -217,6 +217,17 @@ impl Agent for SimpleQaAgent {
                     "duration_ms": duration_ms,
                 }),
             );
+
+            // Emit standard final_result for ExecutionState/harness compatibility
+            use crate::update::ResultMetadata;
+            let metadata = ResultMetadata {
+                total_tokens: tokens_used.unwrap_or(0),
+                tokens_unavailable_count: if tokens_used.is_none() { 1 } else { 0 },
+                duration_ms,
+                sub_queries_succeeded: 0,
+                sub_queries_failed: 0,
+            };
+            yield AgentUpdate::final_result(answer, metadata);
         })
     }
 }
