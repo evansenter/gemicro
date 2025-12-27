@@ -41,6 +41,15 @@ pub struct LlmClient {
     config: LlmConfig,
 }
 
+impl std::fmt::Debug for LlmClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LlmClient")
+            .field("client", &"[REDACTED]")
+            .field("config", &self.config)
+            .finish()
+    }
+}
+
 /// Request to the LLM
 #[derive(Debug, Clone)]
 pub struct LlmRequest {
