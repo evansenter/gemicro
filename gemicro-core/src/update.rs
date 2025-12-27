@@ -2,22 +2,23 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::time::SystemTime;
 
-// Event type constants to prevent typos and improve refactorability
-pub const EVENT_DECOMPOSITION_STARTED: &str = "decomposition_started";
-pub const EVENT_DECOMPOSITION_COMPLETE: &str = "decomposition_complete";
-pub const EVENT_SUB_QUERY_STARTED: &str = "sub_query_started";
-pub const EVENT_SUB_QUERY_COMPLETED: &str = "sub_query_completed";
-pub const EVENT_SUB_QUERY_FAILED: &str = "sub_query_failed";
-pub const EVENT_SYNTHESIS_STARTED: &str = "synthesis_started";
-pub const EVENT_FINAL_RESULT: &str = "final_result";
+// Event type constants - internal to prevent typos in agent implementations.
+// NOT re-exported from lib.rs; consumers use string literals.
+pub(crate) const EVENT_DECOMPOSITION_STARTED: &str = "decomposition_started";
+pub(crate) const EVENT_DECOMPOSITION_COMPLETE: &str = "decomposition_complete";
+pub(crate) const EVENT_SUB_QUERY_STARTED: &str = "sub_query_started";
+pub(crate) const EVENT_SUB_QUERY_COMPLETED: &str = "sub_query_completed";
+pub(crate) const EVENT_SUB_QUERY_FAILED: &str = "sub_query_failed";
+pub(crate) const EVENT_SYNTHESIS_STARTED: &str = "synthesis_started";
+pub(crate) const EVENT_FINAL_RESULT: &str = "final_result";
 
-// ReAct agent event types
-pub const EVENT_REACT_STARTED: &str = "react_started";
-pub const EVENT_REACT_THOUGHT: &str = "react_thought";
-pub const EVENT_REACT_ACTION: &str = "react_action";
-pub const EVENT_REACT_OBSERVATION: &str = "react_observation";
-pub const EVENT_REACT_COMPLETE: &str = "react_complete";
-pub const EVENT_REACT_MAX_ITERATIONS: &str = "react_max_iterations";
+// ReAct agent event types - internal only
+pub(crate) const EVENT_REACT_STARTED: &str = "react_started";
+pub(crate) const EVENT_REACT_THOUGHT: &str = "react_thought";
+pub(crate) const EVENT_REACT_ACTION: &str = "react_action";
+pub(crate) const EVENT_REACT_OBSERVATION: &str = "react_observation";
+pub(crate) const EVENT_REACT_COMPLETE: &str = "react_complete";
+pub(crate) const EVENT_REACT_MAX_ITERATIONS: &str = "react_max_iterations";
 
 /// Flexible event structure for agent updates.
 ///
