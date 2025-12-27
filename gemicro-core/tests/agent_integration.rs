@@ -7,11 +7,7 @@ mod common;
 
 use common::{create_test_context, create_test_context_with_cancellation, get_api_key};
 use futures_util::StreamExt;
-use gemicro_core::{
-    AgentError, DeepResearchAgent, ResearchConfig, EVENT_DECOMPOSITION_COMPLETE,
-    EVENT_DECOMPOSITION_STARTED, EVENT_FINAL_RESULT, EVENT_SUB_QUERY_COMPLETED,
-    EVENT_SUB_QUERY_FAILED, EVENT_SUB_QUERY_STARTED, EVENT_SYNTHESIS_STARTED,
-};
+use gemicro_core::{AgentError, DeepResearchAgent, ResearchConfig};
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
@@ -54,13 +50,13 @@ async fn test_deep_research_agent_full_flow() {
                 events.push(update.event_type.clone());
 
                 match update.event_type.as_str() {
-                    EVENT_DECOMPOSITION_COMPLETE => {
+                    "decomposition_complete" => {
                         if let Some(sub_queries) = update.as_decomposition_complete() {
                             sub_query_count = sub_queries.len();
                             println!("  Sub-queries: {:?}", sub_queries);
                         }
                     }
-                    EVENT_SUB_QUERY_COMPLETED => {
+                    "sub_query_completed" => {
                         sub_query_results += 1;
                         if let Some(result) = update.as_sub_query_completed() {
                             println!(
@@ -69,10 +65,10 @@ async fn test_deep_research_agent_full_flow() {
                             );
                         }
                     }
-                    EVENT_SUB_QUERY_FAILED => {
+                    "sub_query_failed" => {
                         println!("  Sub-query failed: {:?}", update.data);
                     }
-                    EVENT_FINAL_RESULT => {
+                    "final_result" => {
                         if let Some(result) = update.as_final_result() {
                             final_answer = result.answer.clone();
                             println!("\n=== Final Answer ===");
@@ -102,19 +98,19 @@ async fn test_deep_research_agent_full_flow() {
 
     // Verify event order
     assert!(
-        events.contains(&EVENT_DECOMPOSITION_STARTED.to_string()),
+        events.contains(&"decomposition_started".to_string()),
         "Should have decomposition_started"
     );
     assert!(
-        events.contains(&EVENT_DECOMPOSITION_COMPLETE.to_string()),
+        events.contains(&"decomposition_complete".to_string()),
         "Should have decomposition_complete"
     );
     assert!(
-        events.contains(&EVENT_SYNTHESIS_STARTED.to_string()),
+        events.contains(&"synthesis_started".to_string()),
         "Should have synthesis_started"
     );
     assert!(
-        events.contains(&EVENT_FINAL_RESULT.to_string()),
+        events.contains(&"final_result".to_string()),
         "Should have final_result"
     );
 
@@ -165,12 +161,10 @@ async fn test_agent_event_ordering() {
     }
 
     // Verify strict ordering of phases
-    let decomp_start = events.iter().position(|e| e == EVENT_DECOMPOSITION_STARTED);
-    let decomp_complete = events
-        .iter()
-        .position(|e| e == EVENT_DECOMPOSITION_COMPLETE);
-    let synth_start = events.iter().position(|e| e == EVENT_SYNTHESIS_STARTED);
-    let final_result = events.iter().position(|e| e == EVENT_FINAL_RESULT);
+    let decomp_start = events.iter().position(|e| e == "decomposition_started");
+    let decomp_complete = events.iter().position(|e| e == "decomposition_complete");
+    let synth_start = events.iter().position(|e| e == "synthesis_started");
+    let final_result = events.iter().position(|e| e == "final_result");
 
     assert!(decomp_start.is_some(), "Should have decomposition_started");
     assert!(
@@ -197,7 +191,7 @@ async fn test_agent_event_ordering() {
     assert!(ss < fr, "synthesis_started should come before final_result");
 
     // Verify sub_query_started events come after decomposition_complete
-    let first_sub_query_started = events.iter().position(|e| e == EVENT_SUB_QUERY_STARTED);
+    let first_sub_query_started = events.iter().position(|e| e == "sub_query_started");
     if let Some(sq_start) = first_sub_query_started {
         assert!(
             sq_start > dc,
@@ -262,11 +256,11 @@ async fn test_cancellation_during_execution() {
             Ok(update) => {
                 println!("[{}] {}", update.event_type, update.message);
 
-                if update.event_type == EVENT_DECOMPOSITION_STARTED {
+                if update.event_type == "decomposition_started" {
                     seen_decomposition_started = true;
                 }
 
-                if update.event_type == EVENT_SUB_QUERY_STARTED {
+                if update.event_type == "sub_query_started" {
                     seen_sub_query_started = true;
                     // Cancel after we see the first sub-query start
                     // This ensures we're cancelling mid-execution
@@ -342,7 +336,7 @@ async fn test_immediate_cancellation() {
                 println!("[{}] {}", update.event_type, update.message);
                 // Should not proceed past decomposition_started with a pre-cancelled token
                 assert!(
-                    update.event_type == EVENT_DECOMPOSITION_STARTED,
+                    update.event_type == "decomposition_started",
                     "Should only see decomposition_started before cancellation, got {}",
                     update.event_type
                 );

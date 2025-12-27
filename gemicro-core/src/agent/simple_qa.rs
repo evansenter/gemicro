@@ -24,10 +24,10 @@ use std::time::{Duration, Instant};
 // ============================================================================
 
 /// Event emitted when the agent starts processing a query.
-pub const EVENT_SIMPLE_QA_STARTED: &str = "simple_qa_started";
+pub(crate) const EVENT_SIMPLE_QA_STARTED: &str = "simple_qa_started";
 
 /// Event emitted when the agent produces its final result.
-pub const EVENT_SIMPLE_QA_RESULT: &str = "simple_qa_result";
+pub(crate) const EVENT_SIMPLE_QA_RESULT: &str = "simple_qa_result";
 
 // ============================================================================
 // Configuration

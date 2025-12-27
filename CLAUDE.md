@@ -295,28 +295,54 @@ See [`docs/AGENT_AUTHORING.md`](docs/AGENT_AUTHORING.md) for a complete walkthro
 
 Quick checklist:
 1. Create agent-specific config struct (e.g., `ReactConfig`) with `validate()` method
-2. Define event type constants (e.g., `pub const EVENT_REACT_STEP: &str = "react_step"`)
+2. Define event types as strings (e.g., `"react_step"`) - no exports needed
 3. Implement `Agent` trait using `async_stream::try_stream!`
 4. Handle timeouts via `remaining_time()` and `with_timeout_and_cancellation()`
 5. Add unit tests for config, integration tests (`#[ignore]`) for execution
-6. Export from `mod.rs` and `lib.rs`
+6. Export agent struct and config from `mod.rs` and `lib.rs`
 7. **NO CHANGES TO CORE TYPES REQUIRED** ✅
 
 ### Adding a New Event Type
 
+Events are soft-typed strings - no exports or core changes needed. Use `AgentUpdate::custom()`:
+
 ```rust
-// In your agent implementation
-impl AgentUpdate {
-    pub fn react_step_completed(thought: String, action: String) -> Self {
-        Self {
-            event_type: "react_step_completed".into(),
-            message: format!("Completed ReAct step"),
-            timestamp: SystemTime::now(),
-            data: json!({ "thought": thought, "action": action }),
-        }
-    }
-}
+// In your agent implementation - just use string literals
+yield Ok(AgentUpdate::custom(
+    "react_step_completed",
+    "Completed ReAct step",
+    json!({ "thought": thought, "action": action })
+));
+
+// Or define internal constants for consistency (NOT exported):
+const EVENT_MY_STEP: &str = "my_step";
+yield Ok(AgentUpdate::custom(EVENT_MY_STEP, "Step complete", json!({})));
 ```
+
+### Standard Events
+
+For interoperability, all agents should emit `final_result` when complete:
+
+| Event Type | Purpose | Emitted By |
+|------------|---------|------------|
+| `final_result` | Signals completion with answer | All agents (required) |
+| `decomposition_started` | Query decomposition begins | DeepResearchAgent |
+| `decomposition_complete` | Sub-queries determined | DeepResearchAgent |
+| `sub_query_started` | Individual query starts | DeepResearchAgent |
+| `sub_query_completed` | Individual query finishes | DeepResearchAgent |
+| `synthesis_started` | Result synthesis begins | DeepResearchAgent |
+| `react_started` | ReAct loop begins | ReactAgent |
+| `react_thought` | Agent reasoning | ReactAgent |
+| `react_action` | Tool invocation | ReactAgent |
+| `react_observation` | Tool result | ReactAgent |
+| `react_complete` | Answer found | ReactAgent |
+| `react_max_iterations` | Max iterations reached | ReactAgent |
+| `simple_qa_started` | Query starts | SimpleQaAgent |
+| `simple_qa_result` | Response received | SimpleQaAgent |
+| `tool_agent_started` | Tool agent starts | ToolAgent |
+| `tool_agent_complete` | Tool agent finishes | ToolAgent |
+
+Consumers must handle unknown event types gracefully (log and ignore).
 
 ### Consuming Events in CLI
 

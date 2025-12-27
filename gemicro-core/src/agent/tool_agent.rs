@@ -21,10 +21,10 @@ use std::time::{Duration, Instant};
 // ============================================================================
 
 /// Emitted when the tool agent starts processing
-pub const EVENT_TOOL_AGENT_STARTED: &str = "tool_agent_started";
+pub(crate) const EVENT_TOOL_AGENT_STARTED: &str = "tool_agent_started";
 
 /// Emitted when the agent completes successfully
-pub const EVENT_TOOL_AGENT_COMPLETE: &str = "tool_agent_complete";
+pub(crate) const EVENT_TOOL_AGENT_COMPLETE: &str = "tool_agent_complete";
 
 // ============================================================================
 // Tool Definitions using #[tool] macro

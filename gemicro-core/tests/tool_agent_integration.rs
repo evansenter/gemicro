@@ -7,10 +7,7 @@ mod common;
 
 use common::{create_test_context, get_api_key};
 use futures_util::StreamExt;
-use gemicro_core::{
-    ToolAgent, ToolAgentConfig, ToolType, EVENT_FINAL_RESULT, EVENT_TOOL_AGENT_COMPLETE,
-    EVENT_TOOL_AGENT_STARTED,
-};
+use gemicro_core::{ToolAgent, ToolAgentConfig, ToolType};
 use std::time::Duration;
 
 #[tokio::test]
@@ -45,7 +42,7 @@ async fn test_tool_agent_calculator() {
                 println!("[{}] {}", update.event_type, update.message);
                 events.push(update.event_type.clone());
 
-                if update.event_type == EVENT_FINAL_RESULT {
+                if update.event_type == "final_result" {
                     if let Some(result) = update.as_final_result() {
                         final_answer = result.answer.clone();
                     }
@@ -59,15 +56,15 @@ async fn test_tool_agent_calculator() {
 
     // Verify events
     assert!(
-        events.contains(&EVENT_TOOL_AGENT_STARTED.to_string()),
+        events.contains(&"tool_agent_started".to_string()),
         "Should have tool_agent_started"
     );
     assert!(
-        events.contains(&EVENT_TOOL_AGENT_COMPLETE.to_string()),
+        events.contains(&"tool_agent_complete".to_string()),
         "Should have tool_agent_complete"
     );
     assert!(
-        events.contains(&EVENT_FINAL_RESULT.to_string()),
+        events.contains(&"final_result".to_string()),
         "Should have final_result"
     );
 
@@ -102,7 +99,7 @@ async fn test_tool_agent_complex_math() {
         match result {
             Ok(update) => {
                 println!("[{}] {}", update.event_type, update.message);
-                if update.event_type == EVENT_FINAL_RESULT {
+                if update.event_type == "final_result" {
                     if let Some(result) = update.as_final_result() {
                         final_answer = result.answer.clone();
                     }
@@ -150,7 +147,7 @@ async fn test_tool_agent_current_datetime() {
         match result {
             Ok(update) => {
                 println!("[{}] {}", update.event_type, update.message);
-                if update.event_type == EVENT_FINAL_RESULT {
+                if update.event_type == "final_result" {
                     if let Some(result) = update.as_final_result() {
                         final_answer = result.answer.clone();
                     }
@@ -198,7 +195,7 @@ async fn test_tool_agent_multiple_tools() {
             Ok(update) => {
                 println!("[{}] {}", update.event_type, update.message);
                 events.push(update.event_type.clone());
-                if update.event_type == EVENT_FINAL_RESULT {
+                if update.event_type == "final_result" {
                     if let Some(result) = update.as_final_result() {
                         final_answer = result.answer.clone();
                     }

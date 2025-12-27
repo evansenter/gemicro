@@ -4,11 +4,7 @@
 //! making it easy to test and enabling renderer swappability.
 
 use crate::utils::first_sentence;
-use gemicro_core::{
-    AgentUpdate, EVENT_DECOMPOSITION_COMPLETE, EVENT_DECOMPOSITION_STARTED, EVENT_FINAL_RESULT,
-    EVENT_SUB_QUERY_COMPLETED, EVENT_SUB_QUERY_FAILED, EVENT_SUB_QUERY_STARTED,
-    EVENT_SYNTHESIS_STARTED,
-};
+use gemicro_core::AgentUpdate;
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 
@@ -112,12 +108,12 @@ impl ExecutionState {
     /// is required.
     pub fn update(&mut self, event: &AgentUpdate) -> Option<usize> {
         match event.event_type.as_str() {
-            EVENT_DECOMPOSITION_STARTED => {
+            "decomposition_started" => {
                 self.phase = Phase::Decomposing;
                 None
             }
 
-            EVENT_DECOMPOSITION_COMPLETE => {
+            "decomposition_complete" => {
                 if let Some(queries) = event.as_decomposition_complete() {
                     self.sub_queries = queries
                         .into_iter()
@@ -140,7 +136,7 @@ impl ExecutionState {
                 None
             }
 
-            EVENT_SUB_QUERY_STARTED => {
+            "sub_query_started" => {
                 if let Some(id) = event.data.get("id").and_then(|v| v.as_u64()) {
                     let id = id as usize;
                     if let Some(sq) = self.sub_queries.get_mut(id) {
@@ -152,7 +148,7 @@ impl ExecutionState {
                 None
             }
 
-            EVENT_SUB_QUERY_COMPLETED => {
+            "sub_query_completed" => {
                 if let Some(result) = event.as_sub_query_completed() {
                     if let Some(sq) = self.sub_queries.get_mut(result.id) {
                         sq.duration = sq.start_time.map(|s| s.elapsed());
@@ -172,7 +168,7 @@ impl ExecutionState {
                 None
             }
 
-            EVENT_SUB_QUERY_FAILED => {
+            "sub_query_failed" => {
                 if let Some(id) = event.data.get("id").and_then(|v| v.as_u64()) {
                     let id = id as usize;
                     if let Some(sq) = self.sub_queries.get_mut(id) {
@@ -190,12 +186,12 @@ impl ExecutionState {
                 None
             }
 
-            EVENT_SYNTHESIS_STARTED => {
+            "synthesis_started" => {
                 self.phase = Phase::Synthesizing;
                 None
             }
 
-            EVENT_FINAL_RESULT => {
+            "final_result" => {
                 if let Some(result) = event.as_final_result() {
                     self.final_result = Some(FinalResultData {
                         answer: result.answer,

@@ -26,13 +26,13 @@ Following Evergreen principles:
 ## Quick Start Checklist
 
 - [ ] Create agent-specific config struct with `validate()` method
-- [ ] Define event type constants (`pub const EVENT_*: &str`)
+- [ ] Define event types as strings (constants are internal, NOT exported)
 - [ ] Implement `Agent` trait (`name`, `description`, `execute`)
 - [ ] Use `async_stream::try_stream!` for streaming
 - [ ] Handle timeouts and cancellation
 - [ ] Add unit tests for config validation
 - [ ] Add integration tests (`#[ignore]`)
-- [ ] Export from `gemicro-core/src/agent/mod.rs` and `lib.rs`
+- [ ] Export agent struct and config from `gemicro-core/src/agent/mod.rs` and `lib.rs`
 
 ## Core Types
 
@@ -91,13 +91,16 @@ pub struct AgentUpdate {
 
 The `SimpleQaAgent` is a minimal reference implementation. See the full source at `gemicro-core/src/agent/simple_qa.rs`.
 
-### 1. Event Type Constants
+### 1. Event Type Constants (Internal Only)
+
+Constants are internal to prevent typos and ensure consistency within the agent. They are **not exported** to the public API - consumers match on string literals.
 
 ```rust
 // Location: gemicro-core/src/agent/simple_qa.rs:23-27
 
-pub const EVENT_SIMPLE_QA_STARTED: &str = "simple_qa_started";
-pub const EVENT_SIMPLE_QA_RESULT: &str = "simple_qa_result";
+// Internal constants (NOT re-exported from lib.rs)
+pub(crate) const EVENT_SIMPLE_QA_STARTED: &str = "simple_qa_started";
+pub(crate) const EVENT_SIMPLE_QA_RESULT: &str = "simple_qa_result";
 ```
 
 ### 2. Configuration
@@ -388,9 +391,11 @@ async fn test_simple_qa_full_flow() {
         events.push(update.event_type.clone());
     }
 
+    // Use string literals to match events (constants are internal)
     assert_eq!(events, vec![
-        EVENT_SIMPLE_QA_STARTED,
-        EVENT_SIMPLE_QA_RESULT,
+        "simple_qa_started",
+        "simple_qa_result",
+        "final_result",
     ]);
 }
 ```
@@ -474,9 +479,16 @@ pub enum AgentEventType {
     // ... grows forever
 }
 
-// ✅ DO - soft-typed events
-pub const EVENT_REACT_STEP_COMPLETED: &str = "react_step_completed";
+// ✅ DO - soft-typed events with internal constants
+// In your agent module (NOT exported):
+const EVENT_REACT_STEP_COMPLETED: &str = "react_step_completed";
 AgentUpdate::custom(EVENT_REACT_STEP_COMPLETED, ...)
+
+// Consumers match on string literals:
+match update.event_type.as_str() {
+    "react_step_completed" => { /* handle */ }
+    _ => { log::debug!("Unknown event"); }
+}
 ```
 
 ## File Structure for New Agents
@@ -485,14 +497,16 @@ AgentUpdate::custom(EVENT_REACT_STEP_COMPLETED, ...)
 gemicro-core/
 ├── src/
 │   ├── agent/
-│   │   ├── mod.rs          # Add: mod my_agent; pub use my_agent::*;
+│   │   ├── mod.rs          # Add: mod my_agent; pub use my_agent::{MyAgent, MyConfig};
 │   │   ├── deep_research.rs
 │   │   ├── simple_qa.rs    # Reference implementation
-│   │   └── my_agent.rs     # Your new agent
-│   └── lib.rs              # Add exports
+│   │   └── my_agent.rs     # Your new agent (event constants stay internal)
+│   └── lib.rs              # Add agent struct and config to exports
 └── tests/
-    └── my_agent_integration.rs  # Integration tests
+    └── my_agent_integration.rs  # Integration tests (use string literals)
 ```
+
+**Note:** Only export the agent struct and config - event constants remain internal.
 
 ## See Also
 

@@ -16,11 +16,7 @@
 //! Press Ctrl+C to cancel gracefully.
 
 use futures_util::StreamExt;
-use gemicro_core::{
-    AgentContext, AgentError, LlmClient, LlmConfig, ReactAgent, ReactConfig, EVENT_REACT_ACTION,
-    EVENT_REACT_COMPLETE, EVENT_REACT_MAX_ITERATIONS, EVENT_REACT_OBSERVATION, EVENT_REACT_STARTED,
-    EVENT_REACT_THOUGHT,
-};
+use gemicro_core::{AgentContext, AgentError, LlmClient, LlmConfig, ReactAgent, ReactConfig};
 use std::env;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -114,13 +110,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     while let Some(result) = stream.next().await {
         match result {
             Ok(update) => match update.event_type.as_str() {
-                EVENT_REACT_STARTED => {
+                "react_started" => {
                     if let Some(max) = update.data.get("max_iterations").and_then(|v| v.as_u64()) {
                         println!("🔄 Starting ReAct loop (max {} iterations)", max);
                         println!();
                     }
                 }
-                EVENT_REACT_THOUGHT => {
+                "react_thought" => {
                     if let Some(iteration) = update.data.get("iteration").and_then(|v| v.as_u64()) {
                         let thought = update
                             .data
@@ -138,7 +134,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         println!("│ Thought: {}│", format_box_line(&truncate(thought, 48)));
                     }
                 }
-                EVENT_REACT_ACTION => {
+                "react_action" => {
                     let tool = update
                         .data
                         .get("tool")
@@ -164,7 +160,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         format_input(&truncate(input, 40))
                     );
                 }
-                EVENT_REACT_OBSERVATION => {
+                "react_observation" => {
                     let result_text = update
                         .data
                         .get("result")
@@ -190,7 +186,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     println!("└─────────────────────────────────────────────────────────────┘");
                     println!();
                 }
-                EVENT_REACT_COMPLETE => {
+                "react_complete" => {
                     let iterations = update
                         .data
                         .get("iterations_used")
@@ -215,7 +211,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     println!("   Iterations: {}", iterations);
                     println!("   Total time: {:.1}s", duration.as_secs_f64());
                 }
-                EVENT_REACT_MAX_ITERATIONS => {
+                "react_max_iterations" => {
                     let max = update
                         .data
                         .get("max_iterations")
