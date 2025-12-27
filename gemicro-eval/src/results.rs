@@ -292,7 +292,7 @@ mod tests {
     fn test_eval_result_success() {
         let question = sample_question();
         let mut scores = HashMap::new();
-        scores.insert("exact_match".to_string(), 1.0);
+        scores.insert("contains".to_string(), 1.0);
 
         let result =
             EvalResult::success(&question, "4".to_string(), scores, create_mock_metrics(), 0);
@@ -316,8 +316,8 @@ mod tests {
     fn test_eval_summary_from_results() {
         let question = sample_question();
         let mut scores = HashMap::new();
-        scores.insert("exact_match".to_string(), 1.0);
-        scores.insert("f1".to_string(), 0.8);
+        scores.insert("contains".to_string(), 1.0);
+        scores.insert("llm_judge".to_string(), 0.8);
 
         let results = vec![
             EvalResult::success(
@@ -340,8 +340,8 @@ mod tests {
         assert_eq!(summary.total_questions, 2);
         assert_eq!(summary.succeeded, 1);
         assert_eq!(summary.failed, 1);
-        assert_eq!(summary.average_scores.get("exact_match"), Some(&1.0));
-        assert_eq!(summary.average_scores.get("f1"), Some(&0.8));
+        assert_eq!(summary.average_scores.get("contains"), Some(&1.0));
+        assert_eq!(summary.average_scores.get("llm_judge"), Some(&0.8));
     }
 
     #[test]
@@ -364,7 +364,7 @@ mod tests {
     fn test_recalculate_averages_after_adding_scores() {
         let question = sample_question();
         let mut scores = HashMap::new();
-        scores.insert("exact_match".to_string(), 1.0);
+        scores.insert("contains".to_string(), 1.0);
 
         let results = vec![
             EvalResult::success(
@@ -391,7 +391,7 @@ mod tests {
         );
 
         // Verify initial state
-        assert_eq!(summary.avg_score("exact_match"), Some(1.0));
+        assert_eq!(summary.avg_score("contains"), Some(1.0));
         assert_eq!(summary.avg_score("llm_judge"), None);
 
         // Add llm_judge scores after the fact (simulating LlmJudgeAgent)
@@ -408,7 +408,7 @@ mod tests {
         // Verify new score is included
         assert_eq!(summary.avg_score("llm_judge"), Some(0.5));
         // Existing scores are preserved
-        assert_eq!(summary.avg_score("exact_match"), Some(1.0));
+        assert_eq!(summary.avg_score("contains"), Some(1.0));
     }
 
     fn create_mock_metrics() -> ExecutionMetrics {
@@ -433,7 +433,7 @@ mod tests {
     fn test_format_summary() {
         let question = sample_question();
         let mut scores = HashMap::new();
-        scores.insert("exact_match".to_string(), 1.0);
+        scores.insert("contains".to_string(), 1.0);
 
         let results = vec![EvalResult::success(
             &question,
@@ -458,7 +458,7 @@ mod tests {
         assert!(formatted.contains("Questions: 1 total, 1 succeeded, 0 failed"));
         assert!(formatted.contains("Success rate: 100.0%"));
         assert!(formatted.contains("Scores:"));
-        assert!(formatted.contains("exact_match: 1.000"));
+        assert!(formatted.contains("contains: 1.000"));
         assert!(formatted.contains("Tokens: 100"));
         assert!(formatted.contains("Duration: 10.0s"));
     }

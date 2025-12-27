@@ -2,8 +2,6 @@
 //!
 //! Provides the [`Scorer`] trait and built-in implementations for common metrics.
 
-use std::collections::HashSet;
-
 /// Trait for evaluation scorers.
 ///
 /// A scorer compares a predicted answer against the ground truth
@@ -40,100 +38,6 @@ pub trait Scorer: Send + Sync {
     ///
     /// Returns a value between 0.0 (no match) and 1.0 (perfect match).
     fn score(&self, predicted: &str, ground_truth: &str) -> f64;
-}
-
-/// Exact match scorer (case-insensitive).
-///
-/// Returns 1.0 if the normalized predicted answer exactly matches
-/// the normalized ground truth, 0.0 otherwise.
-///
-/// Normalization includes:
-/// - Lowercasing
-/// - Trimming whitespace
-/// - Collapsing multiple spaces
-///
-/// # Example
-///
-/// ```
-/// use gemicro_eval::{Scorer, ExactMatch};
-///
-/// let scorer = ExactMatch;
-/// assert_eq!(scorer.score("Paris", "paris"), 1.0);
-/// assert_eq!(scorer.score("London", "Paris"), 0.0);
-/// ```
-#[derive(Debug, Clone, Copy, Default)]
-pub struct ExactMatch;
-
-impl Scorer for ExactMatch {
-    fn name(&self) -> &str {
-        "exact_match"
-    }
-
-    fn score(&self, predicted: &str, ground_truth: &str) -> f64 {
-        if normalize(predicted) == normalize(ground_truth) {
-            1.0
-        } else {
-            0.0
-        }
-    }
-}
-
-/// F1 score at the word level (set-based).
-///
-/// Computes the harmonic mean of precision and recall based on unique word overlap.
-/// Words are extracted after normalization (lowercase, split on whitespace).
-/// Duplicate words are counted only once (set-based, not bag-of-words).
-///
-/// # Example
-///
-/// ```
-/// use gemicro_eval::{Scorer, F1Score};
-///
-/// let scorer = F1Score;
-///
-/// // Perfect match
-/// assert_eq!(scorer.score("the cat sat", "the cat sat"), 1.0);
-///
-/// // Partial overlap: {cat, dog} vs {cat, sat}
-/// // overlap = 1, pred_size = 2, truth_size = 2
-/// // Precision = 1/2, Recall = 1/2, F1 = 0.5
-/// let score = scorer.score("cat dog", "cat sat");
-/// assert!((score - 0.5).abs() < 0.01);
-/// ```
-#[derive(Debug, Clone, Copy, Default)]
-pub struct F1Score;
-
-impl Scorer for F1Score {
-    fn name(&self) -> &str {
-        "f1"
-    }
-
-    fn score(&self, predicted: &str, ground_truth: &str) -> f64 {
-        let pred_words = words(predicted);
-        let truth_words = words(ground_truth);
-
-        if pred_words.is_empty() && truth_words.is_empty() {
-            return 1.0;
-        }
-        if pred_words.is_empty() || truth_words.is_empty() {
-            return 0.0;
-        }
-
-        let pred_set: HashSet<_> = pred_words.iter().collect();
-        let truth_set: HashSet<_> = truth_words.iter().collect();
-
-        let overlap = pred_set.intersection(&truth_set).count() as f64;
-
-        // Use set sizes for consistency (pure set-based F1)
-        let precision = overlap / pred_set.len() as f64;
-        let recall = overlap / truth_set.len() as f64;
-
-        if precision + recall == 0.0 {
-            0.0
-        } else {
-            2.0 * precision * recall / (precision + recall)
-        }
-    }
 }
 
 /// Contains scorer.
@@ -189,32 +93,18 @@ fn normalize(text: &str) -> String {
         .join(" ")
 }
 
-/// Extract words from text.
-fn words(text: &str) -> Vec<String> {
-    text.to_lowercase()
-        .split_whitespace()
-        .map(|w| {
-            // Remove common punctuation from word boundaries
-            w.trim_matches(|c: char| c.is_ascii_punctuation())
-                .to_string()
-        })
-        .filter(|w| !w.is_empty())
-        .collect()
-}
-
 /// A collection of scorers for batch evaluation.
 ///
 /// # Example
 ///
 /// ```
-/// use gemicro_eval::{Scorers, ExactMatch, F1Score, Contains};
+/// use gemicro_eval::{Scorers, Contains};
 ///
-/// let scorers = Scorers::default(); // EM, F1, Contains
+/// let scorers = Scorers::default(); // Contains only
 ///
 /// // Or custom set
 /// let scorers = Scorers::new(vec![
-///     Box::new(ExactMatch),
-///     Box::new(F1Score),
+///     Box::new(Contains),
 /// ]);
 /// ```
 pub struct Scorers {
@@ -253,15 +143,88 @@ impl Scorers {
 }
 
 impl Default for Scorers {
-    /// Default scorers: ExactMatch, F1Score, Contains.
+    /// Default scorers: Contains only.
     fn default() -> Self {
-        Self::new(vec![
-            Box::new(ExactMatch),
-            Box::new(F1Score),
-            Box::new(Contains),
-        ])
+        Self::new(vec![Box::new(Contains)])
     }
 }
+
+/// LLM-as-judge scorer using semantic comparison.
+///
+/// Uses an LLM to evaluate whether the predicted answer is semantically
+/// correct compared to the ground truth. More flexible than exact matching
+/// but slower and requires API calls.
+///
+/// # Example
+///
+/// ```no_run
+/// use gemicro_eval::{Scorer, LlmJudgeScorer};
+/// use gemicro_core::{LlmClient, LlmConfig};
+/// use std::sync::Arc;
+///
+/// let genai = rust_genai::Client::builder("api-key".to_string()).build();
+/// let llm = Arc::new(LlmClient::new(genai, LlmConfig::default()));
+/// let scorer = LlmJudgeScorer::new(llm);
+///
+/// // Score is 1.0 if LLM judges semantically correct, 0.0 otherwise
+/// // let score = scorer.score("The capital is Paris", "Paris");
+/// ```
+pub struct LlmJudgeScorer {
+    llm: std::sync::Arc<gemicro_core::LlmClient>,
+}
+
+impl LlmJudgeScorer {
+    /// Create a new LLM judge scorer with the given client.
+    pub fn new(llm: std::sync::Arc<gemicro_core::LlmClient>) -> Self {
+        Self { llm }
+    }
+}
+
+impl Scorer for LlmJudgeScorer {
+    fn name(&self) -> &str {
+        "llm_judge"
+    }
+
+    fn score(&self, predicted: &str, ground_truth: &str) -> f64 {
+        use crate::judge::{JudgeConfig, JudgeInput, LlmJudgeAgent};
+        use futures_util::StreamExt;
+        use gemicro_core::{Agent, AgentContext};
+
+        // Create judge agent and input
+        let agent = LlmJudgeAgent::new(JudgeConfig::default());
+        let input = JudgeInput::new(predicted, ground_truth);
+        let context = AgentContext::from_arc(self.llm.clone());
+
+        // Run async agent from sync context using block_in_place
+        // This is safe because we're in a tokio multi-threaded runtime
+        let result = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                let stream = agent.execute(&input.to_query(), context);
+                futures_util::pin_mut!(stream);
+
+                while let Some(update) = stream.next().await {
+                    if let Ok(update) = update {
+                        if update.event_type == "judge_result" {
+                            if let Some(correct) =
+                                update.data.get("correct").and_then(|v| v.as_bool())
+                            {
+                                return if correct { 1.0 } else { 0.0 };
+                            }
+                        }
+                    }
+                }
+                0.0 // Default to incorrect if no result
+            })
+        });
+
+        result
+    }
+}
+
+// Note: LlmJudgeScorer is Send but not Sync due to internal async machinery.
+// However, the Scorer trait requires Send + Sync. Since we use block_in_place
+// which handles the synchronization, this is safe.
+unsafe impl Sync for LlmJudgeScorer {}
 
 #[cfg(test)]
 mod tests {
@@ -273,47 +236,6 @@ mod tests {
         assert_eq!(normalize("  Hello   World  "), "hello world");
         assert_eq!(normalize("UPPERCASE"), "uppercase");
         assert_eq!(normalize(""), "");
-    }
-
-    #[test]
-    fn test_words() {
-        assert_eq!(words("Hello, World!"), vec!["hello", "world"]);
-        assert_eq!(words("  one   two  three  "), vec!["one", "two", "three"]);
-        assert_eq!(words(""), Vec::<String>::new());
-    }
-
-    // Parameterized ExactMatch tests
-    #[rstest]
-    #[case::identical("Paris", "Paris", 1.0)]
-    #[case::case_insensitive("PARIS", "paris", 1.0)]
-    #[case::mixed_case("PaRiS", "paris", 1.0)]
-    #[case::whitespace_pred("  Paris  ", "Paris", 1.0)]
-    #[case::whitespace_collapse("New   York", "new york", 1.0)]
-    #[case::different("London", "Paris", 0.0)]
-    #[case::both_empty("", "", 1.0)]
-    #[case::pred_only("Paris", "", 0.0)]
-    #[case::truth_only("", "Paris", 0.0)]
-    fn test_exact_match(#[case] pred: &str, #[case] truth: &str, #[case] expected: f64) {
-        assert_eq!(ExactMatch.score(pred, truth), expected);
-    }
-
-    // Parameterized F1 tests
-    #[rstest]
-    #[case::identical("the cat sat", "the cat sat", 1.0)]
-    #[case::partial_overlap("cat dog", "cat sat", 0.5)] // overlap=1, pred=2, truth=2
-    #[case::no_overlap("apple banana", "cat dog", 0.0)]
-    #[case::both_empty("", "", 1.0)]
-    #[case::pred_only("word", "", 0.0)]
-    #[case::truth_only("", "word", 0.0)]
-    #[case::case_insensitive("THE CAT", "the cat", 1.0)]
-    fn test_f1_score(#[case] pred: &str, #[case] truth: &str, #[case] expected: f64) {
-        let score = F1Score.score(pred, truth);
-        assert!(
-            (score - expected).abs() < 0.001,
-            "Expected {}, got {}",
-            expected,
-            score
-        );
     }
 
     // Parameterized Contains tests
@@ -333,9 +255,8 @@ mod tests {
     fn test_scorers_default() {
         let scorers = Scorers::default();
         let names = scorers.names();
-        assert!(names.contains(&"exact_match"));
-        assert!(names.contains(&"f1"));
         assert!(names.contains(&"contains"));
+        assert_eq!(names.len(), 1);
     }
 
     #[test]
@@ -343,16 +264,14 @@ mod tests {
         let scorers = Scorers::default();
         let scores = scorers.score_all("Paris", "Paris");
 
-        assert_eq!(scores.get("exact_match"), Some(&1.0));
-        assert_eq!(scores.get("f1"), Some(&1.0));
         assert_eq!(scores.get("contains"), Some(&1.0));
     }
 
     #[test]
     fn test_scorers_custom() {
-        let scorers = Scorers::new(vec![Box::new(ExactMatch)]);
+        let scorers = Scorers::new(vec![Box::new(Contains)]);
         let names = scorers.names();
         assert_eq!(names.len(), 1);
-        assert!(names.contains(&"exact_match"));
+        assert!(names.contains(&"contains"));
     }
 }

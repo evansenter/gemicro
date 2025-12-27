@@ -84,7 +84,7 @@ gemicro-cli (terminal rendering)
 |-------|---------|
 | **gemicro-core** | Platform-agnostic library: Agent trait, AgentUpdate events, LlmClient, conversation history. Agents: DeepResearchAgent, ReActAgent, SimpleQaAgent |
 | **gemicro-runner** | Headless execution runtime: ExecutionState, AgentRunner, AgentRegistry, metrics collection |
-| **gemicro-eval** | Evaluation framework: HotpotQA/custom datasets, scorers (ExactMatch, F1, Contains), LlmJudgeAgent |
+| **gemicro-eval** | Evaluation framework: HotpotQA/custom datasets, scorers (Contains, LLM Judge), LlmJudgeAgent |
 | **gemicro-cli** | Terminal UI: indicatif progress display, rustyline REPL, markdown rendering |
 
 ## Core Design Philosophy: Evergreen-Inspired Soft-Typing
@@ -249,7 +249,7 @@ gemicro/
 │   └── src/
 │       ├── lib.rs
 │       ├── dataset.rs            # HotpotQA, JsonFileDataset
-│       ├── scorer.rs             # ExactMatch, F1Score, Contains
+│       ├── scorer.rs             # Contains, LlmJudgeScorer
 │       ├── harness.rs            # EvalHarness, EvalConfig
 │       ├── results.rs            # EvalSummary, EvalResult
 │       └── judge.rs              # LlmJudgeAgent for evaluation

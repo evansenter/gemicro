@@ -198,14 +198,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             summary.avg_score("contains").unwrap_or(0.0)
         );
         println!(
-            "   ├── F1 Score:  {:.3}",
-            summary.avg_score("f1").unwrap_or(0.0)
-        );
-        println!(
-            "   ├── Exact Match: {:.3}",
-            summary.avg_score("exact_match").unwrap_or(0.0)
-        );
-        println!(
             "   └── Duration: {:.1}s",
             summary.total_duration.as_secs_f64()
         );
