@@ -22,4 +22,4 @@ log = { workspace = true }
 meval = "0.2"
 
 [dev-dependencies]
-rstest = "0.26"
+rstest = { workspace = true }

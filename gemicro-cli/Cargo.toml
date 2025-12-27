@@ -20,11 +20,11 @@ futures-util = { workspace = true }
 clap = { version = "4.5", features = ["derive", "env"] }
 
 # Display
-indicatif = "0.18"
-termimad = "0.34"
+indicatif = { workspace = true }
+termimad = { workspace = true }
 
 # REPL
-rustyline = "17.0"
+rustyline = { workspace = true }
 
 # Error handling
 anyhow = "1.0"

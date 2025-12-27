@@ -174,6 +174,14 @@ impl LlmClient {
     ///
     /// Use this for advanced operations like function calling that require
     /// direct access to the client.
+    ///
+    /// # Warning: Escape Hatch
+    ///
+    /// This method bypasses `LlmClient`'s automatic timeout enforcement, retry
+    /// logic, and consistent error handling. When using this directly, you are
+    /// responsible for implementing these guarantees yourself.
+    ///
+    /// Prefer using `generate()` or `generate_stream()` when possible.
     pub fn client(&self) -> &rust_genai::Client {
         &self.client
     }
