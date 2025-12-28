@@ -171,13 +171,7 @@ mod tests {
             ),
             AgentUpdate::final_result(
                 "The answer is 42".to_string(),
-                ResultMetadata {
-                    total_tokens: 100,
-                    tokens_unavailable_count: 0,
-                    duration_ms: 1000,
-                    sub_queries_succeeded: 2,
-                    sub_queries_failed: 0,
-                },
+                ResultMetadata::new(100, 0, 1000),
             ),
         ]
     }

@@ -174,8 +174,11 @@ impl Renderer for IndicatifRenderer {
             None => return Ok(()),
         };
 
-        // Parse numeric ID for display (1-based)
-        let display_id = id.parse::<usize>().map(|n| n + 1).unwrap_or(0);
+        // Parse numeric ID for display (1-based). If not numeric, use raw ID.
+        let display_id: String = id
+            .parse::<usize>()
+            .map(|n| (n + 1).to_string())
+            .unwrap_or_else(|_| id.to_string());
 
         match &step.status {
             StepStatus::Pending => {
@@ -300,8 +303,12 @@ impl Renderer for IndicatifRenderer {
             for step in completed {
                 if let StepStatus::Completed { result_preview, .. } = &step.status {
                     let chars = (PREVIEW_CHARS as f32 * INTERRUPTED_CONTEXT_MULTIPLIER) as usize;
-                    // Parse numeric ID for display (1-based)
-                    let display_id = step.id.parse::<usize>().map(|n| n + 1).unwrap_or(0);
+                    // Parse numeric ID for display (1-based). If not numeric, use raw ID.
+                    let display_id: String = step
+                        .id
+                        .parse::<usize>()
+                        .map(|n| (n + 1).to_string())
+                        .unwrap_or_else(|_| step.id.clone());
                     println!("  [{}] {}", display_id, truncate(result_preview, chars));
                 }
             }

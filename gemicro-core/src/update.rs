@@ -130,7 +130,9 @@ pub struct FinalResult {
     pub metadata: ResultMetadata,
 }
 
-/// Metadata about the overall research result
+/// Metadata about the overall result.
+///
+/// Contains generic fields plus an extensible `extra` for agent-specific data.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResultMetadata {
     /// Total tokens used across all LLM calls
@@ -147,11 +149,41 @@ pub struct ResultMetadata {
     /// Total execution time in milliseconds
     pub duration_ms: u64,
 
-    /// Number of sub-queries that completed successfully
-    pub sub_queries_succeeded: usize,
+    /// Agent-specific metadata (steps, iterations, tool calls, etc.)
+    ///
+    /// Examples:
+    /// - DeepResearch: `{"steps_succeeded": 3, "steps_failed": 1}`
+    /// - ReAct: `{"iterations": 5, "tools_used": ["calculator", "search"]}`
+    /// - SimpleQA: `null` or `{}`
+    #[serde(default)]
+    pub extra: serde_json::Value,
+}
 
-    /// Number of sub-queries that failed
-    pub sub_queries_failed: usize,
+impl ResultMetadata {
+    /// Create metadata with no extra fields.
+    pub fn new(total_tokens: u32, tokens_unavailable_count: usize, duration_ms: u64) -> Self {
+        Self {
+            total_tokens,
+            tokens_unavailable_count,
+            duration_ms,
+            extra: serde_json::Value::Null,
+        }
+    }
+
+    /// Create metadata with agent-specific extra fields.
+    pub fn with_extra(
+        total_tokens: u32,
+        tokens_unavailable_count: usize,
+        duration_ms: u64,
+        extra: serde_json::Value,
+    ) -> Self {
+        Self {
+            total_tokens,
+            tokens_unavailable_count,
+            duration_ms,
+            extra,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -171,13 +203,7 @@ mod tests {
 
     #[test]
     fn test_final_result() {
-        let metadata = ResultMetadata {
-            total_tokens: 100,
-            tokens_unavailable_count: 0,
-            duration_ms: 5000,
-            sub_queries_succeeded: 3,
-            sub_queries_failed: 1,
-        };
+        let metadata = ResultMetadata::new(100, 0, 5000);
         let update = AgentUpdate::final_result("Answer".to_string(), metadata);
 
         assert_eq!(update.event_type, "final_result");
@@ -189,14 +215,23 @@ mod tests {
     }
 
     #[test]
+    fn test_final_result_with_extra() {
+        let metadata = ResultMetadata::with_extra(
+            100,
+            0,
+            5000,
+            json!({"steps_succeeded": 3, "steps_failed": 1}),
+        );
+        let update = AgentUpdate::final_result("Answer".to_string(), metadata);
+
+        let result = update.as_final_result().unwrap();
+        assert_eq!(result.metadata.extra["steps_succeeded"], 3);
+        assert_eq!(result.metadata.extra["steps_failed"], 1);
+    }
+
+    #[test]
     fn test_final_result_with_incomplete_tokens() {
-        let metadata = ResultMetadata {
-            total_tokens: 50,
-            tokens_unavailable_count: 2,
-            duration_ms: 3000,
-            sub_queries_succeeded: 3,
-            sub_queries_failed: 2,
-        };
+        let metadata = ResultMetadata::new(50, 2, 3000);
         let update = AgentUpdate::final_result("Partial answer".to_string(), metadata);
 
         let result = update.as_final_result().unwrap();
@@ -227,13 +262,12 @@ mod tests {
 
     #[test]
     fn test_serialization_roundtrip() {
-        let metadata = ResultMetadata {
-            total_tokens: 100,
-            tokens_unavailable_count: 0,
-            duration_ms: 5000,
-            sub_queries_succeeded: 2,
-            sub_queries_failed: 0,
-        };
+        let metadata = ResultMetadata::with_extra(
+            100,
+            0,
+            5000,
+            json!({"steps_succeeded": 2, "steps_failed": 0}),
+        );
         let original = AgentUpdate::final_result("Test answer".to_string(), metadata);
 
         let json_str = serde_json::to_string(&original).unwrap();
@@ -245,5 +279,6 @@ mod tests {
         let result = deserialized.as_final_result().unwrap();
         assert_eq!(result.answer, "Test answer");
         assert_eq!(result.metadata.total_tokens, 100);
+        assert_eq!(result.metadata.extra["steps_succeeded"], 2);
     }
 }

@@ -12,7 +12,6 @@
 //!
 //! To parse agent-specific events, use a `StateHandler` implementation.
 
-use crate::utils::first_sentence;
 use gemicro_core::AgentUpdate;
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
@@ -254,12 +253,18 @@ impl StateHandler for DefaultStateHandler {
         match event.event_type.as_str() {
             "final_result" => {
                 if let Some(result) = event.as_final_result() {
+                    // Extract step counts from extra field (agent-specific)
+                    let steps_succeeded = result.metadata.extra["steps_succeeded"]
+                        .as_u64()
+                        .unwrap_or(0) as usize;
+                    let steps_failed =
+                        result.metadata.extra["steps_failed"].as_u64().unwrap_or(0) as usize;
                     state.set_final_result(FinalResultData {
                         answer: result.answer,
                         total_tokens: result.metadata.total_tokens,
                         tokens_unavailable_count: result.metadata.tokens_unavailable_count,
-                        steps_succeeded: result.metadata.sub_queries_succeeded,
-                        steps_failed: result.metadata.sub_queries_failed,
+                        steps_succeeded,
+                        steps_failed,
                     });
                 } else {
                     log::warn!(
@@ -271,119 +276,6 @@ impl StateHandler for DefaultStateHandler {
             }
             _ => {
                 log::debug!("Unhandled event type: {}", event.event_type);
-                None
-            }
-        }
-    }
-}
-
-/// Handler for DeepResearch agent events.
-///
-/// This is kept in gemicro-runner for backwards compatibility, but
-/// ideally would move to a separate crate or the agent crate itself.
-pub struct DeepResearchStateHandler;
-
-impl StateHandler for DeepResearchStateHandler {
-    fn handle(&self, state: &mut ExecutionState, event: &AgentUpdate) -> Option<String> {
-        use gemicro_deep_research::DeepResearchEventExt;
-
-        match event.event_type.as_str() {
-            "decomposition_started" => {
-                state.set_phase(phases::DECOMPOSING);
-                None
-            }
-
-            "decomposition_complete" => {
-                if let Some(queries) = event.as_decomposition_complete() {
-                    let steps: Vec<ExecutionStep> = queries
-                        .into_iter()
-                        .enumerate()
-                        .map(|(id, query)| ExecutionStep::new(id.to_string(), query))
-                        .collect();
-                    state.add_steps(steps);
-                    state.set_phase(phases::EXECUTING);
-                } else {
-                    log::warn!(
-                        "Received decomposition_complete event with malformed data: {:?}",
-                        event.data
-                    );
-                }
-                None
-            }
-
-            "sub_query_started" => {
-                if let Some(id) = event.data.get("id").and_then(|v| v.as_u64()) {
-                    let id_str = id.to_string();
-                    if let Some(step) = state.step_by_index_mut(id as usize) {
-                        step.start();
-                        return Some(id_str);
-                    }
-                }
-                None
-            }
-
-            "sub_query_completed" => {
-                if let Some(result) = event.as_sub_query_completed() {
-                    let id_str = result.id.to_string();
-                    if let Some(step) = state.step_by_index_mut(result.id) {
-                        let preview = first_sentence(&result.result);
-                        step.complete(preview, Some(result.tokens_used));
-                        return Some(id_str);
-                    }
-                } else {
-                    log::warn!(
-                        "Received sub_query_completed event with malformed data: {:?}",
-                        event.data
-                    );
-                }
-                None
-            }
-
-            "sub_query_failed" => {
-                if let Some(id) = event.data.get("id").and_then(|v| v.as_u64()) {
-                    let id_str = id.to_string();
-                    if let Some(step) = state.step_by_index_mut(id as usize) {
-                        let error = event
-                            .data
-                            .get("error")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("Unknown error")
-                            .to_string();
-                        step.fail(error);
-                        return Some(id_str);
-                    }
-                }
-                None
-            }
-
-            "synthesis_started" => {
-                state.set_phase(phases::SYNTHESIZING);
-                None
-            }
-
-            "final_result" => {
-                if let Some(result) = event.as_final_result() {
-                    state.set_final_result(FinalResultData {
-                        answer: result.answer,
-                        total_tokens: result.metadata.total_tokens,
-                        tokens_unavailable_count: result.metadata.tokens_unavailable_count,
-                        steps_succeeded: result.metadata.sub_queries_succeeded,
-                        steps_failed: result.metadata.sub_queries_failed,
-                    });
-                } else {
-                    log::warn!(
-                        "Received final_result event with malformed data: {:?}",
-                        event.data
-                    );
-                }
-                None
-            }
-
-            _ => {
-                log::debug!(
-                    "Unknown event type in DeepResearchStateHandler: {}",
-                    event.event_type
-                );
                 None
             }
         }
@@ -460,98 +352,19 @@ mod tests {
     }
 
     #[test]
-    fn test_deep_research_handler_decomposition() {
-        let handler = DeepResearchStateHandler;
+    fn test_default_handler_final_result() {
+        let handler = DefaultStateHandler;
         let mut state = ExecutionState::new();
 
-        let event = AgentUpdate::custom("decomposition_started", "Decomposing query", json!({}));
-        handler.handle(&mut state, &event);
-        assert_eq!(state.phase(), phases::DECOMPOSING);
-
-        let event = AgentUpdate::custom(
-            "decomposition_complete",
-            "Decomposed into 3 sub-queries",
-            json!({ "sub_queries": ["Query 1", "Query 2", "Query 3"] }),
+        let metadata = gemicro_core::ResultMetadata::with_extra(
+            100,
+            0,
+            5000,
+            json!({
+                "steps_succeeded": 3,
+                "steps_failed": 1,
+            }),
         );
-        handler.handle(&mut state, &event);
-
-        assert_eq!(state.phase(), phases::EXECUTING);
-        assert_eq!(state.steps().len(), 3);
-        assert_eq!(state.step("0").unwrap().label, "Query 1");
-    }
-
-    #[test]
-    fn test_deep_research_handler_sub_query_flow() {
-        let handler = DeepResearchStateHandler;
-        let mut state = ExecutionState::new();
-
-        // Setup
-        handler.handle(
-            &mut state,
-            &AgentUpdate::custom(
-                "decomposition_complete",
-                "Decomposed",
-                json!({ "sub_queries": ["Q1"] }),
-            ),
-        );
-
-        // Start
-        let event = AgentUpdate::custom(
-            "sub_query_started",
-            "Sub-query 0 started",
-            json!({ "id": 0, "query": "Q1" }),
-        );
-        let updated = handler.handle(&mut state, &event);
-        assert_eq!(updated, Some("0".to_string()));
-
-        let step = state.step("0").unwrap();
-        assert!(matches!(step.status, StepStatus::InProgress));
-
-        // Complete
-        let event = AgentUpdate::custom(
-            "sub_query_completed",
-            "Sub-query 0 completed",
-            json!({ "id": 0, "result": "This is the result.", "tokens_used": 42 }),
-        );
-        let updated = handler.handle(&mut state, &event);
-        assert_eq!(updated, Some("0".to_string()));
-
-        let step = state.step("0").unwrap();
-        match &step.status {
-            StepStatus::Completed {
-                result_preview,
-                tokens,
-            } => {
-                assert!(result_preview.contains("This is the result"));
-                assert_eq!(*tokens, Some(42));
-            }
-            _ => panic!("Expected Completed status"),
-        }
-    }
-
-    #[test]
-    fn test_deep_research_handler_synthesis() {
-        let handler = DeepResearchStateHandler;
-        let mut state = ExecutionState::new();
-
-        let event = AgentUpdate::custom("synthesis_started", "Synthesizing results", json!({}));
-        handler.handle(&mut state, &event);
-
-        assert_eq!(state.phase(), phases::SYNTHESIZING);
-    }
-
-    #[test]
-    fn test_deep_research_handler_final_result() {
-        let handler = DeepResearchStateHandler;
-        let mut state = ExecutionState::new();
-
-        let metadata = gemicro_core::ResultMetadata {
-            total_tokens: 100,
-            tokens_unavailable_count: 0,
-            duration_ms: 5000,
-            sub_queries_succeeded: 3,
-            sub_queries_failed: 1,
-        };
         let event = AgentUpdate::final_result("Final answer".to_string(), metadata);
         handler.handle(&mut state, &event);
 
@@ -560,6 +373,38 @@ mod tests {
         assert_eq!(result.answer, "Final answer");
         assert_eq!(result.total_tokens, 100);
         assert_eq!(result.steps_succeeded, 3);
+        assert_eq!(result.steps_failed, 1);
+    }
+
+    #[test]
+    fn test_default_handler_unknown_event() {
+        let handler = DefaultStateHandler;
+        let mut state = ExecutionState::new();
+
+        let event = AgentUpdate::custom("unknown_event", "Unknown", json!({}));
+        let result = handler.handle(&mut state, &event);
+
+        // Unknown events should return None and not change state
+        assert!(result.is_none());
+        assert_eq!(state.phase(), phases::NOT_STARTED);
+    }
+
+    #[test]
+    fn test_default_handler_malformed_final_result() {
+        let handler = DefaultStateHandler;
+        let mut state = ExecutionState::new();
+
+        // Create a malformed final_result event (missing required fields)
+        let event = AgentUpdate::custom(
+            "final_result",
+            "Malformed",
+            json!({ "answer": 123 }), // answer should be a string in proper format
+        );
+        let result = handler.handle(&mut state, &event);
+
+        // Should log warning and not crash
+        assert!(result.is_none());
+        assert!(state.final_result().is_none());
     }
 
     #[test]
@@ -575,17 +420,5 @@ mod tests {
         let seq_time = state.sequential_time();
         assert!(seq_time.is_some());
         assert_eq!(seq_time.unwrap(), Duration::from_secs(5));
-    }
-
-    #[test]
-    fn test_unknown_event_logged() {
-        let handler = DeepResearchStateHandler;
-        let mut state = ExecutionState::new();
-
-        let event = AgentUpdate::custom("unknown_event", "Unknown", json!({}));
-        let result = handler.handle(&mut state, &event);
-
-        assert!(result.is_none());
-        assert_eq!(state.phase(), phases::NOT_STARTED);
     }
 }

@@ -5,7 +5,8 @@
 //!
 //! # Example
 //!
-//! ```no_run
+//! ```ignore
+//! // Requires an agent crate like gemicro-deep-research
 //! use gemicro_runner::AgentRegistry;
 //! use gemicro_deep_research::{DeepResearchAgent, ResearchConfig};
 //!
@@ -35,7 +36,8 @@ pub type AgentFactory = Arc<dyn Fn() -> Box<dyn Agent> + Send + Sync>;
 ///
 /// # Example
 ///
-/// ```no_run
+/// ```ignore
+/// // Requires an agent crate like gemicro-deep-research
 /// use gemicro_runner::AgentRegistry;
 /// use gemicro_deep_research::{DeepResearchAgent, ResearchConfig};
 ///
@@ -71,7 +73,8 @@ impl AgentRegistry {
     ///
     /// # Example
     ///
-    /// ```no_run
+    /// ```ignore
+    /// // Requires an agent crate like gemicro-deep-research
     /// use gemicro_runner::AgentRegistry;
     /// use gemicro_deep_research::{DeepResearchAgent, ResearchConfig};
     ///
@@ -146,6 +149,10 @@ mod tests {
             Box::pin(async_stream::try_stream! {
                 yield AgentUpdate::custom("mock_started", "Mock agent started", serde_json::json!({}));
             })
+        }
+
+        fn create_tracker(&self) -> Box<dyn gemicro_core::ExecutionTracking> {
+            Box::new(gemicro_core::DefaultTracker::default())
         }
     }
 

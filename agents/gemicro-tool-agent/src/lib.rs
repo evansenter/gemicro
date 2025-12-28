@@ -431,17 +431,13 @@ impl ToolAgent {
                 }),
             );
 
-            // Emit standard final_result for ExecutionState/harness compatibility.
-            // Note: sub_queries_succeeded/failed are set to 0 because ToolAgent doesn't use
-            // sub-queries (those fields are for DeepResearchAgent). Tool call details are
-            // exposed in the tool_agent_complete event above.
-            let metadata = ResultMetadata {
+            // Emit standard final_result for harness compatibility.
+            // Tool call details are exposed in the tool_agent_complete event above.
+            let metadata = ResultMetadata::new(
                 total_tokens,
-                tokens_unavailable_count: tokens_unavailable,
-                duration_ms: start_time.elapsed().as_millis() as u64,
-                sub_queries_succeeded: 0,
-                sub_queries_failed: 0,
-            };
+                tokens_unavailable,
+                start_time.elapsed().as_millis() as u64,
+            );
             yield AgentUpdate::final_result(answer, metadata);
         }
     }
@@ -458,6 +454,10 @@ impl Agent for ToolAgent {
 
     fn execute(&self, query: &str, context: AgentContext) -> AgentStream<'_> {
         Box::pin(ToolAgent::execute(self, query, context))
+    }
+
+    fn create_tracker(&self) -> Box<dyn gemicro_core::ExecutionTracking> {
+        Box::new(gemicro_core::DefaultTracker::default())
     }
 }
 

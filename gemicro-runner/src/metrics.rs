@@ -160,6 +160,55 @@ impl ExecutionMetrics {
         Self::from(state)
     }
 
+    /// Create metrics from an ExecutionTracking trait object.
+    ///
+    /// This is the preferred method when using `agent.create_tracker()`.
+    /// It provides simpler metrics without step-level details.
+    pub fn from_tracker(tracker: &dyn gemicro_core::ExecutionTracking, duration: Duration) -> Self {
+        let (total_tokens, tokens_unavailable_count, final_answer, completion_phase, extra) =
+            if let Some(result) = tracker.final_result() {
+                (
+                    result.total_tokens,
+                    result.tokens_unavailable_count,
+                    Some(result.answer.clone()),
+                    "complete".to_string(),
+                    result.extra.clone(),
+                )
+            } else {
+                (
+                    0,
+                    0,
+                    None,
+                    if tracker.is_complete() {
+                        "complete"
+                    } else {
+                        "unknown"
+                    }
+                    .to_string(),
+                    serde_json::Value::Null,
+                )
+            };
+
+        // Extract step counts from extra field if present
+        let steps_succeeded = extra["steps_succeeded"].as_u64().unwrap_or(0) as usize;
+        let steps_failed = extra["steps_failed"].as_u64().unwrap_or(0) as usize;
+        let steps_total = steps_succeeded + steps_failed;
+
+        ExecutionMetrics {
+            total_duration: duration,
+            sequential_time: None, // Not available without step timing
+            parallel_speedup: None,
+            steps_total,
+            steps_succeeded,
+            steps_failed,
+            step_timings: Vec::new(), // Not available from basic tracker
+            total_tokens,
+            tokens_unavailable_count,
+            final_answer,
+            completion_phase,
+        }
+    }
+
     /// Check if execution completed successfully.
     pub fn is_complete(&self) -> bool {
         self.completion_phase == phases::COMPLETE
@@ -169,96 +218,51 @@ impl ExecutionMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{DeepResearchStateHandler, ExecutionState, StateHandler};
-    use gemicro_core::{AgentUpdate, ResultMetadata};
+    use crate::state::{ExecutionState, ExecutionStep, FinalResultData, StepStatus};
 
+    /// Create state directly for testing metrics conversion.
+    /// This builds state without relying on any agent-specific handler.
     fn create_completed_state() -> ExecutionState {
-        use serde_json::json;
+        use std::time::Duration;
 
-        let handler = DeepResearchStateHandler;
         let mut state = ExecutionState::new();
 
-        handler.handle(
-            &mut state,
-            &AgentUpdate::custom("decomposition_started", "Decomposing query", json!({})),
-        );
-        handler.handle(
-            &mut state,
-            &AgentUpdate::custom(
-                "decomposition_complete",
-                "Decomposed into 3 sub-queries",
-                json!({ "sub_queries": ["Q1", "Q2", "Q3"] }),
-            ),
-        );
+        // Add steps (simulating decomposition result)
+        let mut step0 = ExecutionStep::new("0", "Q1");
+        let mut step1 = ExecutionStep::new("1", "Q2");
+        let mut step2 = ExecutionStep::new("2", "Q3");
 
-        // Simulate sub-query execution
-        handler.handle(
-            &mut state,
-            &AgentUpdate::custom(
-                "sub_query_started",
-                "Sub-query 0 started",
-                json!({ "id": 0, "query": "Q1" }),
-            ),
-        );
-        handler.handle(
-            &mut state,
-            &AgentUpdate::custom(
-                "sub_query_completed",
-                "Sub-query 0 completed",
-                json!({ "id": 0, "result": "Result 1", "tokens_used": 50 }),
-            ),
-        );
+        // Simulate execution: start and complete/fail each step
+        step0.start();
+        step0.duration = Some(Duration::from_millis(100));
+        step0.status = StepStatus::Completed {
+            result_preview: "Result 1".to_string(),
+            tokens: Some(50),
+        };
 
-        handler.handle(
-            &mut state,
-            &AgentUpdate::custom(
-                "sub_query_started",
-                "Sub-query 1 started",
-                json!({ "id": 1, "query": "Q2" }),
-            ),
-        );
-        handler.handle(
-            &mut state,
-            &AgentUpdate::custom(
-                "sub_query_completed",
-                "Sub-query 1 completed",
-                json!({ "id": 1, "result": "Result 2", "tokens_used": 60 }),
-            ),
-        );
+        step1.start();
+        step1.duration = Some(Duration::from_millis(100));
+        step1.status = StepStatus::Completed {
+            result_preview: "Result 2".to_string(),
+            tokens: Some(60),
+        };
 
-        handler.handle(
-            &mut state,
-            &AgentUpdate::custom(
-                "sub_query_started",
-                "Sub-query 2 started",
-                json!({ "id": 2, "query": "Q3" }),
-            ),
-        );
-        handler.handle(
-            &mut state,
-            &AgentUpdate::custom(
-                "sub_query_failed",
-                "Sub-query 2 failed",
-                json!({ "id": 2, "error": "Timeout" }),
-            ),
-        );
+        step2.start();
+        step2.duration = Some(Duration::from_millis(50));
+        step2.status = StepStatus::Failed {
+            error: "Timeout".to_string(),
+        };
 
-        handler.handle(
-            &mut state,
-            &AgentUpdate::custom("synthesis_started", "Synthesizing results", json!({})),
-        );
+        state.add_steps(vec![step0, step1, step2]);
 
-        let metadata = ResultMetadata {
+        // Set final result
+        state.set_final_result(FinalResultData {
+            answer: "Final answer".to_string(),
             total_tokens: 150,
             tokens_unavailable_count: 0,
-            duration_ms: 5000,
-            sub_queries_succeeded: 2,
-            sub_queries_failed: 1,
-        };
-        handler.handle(
-            &mut state,
-            &AgentUpdate::final_result("Final answer".to_string(), metadata),
-        );
+            steps_succeeded: 2,
+            steps_failed: 1,
+        });
 
         state
     }
@@ -298,23 +302,14 @@ mod tests {
 
     #[test]
     fn test_metrics_from_partial_state() {
-        use serde_json::json;
-
-        let handler = DeepResearchStateHandler;
         let mut state = ExecutionState::new();
 
-        handler.handle(
-            &mut state,
-            &AgentUpdate::custom("decomposition_started", "Decomposing query", json!({})),
-        );
-        handler.handle(
-            &mut state,
-            &AgentUpdate::custom(
-                "decomposition_complete",
-                "Decomposed into 2 sub-queries",
-                json!({ "sub_queries": ["Q1", "Q2"] }),
-            ),
-        );
+        // Simulate partial execution: steps added but not all completed
+        state.set_phase(phases::EXECUTING);
+        state.add_steps(vec![
+            ExecutionStep::new("0", "Q1"),
+            ExecutionStep::new("1", "Q2"),
+        ]);
 
         let metrics = ExecutionMetrics::from(&state);
 

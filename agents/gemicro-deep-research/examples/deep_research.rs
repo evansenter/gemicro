@@ -272,8 +272,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         println!();
                         println!("══════════════════════════════════════════════════════════════");
 
-                        let total_queries = result.metadata.sub_queries_succeeded
-                            + result.metadata.sub_queries_failed;
+                        let steps_succeeded = result.metadata.extra["steps_succeeded"]
+                            .as_u64()
+                            .unwrap_or(0);
+                        let steps_failed =
+                            result.metadata.extra["steps_failed"].as_u64().unwrap_or(0);
+                        let total_queries = steps_succeeded + steps_failed;
 
                         // Calculate parallel efficiency
                         let sequential_time: f64 =
@@ -289,7 +293,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         println!("   Total time: {:.1}s", parallel_time);
                         println!(
                             "   Sub-queries: {}/{} succeeded",
-                            result.metadata.sub_queries_succeeded, total_queries
+                            steps_succeeded, total_queries
                         );
                         if speedup > 1.1 {
                             println!(

@@ -82,11 +82,12 @@ async fn test_deep_research_agent_full_flow() {
                                 result.metadata.tokens_unavailable_count
                             );
                             println!("  Duration: {}ms", result.metadata.duration_ms);
-                            println!(
-                                "  Succeeded: {}, Failed: {}",
-                                result.metadata.sub_queries_succeeded,
-                                result.metadata.sub_queries_failed
-                            );
+                            let steps_succeeded = result.metadata.extra["steps_succeeded"]
+                                .as_u64()
+                                .unwrap_or(0);
+                            let steps_failed =
+                                result.metadata.extra["steps_failed"].as_u64().unwrap_or(0);
+                            println!("  Succeeded: {}, Failed: {}", steps_succeeded, steps_failed);
                         }
                     }
                     _ => {}

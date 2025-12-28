@@ -6,12 +6,13 @@ use super::commands::Command;
 use crate::display::{phases, ExecutionState, IndicatifRenderer, Renderer};
 use crate::error::ErrorFormatter;
 use crate::format::truncate;
+use crate::state_handlers::DeepResearchStateHandler;
 use anyhow::{Context, Result};
 use futures_util::StreamExt;
 use gemicro_core::{
     AgentContext, AgentError, AgentUpdate, ConversationHistory, HistoryEntry, LlmClient,
 };
-use gemicro_runner::{AgentRegistry, DeepResearchStateHandler, StateHandler};
+use gemicro_runner::{AgentRegistry, StateHandler};
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 use std::path::PathBuf;
@@ -536,13 +537,15 @@ mod tests {
             AgentUpdate::custom("decomposition_started", "Decomposing query", json!({})),
             AgentUpdate::final_result(
                 "The answer".to_string(),
-                ResultMetadata {
-                    total_tokens: 1500,
-                    tokens_unavailable_count: 0,
-                    duration_ms: 1000,
-                    sub_queries_succeeded: 2,
-                    sub_queries_failed: 0,
-                },
+                ResultMetadata::with_extra(
+                    1500,
+                    0,
+                    1000,
+                    json!({
+                        "steps_succeeded": 2,
+                        "steps_failed": 0,
+                    }),
+                ),
             ),
         ];
         assert_eq!(extract_tokens_from_events(&events), 1500);

@@ -23,7 +23,10 @@
 //! ## Example
 //!
 //! ```no_run
-//! use gemicro_core::{Agent, AgentContext, AgentStream, AgentUpdate, AgentError, LlmClient, LlmConfig};
+//! use gemicro_core::{
+//!     Agent, AgentContext, AgentStream, AgentUpdate, AgentError,
+//!     LlmClient, LlmConfig, ExecutionTracking, DefaultTracker,
+//! };
 //!
 //! struct MyAgent;
 //!
@@ -34,6 +37,9 @@
 //!         // Implementation would return a stream of updates
 //!         # todo!()
 //!     }
+//!     fn create_tracker(&self) -> Box<dyn ExecutionTracking> {
+//!         Box::new(DefaultTracker::default())
+//!     }
 //! }
 //! ```
 
@@ -42,6 +48,7 @@ pub mod config;
 pub mod error;
 pub mod history;
 pub mod llm;
+pub mod tracking;
 pub mod update;
 pub mod utils;
 
@@ -55,5 +62,6 @@ pub use history::{ConversationHistory, HistoryEntry};
 pub use llm::{LlmClient, LlmRequest, LlmStreamChunk};
 // Re-export rust-genai types for convenience
 pub use rust_genai::{InteractionResponse, UsageMetadata};
+pub use tracking::{DefaultTracker, ExecutionTracking, FinalResultData};
 pub use update::{AgentUpdate, FinalResult, ResultMetadata};
 pub use utils::{extract_total_tokens, first_sentence, truncate, truncate_with_count};

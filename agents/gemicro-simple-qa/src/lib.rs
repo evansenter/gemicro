@@ -246,15 +246,17 @@ impl Agent for SimpleQaAgent {
             );
 
             // Emit standard final_result for ExecutionState/harness compatibility
-            let metadata = ResultMetadata {
-                total_tokens: tokens_used.unwrap_or(0),
-                tokens_unavailable_count: if tokens_used.is_none() { 1 } else { 0 },
+            let metadata = ResultMetadata::new(
+                tokens_used.unwrap_or(0),
+                if tokens_used.is_none() { 1 } else { 0 },
                 duration_ms,
-                sub_queries_succeeded: 0,
-                sub_queries_failed: 0,
-            };
+            );
             yield AgentUpdate::final_result(answer, metadata);
         })
+    }
+
+    fn create_tracker(&self) -> Box<dyn gemicro_core::ExecutionTracking> {
+        Box::new(gemicro_core::DefaultTracker::default())
     }
 }
 
