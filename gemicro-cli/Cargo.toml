@@ -11,6 +11,12 @@ path = "src/main.rs"
 [dependencies]
 gemicro-core = { path = "../gemicro-core" }
 gemicro-runner = { path = "../gemicro-runner" }
+
+# Agent crates - CLI needs all agents it uses
+gemicro-deep-research = { path = "../agents/gemicro-deep-research" }
+gemicro-react = { path = "../agents/gemicro-react" }
+gemicro-simple-qa = { path = "../agents/gemicro-simple-qa" }
+gemicro-tool-agent = { path = "../agents/gemicro-tool-agent" }
 rust-genai = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }

@@ -1,5 +1,15 @@
 [workspace]
-members = ["gemicro-core", "gemicro-runner", "gemicro-cli", "gemicro-eval"]
+members = [
+    "gemicro-core",
+    "gemicro-runner",
+    "gemicro-cli",
+    "gemicro-eval",
+    "agents/gemicro-deep-research",
+    "agents/gemicro-react",
+    "agents/gemicro-simple-qa",
+    "agents/gemicro-tool-agent",
+    "agents/gemicro-judge",
+]
 resolver = "2"
 
 [workspace.dependencies]

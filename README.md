@@ -18,10 +18,12 @@ Gemicro allows you to explore and interact with different AI agent patterns thro
 
 ## Architecture
 
-### Four-Crate Workspace
+### Nine-Crate Workspace
 
 ```
-gemicro-core (agents, events, LLM)
+gemicro-core (Agent trait, events, LLM - GENERIC ONLY)
+    ↓
+agents/* (one crate per agent - hermetic isolation)
     ↓
 gemicro-runner (execution state, metrics, runner)
     ↓
@@ -31,9 +33,14 @@ gemicro-cli (terminal rendering)
 
 | Crate | Purpose |
 |-------|---------|
-| **gemicro-core** | Platform-agnostic library: Agent trait, AgentUpdate events, LlmClient, conversation history. Agents: DeepResearchAgent, ReActAgent, SimpleQaAgent |
+| **gemicro-core** | Platform-agnostic library: Agent trait, AgentContext, AgentUpdate events, LlmClient, conversation history. **No agent implementations.** |
+| **agents/gemicro-deep-research** | DeepResearchAgent: query decomposition, parallel sub-query execution, synthesis |
+| **agents/gemicro-react** | ReactAgent: Thought → Action → Observation reasoning loops |
+| **agents/gemicro-simple-qa** | SimpleQaAgent: minimal reference implementation |
+| **agents/gemicro-tool-agent** | ToolAgent: native function calling with calculator/datetime tools |
+| **agents/gemicro-judge** | LlmJudgeAgent: LLM-based evaluation scoring |
 | **gemicro-runner** | Headless execution runtime: ExecutionState, AgentRunner, AgentRegistry, metrics collection |
-| **gemicro-eval** | Evaluation framework: HotpotQA/custom datasets, scorers (Contains, LLM Judge), LlmJudgeAgent |
+| **gemicro-eval** | Evaluation framework: HotpotQA/custom datasets, scorers (Contains, LLM Judge) |
 | **gemicro-cli** | Terminal UI: indicatif progress display, rustyline REPL, markdown rendering |
 
 ### Design Philosophy
@@ -183,7 +190,7 @@ cargo fmt --all -- --check
 
 ```bash
 # Deep research example (non-interactive)
-cargo run -p gemicro-core --example deep_research
+cargo run -p gemicro-deep-research --example deep_research
 
 # A/B comparison example (requires GEMINI_API_KEY)
 cargo run -p gemicro-eval --example ab_comparison

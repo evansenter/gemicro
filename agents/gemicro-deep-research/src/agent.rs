@@ -3,12 +3,14 @@
 //! The Deep Research pattern decomposes complex queries into sub-questions,
 //! executes them in parallel, and synthesizes results into a comprehensive answer.
 
-use super::{remaining_time, timeout_error, with_timeout_and_cancellation, Agent, AgentContext};
 use crate::config::ResearchConfig;
-use crate::error::AgentError;
-use crate::llm::LlmRequest;
-use crate::update::{AgentUpdate, ResultMetadata};
-use crate::utils::extract_total_tokens;
+use crate::events::{EVENT_DECOMPOSITION_COMPLETE, EVENT_SUB_QUERY_COMPLETED};
+
+use gemicro_core::agent::{remaining_time, timeout_error, with_timeout_and_cancellation};
+use gemicro_core::{
+    extract_total_tokens, Agent, AgentContext, AgentError, AgentStream, AgentUpdate, LlmRequest,
+    ResultMetadata,
+};
 
 use async_stream::try_stream;
 use futures_util::Stream;
@@ -24,96 +26,11 @@ use tokio::sync::{mpsc, Semaphore};
 /// headroom for configs with larger max_sub_queries values.
 const PARALLEL_EXECUTION_CHANNEL_BUFFER: usize = 16;
 
-// ============================================================================
-// Event Type Constants (internal to this module)
-// ============================================================================
-
+// Event type constants (internal to this module)
 const EVENT_DECOMPOSITION_STARTED: &str = "decomposition_started";
-const EVENT_DECOMPOSITION_COMPLETE: &str = "decomposition_complete";
 const EVENT_SUB_QUERY_STARTED: &str = "sub_query_started";
-const EVENT_SUB_QUERY_COMPLETED: &str = "sub_query_completed";
 const EVENT_SUB_QUERY_FAILED: &str = "sub_query_failed";
 const EVENT_SYNTHESIS_STARTED: &str = "synthesis_started";
-
-// ============================================================================
-// Deep Research Event Accessors
-//
-// Extension trait for parsing DeepResearch-specific events. These accessors
-// belong here (not in update.rs) per the "No Agent/Dataset Leakage" principle.
-// ============================================================================
-
-use serde::{Deserialize, Serialize};
-
-/// Strongly-typed result struct for sub_query_completed events.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SubQueryResult {
-    pub id: usize,
-    pub result: String,
-    pub tokens_used: u32,
-}
-
-/// Extension trait for parsing DeepResearch-specific events from AgentUpdate.
-///
-/// Import this trait to use the accessor methods on AgentUpdate:
-///
-/// ```
-/// use gemicro_core::agent::DeepResearchEventExt;
-/// use gemicro_core::AgentUpdate;
-/// use serde_json::json;
-///
-/// let update = AgentUpdate::custom(
-///     "decomposition_complete",
-///     "Decomposed into 2 sub-queries",
-///     json!({ "sub_queries": ["Q1", "Q2"] }),
-/// );
-///
-/// if let Some(queries) = update.as_decomposition_complete() {
-///     println!("Got {} sub-queries", queries.len());
-/// }
-/// ```
-pub trait DeepResearchEventExt {
-    /// Parse decomposition_complete event data.
-    ///
-    /// Returns `None` if this is not a decomposition_complete event
-    /// or if the data doesn't match the expected schema.
-    fn as_decomposition_complete(&self) -> Option<Vec<String>>;
-
-    /// Parse sub_query_completed event data.
-    ///
-    /// Returns `None` if this is not a sub_query_completed event
-    /// or if the data doesn't match the expected schema.
-    fn as_sub_query_completed(&self) -> Option<SubQueryResult>;
-}
-
-impl DeepResearchEventExt for AgentUpdate {
-    fn as_decomposition_complete(&self) -> Option<Vec<String>> {
-        if self.event_type == EVENT_DECOMPOSITION_COMPLETE {
-            self.data
-                .get("sub_queries")
-                .and_then(|v| serde_json::from_value(v.clone()).ok())
-                .or_else(|| {
-                    log::warn!(
-                        "Failed to parse decomposition_complete data: {:?}",
-                        self.data
-                    );
-                    None
-                })
-        } else {
-            None
-        }
-    }
-
-    fn as_sub_query_completed(&self) -> Option<SubQueryResult> {
-        if self.event_type == EVENT_SUB_QUERY_COMPLETED {
-            serde_json::from_value(self.data.clone()).ok().or_else(|| {
-                log::warn!("Failed to parse sub_query_completed data: {:?}", self.data);
-                None
-            })
-        } else {
-            None
-        }
-    }
-}
 
 /// Deep Research Agent.
 ///
@@ -133,7 +50,8 @@ impl DeepResearchEventExt for AgentUpdate {
 /// # Example
 ///
 /// ```no_run
-/// use gemicro_core::{AgentContext, DeepResearchAgent, ResearchConfig, LlmClient, LlmConfig};
+/// use gemicro_deep_research::{DeepResearchAgent, ResearchConfig};
+/// use gemicro_core::{AgentContext, LlmClient, LlmConfig};
 /// use futures_util::StreamExt;
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -167,41 +85,7 @@ impl DeepResearchAgent {
 
     /// Execute the deep research process.
     ///
-    /// This is the main entry point that orchestrates:
-    /// 1. Query decomposition into sub-questions
-    /// 2. Parallel execution of sub-queries
-    /// 3. Synthesis of results into a final answer
-    ///
-    /// Returns a stream of [`AgentUpdate`] events:
-    /// - `decomposition_started` / `decomposition_complete`
-    /// - `sub_query_started` / `sub_query_completed` / `sub_query_failed`
-    /// - `synthesis_started`
-    /// - `final_result`
-    ///
-    /// # Arguments
-    ///
-    /// * `query` - The user's research query
-    /// * `context` - Shared resources (LLM client)
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// use gemicro_core::{AgentContext, DeepResearchAgent, ResearchConfig, LlmClient, LlmConfig};
-    /// use futures_util::StreamExt;
-    ///
-    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let genai_client = rust_genai::Client::builder("api-key".to_string()).build();
-    /// let context = AgentContext::new(LlmClient::new(genai_client, LlmConfig::default()));
-    /// let agent = DeepResearchAgent::new(ResearchConfig::default())?;
-    ///
-    /// let stream = agent.execute("What is Rust?", context);
-    /// futures_util::pin_mut!(stream);
-    /// while let Some(update) = stream.next().await {
-    ///     println!("{:?}", update?);
-    /// }
-    /// # Ok(())
-    /// # }
-    /// ```
+    /// Returns a stream of [`AgentUpdate`] events.
     pub fn execute(
         &self,
         query: &str,
@@ -326,7 +210,7 @@ impl Agent for DeepResearchAgent {
         "Decomposes queries into sub-questions, executes them in parallel, and synthesizes results"
     }
 
-    fn execute(&self, query: &str, context: AgentContext) -> super::AgentStream<'_> {
+    fn execute(&self, query: &str, context: AgentContext) -> AgentStream<'_> {
         Box::pin(DeepResearchAgent::execute(self, query, context))
     }
 }
@@ -348,18 +232,12 @@ struct ExecutionResult {
     /// Number of calls where token count was unavailable
     tokens_unavailable_count: usize,
     /// Updates to yield (sub_query_completed / sub_query_failed)
-    ///
-    /// Note: These updates arrive in non-deterministic order due to parallel
-    /// execution. The order depends on which sub-queries complete first.
     updates: Vec<AgentUpdate>,
-    /// Whether execution was aborted early due to failure (when continue_on_partial_failure=false)
+    /// Whether execution was aborted early due to failure
     aborted_early: bool,
 }
 
 /// Decompose a query into sub-queries using the LLM
-///
-/// Returns a tuple of (sub_queries, tokens_used) where tokens_used is the
-/// token count from the decomposition LLM call, if available.
 async fn decompose(
     query: &str,
     context: &AgentContext,
@@ -426,17 +304,6 @@ async fn decompose(
 }
 
 /// Execute sub-queries in parallel, collecting results
-///
-/// # Arguments
-///
-/// * `sub_queries` - The sub-queries to execute
-/// * `context` - Agent context with LLM client and cancellation token
-/// * `config` - Research configuration (for prompts, continue_on_partial_failure, and concurrency limit)
-///
-/// # Returns
-///
-/// Results with updates in non-deterministic order (depends on which queries complete first).
-/// If cancelled, returns partial results collected so far with `aborted_early = true`.
 async fn execute_parallel(
     sub_queries: &[String],
     context: &AgentContext,
@@ -465,9 +332,6 @@ async fn execute_parallel(
 
         tokio::spawn(async move {
             // Acquire semaphore permit if concurrency is limited.
-            // The permit is held in _permit and automatically released when
-            // the task exits (via Drop), ensuring proper cleanup on all paths
-            // including early returns from cancellation.
             let _permit = match &semaphore {
                 Some(sem) => Some(sem.acquire().await.expect("semaphore closed unexpectedly")),
                 None => None,
@@ -488,15 +352,14 @@ async fn execute_parallel(
                     let tokens = extract_total_tokens(&response);
                     Ok((text, tokens))
                 }
-                Err(crate::LlmError::Cancelled) => {
+                Err(gemicro_core::LlmError::Cancelled) => {
                     log::debug!("Sub-query {} cancelled", id);
                     return; // Exit early, don't send result
                 }
                 Err(e) => Err(e.to_string()),
             };
 
-            // Check cancellation again before sending - avoids queuing results
-            // after cancellation was triggered during the LLM call
+            // Check cancellation again before sending
             if cancellation_token.is_cancelled() {
                 log::debug!(
                     "Sub-query {} completed but cancelled, discarding result",
@@ -525,22 +388,18 @@ async fn execute_parallel(
 
     loop {
         tokio::select! {
-            // biased ensures cancellation is always checked first, providing
-            // deterministic responsiveness to cancel requests
             biased;
 
             _ = context.cancellation_token.cancelled() => {
                 log::debug!("Parallel execution cancelled, collecting in-flight results");
 
                 // Grace period: give nearly-complete tasks a brief window to finish
-                // This collects results that were in-flight when cancellation occurred
                 let grace_period = Duration::from_millis(100);
                 let deadline = tokio::time::Instant::now() + grace_period;
 
                 loop {
                     match tokio::time::timeout_at(deadline, rx.recv()).await {
                         Ok(Some((id, result))) => {
-                            // Process result normally
                             match result {
                                 Ok((text, tokens)) => {
                                     match tokens {
@@ -572,12 +431,8 @@ async fn execute_parallel(
                                 }
                             }
                         }
-                        Ok(None) => {
-                            // Channel closed, all tasks completed
-                            break;
-                        }
+                        Ok(None) => break,
                         Err(_) => {
-                            // Grace period expired
                             log::debug!("Grace period expired, {} results collected", succeeded);
                             break;
                         }
@@ -710,5 +565,12 @@ mod tests {
         let agent = DeepResearchAgent::new(config);
         assert!(agent.is_err());
         assert!(matches!(agent, Err(AgentError::InvalidConfig(_))));
+    }
+
+    #[test]
+    fn test_agent_name_and_description() {
+        let agent = DeepResearchAgent::new(ResearchConfig::default()).unwrap();
+        assert_eq!(agent.name(), "deep_research");
+        assert!(!agent.description().is_empty());
     }
 }

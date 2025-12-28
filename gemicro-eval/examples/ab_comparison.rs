@@ -14,7 +14,8 @@
 //! 5. Compares performance metrics
 
 use futures_util::StreamExt;
-use gemicro_core::{AgentContext, DeepResearchAgent, LlmClient, LlmConfig, ResearchConfig};
+use gemicro_core::{AgentContext, LlmClient, LlmConfig};
+use gemicro_deep_research::{DeepResearchAgent, ResearchConfig};
 use gemicro_eval::{
     EvalConfig, EvalHarness, EvalProgress, JsonFileDataset, JudgeConfig, JudgeInput, LlmJudgeAgent,
     Scorers,

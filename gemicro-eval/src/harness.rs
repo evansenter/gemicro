@@ -104,7 +104,8 @@ impl EvalConfig {
 ///
 /// ```no_run
 /// use gemicro_eval::{EvalHarness, EvalConfig, HotpotQA, Scorers};
-/// use gemicro_core::{DeepResearchAgent, ResearchConfig, LlmClient, LlmConfig};
+/// use gemicro_core::{LlmClient, LlmConfig};
+/// use gemicro_deep_research::{DeepResearchAgent, ResearchConfig};
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// // Create agent and LLM client
@@ -223,7 +224,8 @@ impl EvalHarness {
     ///
     /// ```no_run
     /// use gemicro_eval::{EvalHarness, EvalConfig, EvalProgress, HotpotQA, Scorers};
-    /// use gemicro_core::{DeepResearchAgent, ResearchConfig, LlmClient, LlmConfig};
+    /// use gemicro_core::{LlmClient, LlmConfig};
+    /// use gemicro_deep_research::{DeepResearchAgent, ResearchConfig};
     ///
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// let agent = DeepResearchAgent::new(ResearchConfig::default())?;

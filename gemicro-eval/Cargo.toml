@@ -11,6 +11,13 @@ path = "src/bin/main.rs"
 [dependencies]
 gemicro-core = { path = "../gemicro-core" }
 gemicro-runner = { path = "../gemicro-runner" }
+
+# Agent crates - eval needs these for the CLI and scoring
+gemicro-deep-research = { path = "../agents/gemicro-deep-research" }
+gemicro-react = { path = "../agents/gemicro-react" }
+gemicro-simple-qa = { path = "../agents/gemicro-simple-qa" }
+gemicro-tool-agent = { path = "../agents/gemicro-tool-agent" }
+gemicro-judge = { path = "../agents/gemicro-judge" }
 tokio = { workspace = true }
 futures-util = { workspace = true }
 serde = { workspace = true }

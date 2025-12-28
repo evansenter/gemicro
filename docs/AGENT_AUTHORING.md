@@ -25,20 +25,21 @@ Following Evergreen principles:
 
 ## Quick Start Checklist
 
+- [ ] Create new agent crate: `agents/gemicro-{agent-name}/`
+- [ ] Add crate to workspace `Cargo.toml` members
 - [ ] Create agent-specific config struct with `validate()` method
 - [ ] Define event types as strings (constants are internal, NOT exported)
 - [ ] Implement `Agent` trait (`name`, `description`, `execute`)
 - [ ] Use `async_stream::try_stream!` for streaming
 - [ ] Handle timeouts and cancellation
 - [ ] Add unit tests for config validation
-- [ ] Add integration tests (`#[ignore]`)
-- [ ] Export agent struct and config from `gemicro-core/src/agent/mod.rs` and `lib.rs`
+- [ ] Add integration tests (`#[ignore]`) in `tests/integration.rs`
 
 ## Core Types
 
 ### Agent Trait
 
-Location: `gemicro-core/src/agent/mod.rs:87-99`
+Location: `gemicro-core/src/agent.rs`
 
 ```rust
 pub trait Agent: Send + Sync {
@@ -61,7 +62,7 @@ pub type AgentStream<'a> = Pin<Box<dyn Stream<Item = Result<AgentUpdate, AgentEr
 
 ### AgentContext
 
-Location: `gemicro-core/src/agent/mod.rs:101-154`
+Location: `gemicro-core/src/agent.rs`
 
 Contains **only** cross-agent resources:
 
@@ -76,7 +77,7 @@ pub struct AgentContext {
 
 ### AgentUpdate
 
-Location: `gemicro-core/src/update.rs:39-58`
+Location: `gemicro-core/src/update.rs`
 
 ```rust
 pub struct AgentUpdate {
@@ -89,7 +90,7 @@ pub struct AgentUpdate {
 
 ## Complete Example: SimpleQaAgent
 
-The `SimpleQaAgent` is a minimal reference implementation. See the full source at `gemicro-core/src/agent/simple_qa.rs`.
+The `SimpleQaAgent` is a minimal reference implementation. See the full source at `agents/gemicro-simple-qa/src/lib.rs`.
 
 ### 1. Event Type Constants (Internal Only)
 
@@ -114,7 +115,7 @@ yield AgentUpdate::custom(
 ### 2. Configuration
 
 ```rust
-// Location: gemicro-core/src/agent/simple_qa.rs:33-97
+// Location: agents/gemicro-simple-qa/src/lib.rs
 
 #[derive(Debug, Clone)]
 pub struct SimpleQaConfig {
@@ -145,7 +146,7 @@ impl SimpleQaConfig {
 ### 3. Agent Struct and Constructor
 
 ```rust
-// Location: gemicro-core/src/agent/simple_qa.rs:124-141
+// Location: agents/gemicro-simple-qa/src/lib.rs
 
 pub struct SimpleQaAgent {
     config: SimpleQaConfig,
@@ -162,7 +163,7 @@ impl SimpleQaAgent {
 ### 4. Implement Agent Trait
 
 ```rust
-// Location: gemicro-core/src/agent/simple_qa.rs:143-190
+// Location: agents/gemicro-simple-qa/src/lib.rs
 
 impl Agent for SimpleQaAgent {
     fn name(&self) -> &str {
@@ -276,7 +277,7 @@ AgentUpdate::custom("my_new_agent_event", ...)  // ✅ Extensible
 
 ### Helper Functions
 
-Location: `gemicro-core/src/agent/mod.rs:160-214`
+Location: `gemicro-core/src/agent.rs`
 
 ```rust
 // Calculate remaining time from a total budget
@@ -377,7 +378,7 @@ mod tests {
 
 ### Integration Tests
 
-Location: `gemicro-core/tests/simple_qa_integration.rs`
+Location: `agents/gemicro-simple-qa/tests/integration.rs`
 
 ```rust
 #[tokio::test]
@@ -410,7 +411,7 @@ async fn test_simple_qa_full_flow() {
 
 Run integration tests with:
 ```bash
-cargo test --package gemicro-core -- --include-ignored
+cargo test --package gemicro-simple-qa -- --include-ignored
 ```
 
 ## Registry Integration
@@ -501,24 +502,56 @@ match update.event_type.as_str() {
 
 ## File Structure for New Agents
 
+Each agent gets its own crate in the `agents/` subdirectory:
+
 ```
-gemicro-core/
-├── src/
-│   ├── agent/
-│   │   ├── mod.rs          # Add: mod my_agent; pub use my_agent::{MyAgent, MyConfig};
-│   │   ├── deep_research.rs
-│   │   ├── simple_qa.rs    # Reference implementation
-│   │   └── my_agent.rs     # Your new agent (event constants stay internal)
-│   └── lib.rs              # Add agent struct and config to exports
-└── tests/
-    └── my_agent_integration.rs  # Integration tests (use string literals)
+agents/
+└── gemicro-my-agent/
+    ├── Cargo.toml           # Depends on gemicro-core only
+    ├── src/
+    │   ├── lib.rs           # Public exports: MyAgent, MyConfig
+    │   ├── agent.rs         # Agent implementation (optional split)
+    │   └── config.rs        # Config struct (optional split)
+    └── tests/
+        └── integration.rs   # Integration tests (#[ignore])
 ```
 
-**Note:** Only export the agent struct and config - event constants remain internal.
+**Cargo.toml template:**
+
+```toml
+[package]
+name = "gemicro-my-agent"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+gemicro-core = { path = "../../gemicro-core" }
+async-stream = "0.3"
+futures-util = "0.3"
+log = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.0", features = ["time", "sync"] }
+
+[dev-dependencies]
+tokio = { version = "1.0", features = ["rt-multi-thread", "macros"] }
+```
+
+**Add to workspace Cargo.toml:**
+
+```toml
+[workspace]
+members = [
+    # ... existing members
+    "agents/gemicro-my-agent",
+]
+```
+
+**Note:** Each agent crate depends ONLY on gemicro-core, never on other agent crates. This enforces hermetic isolation at compile time.
 
 ## See Also
 
-- `gemicro-core/src/agent/simple_qa.rs` - Full reference implementation
-- `gemicro-core/src/agent/deep_research.rs` - Complex multi-phase example
-- `gemicro-core/tests/simple_qa_integration.rs` - Integration test examples
-- `CLAUDE.md` - Project design philosophy
+- `agents/gemicro-simple-qa/src/lib.rs` - Full reference implementation
+- `agents/gemicro-deep-research/src/` - Complex multi-phase example
+- `agents/gemicro-simple-qa/tests/integration.rs` - Integration test examples
+- `CLAUDE.md` - Project design philosophy and crate responsibilities

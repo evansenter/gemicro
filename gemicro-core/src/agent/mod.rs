@@ -1,4 +1,4 @@
-//! Agent infrastructure and implementations.
+//! Agent infrastructure.
 //!
 //! This module provides the core [`Agent`] trait for building AI agents,
 //! along with the [`AgentContext`] for shared resources across agent executions.
@@ -12,42 +12,31 @@
 //! - **Minimal shared context**: [`AgentContext`] contains only cross-agent resources (LLM client)
 //! - **Streaming-first**: Real-time observability via async streams
 //!
-//! ## Available Agents
+//! ## Agent Implementations
 //!
-//! - [`DeepResearchAgent`]: Decomposes queries, executes sub-queries in parallel, synthesizes results
-//! - [`SimpleQaAgent`]: Minimal single-call agent for reference/demonstration
-//! - [`ReactAgent`]: Reasoning + Acting pattern with iterative tool use
-//! - [`ToolAgent`]: Native function calling via rust-genai's `#[tool]` macro
+//! Agents are in separate crates for hermetic isolation:
+//! - `gemicro-deep-research`: Decomposes queries, executes sub-queries in parallel, synthesizes
+//! - `gemicro-react`: Reasoning + Acting pattern with iterative tool use
+//! - `gemicro-simple-qa`: Minimal single-call agent for reference/demonstration
+//! - `gemicro-tool-agent`: Native function calling via rust-genai's `#[tool]` macro
+//! - `gemicro-judge`: LLM-based semantic evaluation for scoring
 //!
 //! ## Example
 //!
 //! ```no_run
-//! use gemicro_core::{Agent, AgentContext, DeepResearchAgent, ResearchConfig, LlmClient, LlmConfig};
-//! use futures_util::StreamExt;
+//! use gemicro_core::{Agent, AgentContext, AgentStream, AgentUpdate, AgentError, LlmClient, LlmConfig};
 //!
-//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! let genai_client = rust_genai::Client::builder("api-key".to_string()).build();
-//! let context = AgentContext::new(LlmClient::new(genai_client, LlmConfig::default()));
-//! let agent = DeepResearchAgent::new(ResearchConfig::default())?;
+//! struct MyAgent;
 //!
-//! let stream = agent.execute("What is Rust?", context);
-//! futures_util::pin_mut!(stream);
-//! while let Some(update) = stream.next().await {
-//!     println!("{:?}", update?);
+//! impl Agent for MyAgent {
+//!     fn name(&self) -> &str { "my_agent" }
+//!     fn description(&self) -> &str { "A custom agent" }
+//!     fn execute(&self, query: &str, context: AgentContext) -> AgentStream<'_> {
+//!         // Implementation would return a stream of updates
+//!         # todo!()
+//!     }
 //! }
-//! # Ok(())
-//! # }
 //! ```
-
-mod deep_research;
-mod react;
-mod simple_qa;
-mod tool_agent;
-
-pub use deep_research::{DeepResearchAgent, DeepResearchEventExt, SubQueryResult};
-pub use react::ReactAgent;
-pub use simple_qa::{SimpleQaAgent, SimpleQaConfig};
-pub use tool_agent::{ToolAgent, ToolAgentConfig, ToolType};
 
 use crate::error::AgentError;
 use crate::llm::LlmClient;
@@ -163,13 +152,15 @@ impl AgentContext {
 }
 
 // ============================================================================
-// Internal helper functions (used by agents in this module)
+// Helper functions for agent implementations
 // ============================================================================
 
 /// Calculate remaining time from a total timeout budget.
 ///
 /// Returns an error if the timeout has already been exceeded.
-pub(crate) fn remaining_time(
+///
+/// This is a public helper for agent implementations in separate crates.
+pub fn remaining_time(
     start: Instant,
     total_timeout: Duration,
     phase: &str,
@@ -186,7 +177,9 @@ pub(crate) fn remaining_time(
 }
 
 /// Create a timeout error with current elapsed time.
-pub(crate) fn timeout_error(start: Instant, total_timeout: Duration, phase: &str) -> AgentError {
+///
+/// This is a public helper for agent implementations in separate crates.
+pub fn timeout_error(start: Instant, total_timeout: Duration, phase: &str) -> AgentError {
     AgentError::Timeout {
         elapsed_ms: start.elapsed().as_millis() as u64,
         timeout_ms: total_timeout.as_millis() as u64,
@@ -197,7 +190,9 @@ pub(crate) fn timeout_error(start: Instant, total_timeout: Duration, phase: &str
 /// Execute a future with timeout and cancellation support.
 ///
 /// Returns the future's result, or an error if cancelled/timed out.
-pub(crate) async fn with_timeout_and_cancellation<F, T>(
+///
+/// This is a public helper for agent implementations in separate crates.
+pub async fn with_timeout_and_cancellation<F, T>(
     future: F,
     timeout: Duration,
     cancellation_token: &CancellationToken,

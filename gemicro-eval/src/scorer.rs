@@ -201,9 +201,9 @@ impl Scorer for LlmJudgeScorer {
     }
 
     fn score(&self, predicted: &str, ground_truth: &str) -> f64 {
-        use crate::judge::{JudgeConfig, JudgeInput, LlmJudgeAgent};
         use futures_util::StreamExt;
         use gemicro_core::{Agent, AgentContext};
+        use gemicro_judge::{JudgeConfig, JudgeInput, LlmJudgeAgent};
 
         // Create judge agent and input
         let agent = LlmJudgeAgent::new(JudgeConfig::default());

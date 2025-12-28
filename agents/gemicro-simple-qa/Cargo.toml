@@ -1,0 +1,22 @@
+[package]
+name = "gemicro-simple-qa"
+version = "0.1.0"
+edition = "2021"
+description = "Simple QA agent: minimal reference implementation for agent authoring"
+
+[dependencies]
+gemicro-core = { path = "../../gemicro-core" }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+async-stream = { workspace = true }
+futures-util = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+log = { workspace = true }
+
+[dev-dependencies]
+rstest = { workspace = true }
+rust-genai = { workspace = true }
+tokio = { workspace = true, features = ["test-util", "macros"] }
+tokio-util = { workspace = true }
+futures-util = { workspace = true }

@@ -10,14 +10,11 @@
 //! - Uses structured output for reliable JSON responses
 //! - Can be registered in `AgentRegistry` for A/B testing of different judges
 //!
-//! This module lives in `gemicro-eval` (not `gemicro-core`) to demonstrate that
-//! agents can be defined in any crate that depends on `gemicro-core`.
-//!
 //! # Example
 //!
 //! ```no_run
 //! use gemicro_core::{Agent, AgentContext, LlmClient, LlmConfig};
-//! use gemicro_eval::{LlmJudgeAgent, JudgeConfig, JudgeInput};
+//! use gemicro_judge::{LlmJudgeAgent, JudgeConfig, JudgeInput};
 //! use futures_util::StreamExt;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -43,16 +40,15 @@
 //! # }
 //! ```
 
-use gemicro_core::agent::{Agent, AgentContext, AgentStream};
-use gemicro_core::error::AgentError;
-use gemicro_core::extract_total_tokens;
-use gemicro_core::llm::LlmRequest;
-use gemicro_core::update::AgentUpdate;
+use gemicro_core::{Agent, AgentContext, AgentError, AgentStream, AgentUpdate, LlmRequest};
 
 use async_stream::try_stream;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::time::Duration;
+
+// Re-export core types for convenience
+pub use gemicro_core::{AgentError as Error, AgentUpdate as Update};
 
 /// Event type for judge starting evaluation
 pub const EVENT_JUDGE_STARTED: &str = "judge_started";
@@ -248,7 +244,7 @@ impl Agent for LlmJudgeAgent {
                 )))?;
 
             // Extract token count
-            let tokens_used = extract_total_tokens(&response);
+            let tokens_used = gemicro_core::extract_total_tokens(&response);
 
             // Emit result event
             yield AgentUpdate::custom(

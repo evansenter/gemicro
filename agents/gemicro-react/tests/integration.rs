@@ -1,13 +1,14 @@
 //! Integration tests for ReactAgent
 //!
 //! These tests require a valid GEMINI_API_KEY environment variable.
-//! Run with: cargo test -p gemicro-core -- --include-ignored
+//! Run with: cargo test -p gemicro-react -- --include-ignored
 
 mod common;
 
 use common::{create_test_context, get_api_key};
 use futures_util::StreamExt;
-use gemicro_core::{AgentError, ReactAgent, ReactConfig};
+use gemicro_core::AgentError;
+use gemicro_react::{ReactAgent, ReactConfig};
 use std::time::Duration;
 
 /// Test the full ReAct flow with a calculator query
@@ -156,7 +157,6 @@ async fn test_react_multi_step_calculation() {
         }
     }
 
-    // Should have used calculator at least once (may combine operations)
     assert!(
         calculator_uses >= 1,
         "Should have used calculator at least once"
@@ -208,13 +208,13 @@ async fn test_react_event_ordering() {
         "First event should be react_started"
     );
 
-    // Verify react_complete is present (followed by final_result)
+    // Verify react_complete is present
     assert!(
         events.contains(&"react_complete".to_string()),
         "Events should contain react_complete"
     );
 
-    // Verify final_result is last (emitted after react_complete for harness compatibility)
+    // Verify final_result is last
     assert_eq!(
         events.last(),
         Some(&"final_result".to_string()),
@@ -236,7 +236,6 @@ async fn test_react_event_ordering() {
         .map(|(i, _)| i)
         .collect();
 
-    // Each thought should come before the corresponding action
     for (thought_pos, action_pos) in thought_positions.iter().zip(action_positions.iter()) {
         assert!(
             thought_pos < action_pos,
@@ -256,7 +255,6 @@ async fn test_react_max_iterations_emits_final_result() {
 
     let context = create_test_context(&api_key);
 
-    // Configure with max_iterations=1 and a complex query that won't complete
     let config = ReactConfig {
         max_iterations: 1,
         available_tools: vec!["calculator".to_string()],
@@ -266,7 +264,6 @@ async fn test_react_max_iterations_emits_final_result() {
     };
 
     let agent = ReactAgent::new(config).expect("Should create agent");
-    // Query complex enough that it won't complete in 1 iteration
     let stream = agent.execute(
         "Calculate the factorial of 5, then multiply by 2, then add 100",
         context,
@@ -282,7 +279,7 @@ async fn test_react_max_iterations_emits_final_result() {
         }
     }
 
-    // Verify react_max_iterations was emitted (hit the limit)
+    // Verify react_max_iterations was emitted
     assert!(
         events.contains(&"react_max_iterations".to_string()),
         "Should emit react_max_iterations when hitting limit. Events: {:?}",
@@ -296,7 +293,7 @@ async fn test_react_max_iterations_emits_final_result() {
         events
     );
 
-    // Verify final_result is last (event contract requirement)
+    // Verify final_result is last
     assert_eq!(
         events.last(),
         Some(&"final_result".to_string()),

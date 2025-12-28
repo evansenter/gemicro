@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Gemicro is a CLI agent exploration platform for experimenting with AI agent implementation patterns, powered by the Gemini API via the rust-genai library.
 
-**Key Architecture**: Four-crate workspace with layered dependencies
+**Key Architecture**: Nine-crate workspace with layered dependencies (5 agent crates in `agents/` subdirectory)
 
 **Current Status**: Core implementation complete. Remaining work tracked in [GitHub Issues](https://github.com/evansenter/gemicro/issues).
 
@@ -38,7 +38,7 @@ cargo fmt --all -- --check
 cargo doc --workspace --no-deps
 
 # Run the deep research example
-cargo run -p gemicro-core --example deep_research
+cargo run -p gemicro-deep-research --example deep_research
 
 # Run specific crate tests
 cargo test -p gemicro-runner
@@ -72,7 +72,9 @@ REPL commands: `/help`, `/agent [name]`, `/history`, `/clear`, `/reload`, `/quit
 ## Crate Layers
 
 ```text
-gemicro-core (agents, events, LLM)
+gemicro-core (Agent trait, events, LLM - GENERIC ONLY)
+    ↓
+agents/* (one crate per agent - hermetic isolation)
     ↓
 gemicro-runner (execution state, metrics, runner)
     ↓
@@ -82,10 +84,48 @@ gemicro-cli (terminal rendering)
 
 | Crate | Purpose |
 |-------|---------|
-| **gemicro-core** | Platform-agnostic library: Agent trait, AgentUpdate events, LlmClient, conversation history. Agents: DeepResearchAgent, ReActAgent, SimpleQaAgent |
+| **gemicro-core** | Platform-agnostic library: Agent trait, AgentContext, AgentUpdate events, LlmClient, conversation history. **No agent implementations.** |
+| **agents/gemicro-deep-research** | DeepResearchAgent: query decomposition, parallel sub-query execution, synthesis |
+| **agents/gemicro-react** | ReactAgent: Thought → Action → Observation reasoning loops |
+| **agents/gemicro-simple-qa** | SimpleQaAgent: minimal reference implementation |
+| **agents/gemicro-tool-agent** | ToolAgent: native function calling with calculator/datetime tools |
+| **agents/gemicro-judge** | LlmJudgeAgent: LLM-based evaluation scoring |
 | **gemicro-runner** | Headless execution runtime: ExecutionState, AgentRunner, AgentRegistry, metrics collection |
-| **gemicro-eval** | Evaluation framework: HotpotQA/custom datasets, scorers (Contains, LLM Judge), LlmJudgeAgent |
+| **gemicro-eval** | Evaluation framework: HotpotQA/custom datasets, scorers (Contains, LLM Judge) |
 | **gemicro-cli** | Terminal UI: indicatif progress display, rustyline REPL, markdown rendering |
+
+## Crate Responsibilities
+
+Each crate has a specific purpose. Before adding code, verify it belongs in that crate.
+
+| Crate | Contains | Does NOT Contain |
+|-------|----------|------------------|
+| **gemicro-core** | Agent trait, AgentContext, AgentUpdate, LlmClient, LlmConfig, errors, utilities | Agent implementations, agent-specific configs |
+| **agents/gemicro-deep-research** | DeepResearchAgent, ResearchConfig, DeepResearchEventExt | Other agents, core infrastructure |
+| **agents/gemicro-react** | ReactAgent, ReactConfig | Other agents, core infrastructure |
+| **agents/gemicro-simple-qa** | SimpleQaAgent, SimpleQaConfig | Other agents, core infrastructure |
+| **agents/gemicro-tool-agent** | ToolAgent, ToolAgentConfig, ToolType | Other agents, core infrastructure |
+| **agents/gemicro-judge** | LlmJudgeAgent, JudgeConfig | Other agents, core infrastructure |
+| **gemicro-runner** | AgentRunner, AgentRegistry, generic execution infrastructure | Agent implementations |
+| **gemicro-eval** | EvalHarness, Scorers, Datasets | Agent implementations |
+| **gemicro-cli** | Terminal UI, REPL, argument parsing | Agent implementations |
+
+### Checklist: Before Adding Code
+
+- [ ] Is this a new agent? → Create new `agents/gemicro-{agent-name}` crate
+- [ ] Is this agent-specific config/events? → Put in the agent's crate
+- [ ] Is this cross-agent infrastructure? → gemicro-core
+- [ ] Is this evaluation-specific? → gemicro-eval
+- [ ] Is this CLI/rendering? → gemicro-cli
+- [ ] Is this execution tracking? → gemicro-runner (keep generic)
+
+### Agent Crate Independence
+
+Each agent crate:
+- Depends ONLY on gemicro-core (never on other agent crates)
+- Contains its own config, prompts, event accessors
+- Has its own tests and examples
+- Can be versioned and released independently
 
 ## Core Design Philosophy: Evergreen-Inspired Soft-Typing
 
@@ -223,26 +263,46 @@ gemicro/
 ├── README.md                     # Public documentation
 ├── docs/AGENT_AUTHORING.md       # Guide for implementing new agents
 │
-├── gemicro-core/                 # Platform-agnostic library
+├── agents/                       # Agent crates (one per agent, hermetic)
+│   ├── gemicro-deep-research/    # DeepResearchAgent
+│   │   ├── src/
+│   │   │   ├── lib.rs            # Public exports
+│   │   │   ├── agent.rs          # Agent implementation
+│   │   │   ├── config.rs         # ResearchConfig, ResearchPrompts
+│   │   │   └── events.rs         # DeepResearchEventExt, SubQueryResult
+│   │   └── tests/integration.rs
+│   ├── gemicro-react/            # ReactAgent
+│   │   ├── src/
+│   │   │   ├── lib.rs
+│   │   │   ├── agent.rs
+│   │   │   └── config.rs         # ReactConfig, ReactPrompts
+│   │   └── tests/integration.rs
+│   ├── gemicro-simple-qa/        # SimpleQaAgent (reference impl)
+│   │   ├── src/lib.rs
+│   │   └── tests/integration.rs
+│   ├── gemicro-tool-agent/       # ToolAgent (function calling)
+│   │   ├── src/
+│   │   │   ├── lib.rs
+│   │   │   ├── agent.rs
+│   │   │   ├── config.rs
+│   │   │   └── tools.rs          # calculator(), current_datetime()
+│   │   └── tests/integration.rs
+│   └── gemicro-judge/            # LlmJudgeAgent (evaluation)
+│       └── src/lib.rs
+│
+├── gemicro-core/                 # Platform-agnostic library (GENERIC ONLY)
 │   ├── src/
 │   │   ├── lib.rs                # Public API exports
-│   │   ├── agent/                # Agent implementations
-│   │   │   ├── mod.rs            # Agent trait, AgentContext, helpers
-│   │   │   ├── deep_research.rs  # DeepResearchAgent (decompose → parallel → synthesize)
-│   │   │   ├── react.rs          # ReActAgent (Thought → Action → Observation loops)
-│   │   │   └── simple_qa.rs      # SimpleQaAgent (reference implementation)
+│   │   ├── agent.rs              # Agent trait, AgentContext, helpers (NO implementations)
 │   │   ├── update.rs             # Soft-typed AgentUpdate
 │   │   ├── error.rs              # Error types (#[non_exhaustive])
-│   │   ├── config.rs             # LlmConfig + agent-specific configs
+│   │   ├── config.rs             # LlmConfig only (no agent configs)
 │   │   ├── llm.rs                # LLM client (buffered + streaming)
 │   │   ├── history.rs            # ConversationHistory, HistoryEntry
 │   │   └── utils.rs              # Shared utilities (truncation, etc.)
-│   ├── tests/
-│   │   ├── llm_integration.rs    # LLM integration tests (#[ignore])
-│   │   ├── agent_integration.rs  # Agent integration tests (#[ignore])
-│   │   └── common/mod.rs         # Shared test helpers
-│   └── examples/
-│       └── deep_research.rs      # Full agent example with progress display
+│   └── tests/
+│       ├── llm_integration.rs    # LLM integration tests (#[ignore])
+│       └── common/mod.rs         # Shared test helpers
 │
 ├── gemicro-runner/               # Headless execution runtime
 │   └── src/
@@ -259,8 +319,7 @@ gemicro/
 │       ├── dataset.rs            # HotpotQA, JsonFileDataset
 │       ├── scorer.rs             # Contains, LlmJudgeScorer
 │       ├── harness.rs            # EvalHarness, EvalConfig
-│       ├── results.rs            # EvalSummary, EvalResult
-│       └── judge.rs              # LlmJudgeAgent for evaluation
+│       └── results.rs            # EvalSummary, EvalResult
 │
 └── gemicro-cli/                  # Terminal UI binary
     └── src/
@@ -299,16 +358,17 @@ gemicro/
 
 ### Adding a New Agent Type
 
-See [`docs/AGENT_AUTHORING.md`](docs/AGENT_AUTHORING.md) for a complete walkthrough. Reference implementation: `SimpleQaAgent` in `gemicro-core/src/agent/simple_qa.rs`.
+See [`docs/AGENT_AUTHORING.md`](docs/AGENT_AUTHORING.md) for a complete walkthrough. Reference implementation: `SimpleQaAgent` in `agents/gemicro-simple-qa/src/lib.rs`.
 
 Quick checklist:
-1. Create agent-specific config struct (e.g., `ReactConfig`) with `validate()` method
-2. Define event types as strings (e.g., `"react_step"`) - no exports needed
-3. Implement `Agent` trait using `async_stream::try_stream!`
-4. Handle timeouts via `remaining_time()` and `with_timeout_and_cancellation()`
-5. Add unit tests for config, integration tests (`#[ignore]`) for execution
-6. Export agent struct and config from `mod.rs` and `lib.rs`
-7. **NO CHANGES TO CORE TYPES REQUIRED** ✅
+1. Create new crate: `agents/gemicro-{agent-name}/`
+2. Add to workspace `Cargo.toml` members
+3. Create agent-specific config struct with `validate()` method
+4. Define event types as strings (e.g., `"react_step"`) - no exports needed
+5. Implement `Agent` trait using `async_stream::try_stream!`
+6. Handle timeouts via `remaining_time()` and `with_timeout_and_cancellation()`
+7. Add unit tests for config, integration tests (`#[ignore]`) for execution
+8. **NO CHANGES TO CORE TYPES REQUIRED** ✅
 
 ### Adding a New Event Type
 

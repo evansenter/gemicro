@@ -7,7 +7,7 @@
 //!
 //! ```no_run
 //! use gemicro_runner::AgentRegistry;
-//! use gemicro_core::{DeepResearchAgent, ResearchConfig};
+//! use gemicro_deep_research::{DeepResearchAgent, ResearchConfig};
 //!
 //! let mut registry = AgentRegistry::new();
 //! registry.register("deep_research", || {
@@ -37,7 +37,7 @@ pub type AgentFactory = Arc<dyn Fn() -> Box<dyn Agent> + Send + Sync>;
 ///
 /// ```no_run
 /// use gemicro_runner::AgentRegistry;
-/// use gemicro_core::{DeepResearchAgent, ResearchConfig};
+/// use gemicro_deep_research::{DeepResearchAgent, ResearchConfig};
 ///
 /// let mut registry = AgentRegistry::new();
 /// registry.register("deep_research", || {
@@ -73,7 +73,7 @@ impl AgentRegistry {
     ///
     /// ```no_run
     /// use gemicro_runner::AgentRegistry;
-    /// use gemicro_core::{DeepResearchAgent, ResearchConfig};
+    /// use gemicro_deep_research::{DeepResearchAgent, ResearchConfig};
     ///
     /// let mut registry = AgentRegistry::new();
     /// registry.register("deep_research", || {

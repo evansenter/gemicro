@@ -2,10 +2,7 @@
 name = "gemicro-core"
 version = "0.1.0"
 edition = "2021"
-
-[[example]]
-name = "deep_research"
-path = "examples/deep_research.rs"
+description = "Core library for gemicro AI agent exploration platform"
 
 [dependencies]
 rust-genai = { workspace = true }
@@ -23,3 +20,8 @@ meval = "0.2"
 
 [dev-dependencies]
 rstest = { workspace = true }
+# Agent crates needed for integration tests
+gemicro-deep-research = { path = "../agents/gemicro-deep-research" }
+gemicro-react = { path = "../agents/gemicro-react" }
+gemicro-simple-qa = { path = "../agents/gemicro-simple-qa" }
+gemicro-tool-agent = { path = "../agents/gemicro-tool-agent" }

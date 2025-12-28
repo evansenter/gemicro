@@ -1,17 +1,19 @@
 //! Integration tests for DeepResearchAgent
 //!
 //! These tests require a valid GEMINI_API_KEY environment variable.
-//! They are skipped if the API key is not set.
+//! Run with: cargo test -p gemicro-deep-research -- --include-ignored
 
 mod common;
 
 use common::{create_test_context, create_test_context_with_cancellation, get_api_key};
 use futures_util::StreamExt;
-use gemicro_core::{AgentError, DeepResearchAgent, DeepResearchEventExt, ResearchConfig};
+use gemicro_core::AgentError;
+use gemicro_deep_research::{DeepResearchAgent, DeepResearchEventExt, ResearchConfig};
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
 #[tokio::test]
+#[ignore] // Requires GEMINI_API_KEY
 async fn test_deep_research_agent_full_flow() {
     let Some(api_key) = get_api_key() else {
         eprintln!("Skipping test: GEMINI_API_KEY not set");
@@ -133,6 +135,7 @@ async fn test_deep_research_agent_full_flow() {
 }
 
 #[tokio::test]
+#[ignore] // Requires GEMINI_API_KEY
 async fn test_agent_event_ordering() {
     let Some(api_key) = get_api_key() else {
         eprintln!("Skipping test: GEMINI_API_KEY not set");
@@ -218,9 +221,6 @@ async fn test_agent_invalid_config() {
 }
 
 /// Test that cancellation works correctly and returns AgentError::Cancelled
-///
-/// Note: This test depends on LLM behavior and may be flaky if the LLM returns
-/// invalid responses. Such failures are logged but don't fail the test.
 #[tokio::test]
 #[ignore] // Requires GEMINI_API_KEY
 async fn test_cancellation_during_execution() {
@@ -246,7 +246,6 @@ async fn test_cancellation_during_execution() {
     );
     futures_util::pin_mut!(stream);
 
-    // Track whether we've seen specific events before cancellation
     let mut seen_decomposition_started = false;
     let mut seen_sub_query_started = false;
     let mut cancelled_correctly = false;
@@ -262,8 +261,6 @@ async fn test_cancellation_during_execution() {
 
                 if update.event_type == "sub_query_started" {
                     seen_sub_query_started = true;
-                    // Cancel after we see the first sub-query start
-                    // This ensures we're cancelling mid-execution
                     println!("Triggering cancellation...");
                     cancellation_token.cancel();
                 }
@@ -274,8 +271,6 @@ async fn test_cancellation_during_execution() {
                 break;
             }
             Err(e) => {
-                // LLM API errors (rate limits, parse failures, etc.) can happen
-                // and aren't what we're testing. Log and skip.
                 eprintln!(
                     "Test skipped due to LLM error (not a cancellation issue): {:?}",
                     e
@@ -285,7 +280,6 @@ async fn test_cancellation_during_execution() {
         }
     }
 
-    // Verify the test behaved as expected (only if we didn't skip)
     assert!(
         seen_decomposition_started,
         "Should have seen decomposition_started before cancellation"
@@ -302,6 +296,7 @@ async fn test_cancellation_during_execution() {
 
 /// Test that pre-cancelled token causes early termination
 #[tokio::test]
+#[ignore] // Requires GEMINI_API_KEY
 async fn test_immediate_cancellation() {
     let Some(api_key) = get_api_key() else {
         eprintln!("Skipping test: GEMINI_API_KEY not set");
@@ -309,7 +304,6 @@ async fn test_immediate_cancellation() {
     };
 
     let cancellation_token = CancellationToken::new();
-    // Cancel immediately before starting
     cancellation_token.cancel();
 
     let context = create_test_context_with_cancellation(&api_key, cancellation_token);
@@ -324,8 +318,6 @@ async fn test_immediate_cancellation() {
     let stream = agent.execute("What is 2+2?", context);
     futures_util::pin_mut!(stream);
 
-    // First item may be decomposition_started (yielded before cancellation check),
-    // then we should get Cancelled during decomposition phase
     let mut got_cancelled = false;
     let mut event_count = 0;
 
@@ -334,7 +326,6 @@ async fn test_immediate_cancellation() {
         match result {
             Ok(update) => {
                 println!("[{}] {}", update.event_type, update.message);
-                // Should not proceed past decomposition_started with a pre-cancelled token
                 assert!(
                     update.event_type == "decomposition_started",
                     "Should only see decomposition_started before cancellation, got {}",

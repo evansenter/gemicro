@@ -3,12 +3,11 @@
 //! The ReAct pattern (Reasoning + Acting) iteratively generates thoughts,
 //! chooses actions (tools), and observes results until a final answer is reached.
 
-use super::{remaining_time, timeout_error, with_timeout_and_cancellation, Agent, AgentContext};
 use crate::config::ReactConfig;
-use crate::error::AgentError;
-use crate::llm::LlmRequest;
-use crate::update::{AgentUpdate, ResultMetadata};
-use crate::utils::extract_total_tokens;
+use gemicro_core::{
+    remaining_time, timeout_error, with_timeout_and_cancellation, Agent, AgentContext, AgentError,
+    AgentStream, AgentUpdate, LlmRequest, ResultMetadata,
+};
 
 use async_stream::try_stream;
 use futures_util::Stream;
@@ -48,7 +47,8 @@ const EVENT_REACT_MAX_ITERATIONS: &str = "react_max_iterations";
 /// # Example
 ///
 /// ```no_run
-/// use gemicro_core::{AgentContext, ReactAgent, ReactConfig, LlmClient, LlmConfig};
+/// use gemicro_react::{ReactAgent, ReactConfig};
+/// use gemicro_core::{AgentContext, LlmClient, LlmConfig};
 /// use futures_util::StreamExt;
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -143,7 +143,7 @@ impl ReactAgent {
                 ).await?;
 
                 // Track tokens
-                if let Some(tokens) = extract_total_tokens(&response) {
+                if let Some(tokens) = gemicro_core::extract_total_tokens(&response) {
                     total_tokens += tokens;
                 } else {
                     tokens_unavailable += 1;
@@ -191,7 +191,6 @@ impl ReactAgent {
                     );
 
                     // Emit standard final_result for ExecutionState/harness compatibility
-                    use crate::update::ResultMetadata;
                     let metadata = ResultMetadata {
                         total_tokens,
                         tokens_unavailable_count: tokens_unavailable,
@@ -396,7 +395,7 @@ impl Agent for ReactAgent {
         "Reasoning + Acting agent that iteratively thinks, acts with tools, and observes results"
     }
 
-    fn execute(&self, query: &str, context: AgentContext) -> super::AgentStream<'_> {
+    fn execute(&self, query: &str, context: AgentContext) -> AgentStream<'_> {
         Box::pin(ReactAgent::execute(self, query, context))
     }
 }
@@ -414,6 +413,7 @@ fn truncate_for_error(s: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::ReactConfig;
     use rstest::rstest;
 
     // Calculator tests
