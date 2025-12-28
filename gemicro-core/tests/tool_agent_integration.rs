@@ -35,12 +35,17 @@ async fn test_tool_agent_calculator() {
 
     let mut events: Vec<String> = Vec::new();
     let mut final_answer = String::new();
+    let mut tool_complete_data: Option<serde_json::Value> = None;
 
     while let Some(result) = stream.next().await {
         match result {
             Ok(update) => {
                 println!("[{}] {}", update.event_type, update.message);
                 events.push(update.event_type.clone());
+
+                if update.event_type == "tool_agent_complete" {
+                    tool_complete_data = Some(update.data.clone());
+                }
 
                 if update.event_type == "final_result" {
                     if let Some(result) = update.as_final_result() {
@@ -74,6 +79,67 @@ async fn test_tool_agent_calculator() {
         "Answer should contain 100, got: {}",
         final_answer
     );
+
+    // Verify tool execution metadata in tool_agent_complete event
+    let data = tool_complete_data.expect("Should have tool_agent_complete data");
+
+    // Verify tool_call_count exists and is at least 1
+    let tool_call_count = data
+        .get("tool_call_count")
+        .and_then(|v| v.as_u64())
+        .expect("Should have tool_call_count");
+    assert!(
+        tool_call_count >= 1,
+        "Should have at least 1 tool call, got: {}",
+        tool_call_count
+    );
+
+    // Verify tool_calls array exists and has entries
+    let tool_calls = data
+        .get("tool_calls")
+        .and_then(|v| v.as_array())
+        .expect("Should have tool_calls array");
+    assert!(
+        !tool_calls.is_empty(),
+        "tool_calls array should not be empty"
+    );
+
+    // Verify first tool call has expected fields
+    let first_call = &tool_calls[0];
+    assert!(
+        first_call.get("name").is_some(),
+        "Tool call should have 'name' field"
+    );
+    assert!(
+        first_call.get("call_id").is_some(),
+        "Tool call should have 'call_id' field"
+    );
+    assert!(
+        first_call.get("result").is_some(),
+        "Tool call should have 'result' field"
+    );
+    assert!(
+        first_call.get("duration_ms").is_some(),
+        "Tool call should have 'duration_ms' field"
+    );
+
+    // Verify calculator tool was called
+    let tool_names: Vec<&str> = tool_calls
+        .iter()
+        .filter_map(|c| c.get("name").and_then(|n| n.as_str()))
+        .collect();
+    assert!(
+        tool_names.contains(&"calculator"),
+        "Should have called calculator tool, got: {:?}",
+        tool_names
+    );
+
+    // Verify duration is non-zero
+    let duration_ms = data
+        .get("duration_ms")
+        .and_then(|v| v.as_u64())
+        .expect("Should have duration_ms");
+    assert!(duration_ms > 0, "duration_ms should be non-zero");
 }
 
 #[tokio::test]

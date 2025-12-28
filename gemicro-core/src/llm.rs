@@ -447,6 +447,10 @@ impl LlmClient {
                                 // Final response - stream will end after this
                                 // We could extract usage metadata here if needed
                             }
+                            _ => {
+                                // Handle future StreamChunk variants gracefully
+                                log::debug!("Unknown StreamChunk variant received");
+                            }
                         }
                     }
                     Some(Err(e)) => {
@@ -538,6 +542,10 @@ impl LlmClient {
                             }
                             StreamChunk::Complete(_response) => {
                                 // Final response - stream will end after this
+                            }
+                            _ => {
+                                // Handle future StreamChunk variants gracefully
+                                log::debug!("Unknown StreamChunk variant received");
                             }
                         }
                     }

@@ -11,7 +11,7 @@ use crate::update::{AgentUpdate, ResultMetadata};
 
 use async_stream::try_stream;
 use futures_util::Stream;
-use rust_genai::{CallableFunction, FunctionDeclaration, InteractionResponse};
+use rust_genai::{AutoFunctionResult, CallableFunction, FunctionDeclaration};
 use rust_genai_macros::tool;
 use serde_json::json;
 use std::time::{Duration, Instant};
@@ -352,7 +352,7 @@ impl ToolAgent {
             // Execute with auto function calling and timeout
             let response_future = interaction.create_with_auto_functions();
 
-            let response: InteractionResponse = with_timeout_and_cancellation(
+            let result: AutoFunctionResult = with_timeout_and_cancellation(
                 async {
                     response_future.await.map_err(|e| AgentError::Other(format!("Function calling failed: {}", e)))
                 },
@@ -361,8 +361,12 @@ impl ToolAgent {
                 || timeout_error(start_time, config.timeout, "tool_agent"),
             ).await?;
 
+            // Extract the response and tool executions from AutoFunctionResult
+            let response = result.response;
+            let executions = result.executions;
+
             // Extract the response text, logging if empty
-            let answer = match response.text() {
+            let answer: String = match response.text() {
                 Some(text) if !text.is_empty() => text.to_string(),
                 Some(_) => {
                     log::warn!("LLM returned empty text response for tool agent query");
@@ -381,20 +385,32 @@ impl ToolAgent {
                 tokens_unavailable += 1;
             }
 
-            // Emit completion event
+            // Build tool calls summary for observability
+            let tool_calls: Vec<_> = executions.iter().map(|e| {
+                json!({
+                    "name": e.name,
+                    "call_id": e.call_id,
+                    "result": e.result,
+                    "duration_ms": e.duration.as_millis() as u64,
+                })
+            }).collect();
+
+            // Emit completion event with tool execution details
             yield AgentUpdate::custom(
                 EVENT_TOOL_AGENT_COMPLETE,
-                answer.clone(),
+                format!("Completed with {} tool call(s)", executions.len()),
                 json!({
                     "answer": answer,
+                    "tool_calls": tool_calls,
+                    "tool_call_count": executions.len(),
                     "duration_ms": start_time.elapsed().as_millis() as u64,
                 }),
             );
 
             // Emit standard final_result for ExecutionState/harness compatibility.
             // Note: sub_queries_succeeded/failed are set to 0 because ToolAgent doesn't use
-            // sub-queries (those fields are for DeepResearchAgent). Tool call counts are not
-            // tracked because create_with_auto_functions() abstracts away individual tool calls.
+            // sub-queries (those fields are for DeepResearchAgent). Tool call details are
+            // exposed in the tool_agent_complete event above.
             let metadata = ResultMetadata {
                 total_tokens,
                 tokens_unavailable_count: tokens_unavailable,
