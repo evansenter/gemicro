@@ -76,8 +76,17 @@ pub fn print_final_result(result: &FinalResultData, elapsed: Duration, plain: bo
     println!("══════════════════════════════════════════════════════════════");
 
     // Extract step counts from extra field (agent-specific data)
-    let steps_succeeded = result.extra["steps_succeeded"].as_u64().unwrap_or(0) as usize;
-    let steps_failed = result.extra["steps_failed"].as_u64().unwrap_or(0) as usize;
+    // Use .get() for safe access since extra field contents are agent-specific
+    let steps_succeeded = result
+        .extra
+        .get("steps_succeeded")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as usize;
+    let steps_failed = result
+        .extra
+        .get("steps_failed")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as usize;
     let total = steps_succeeded + steps_failed;
 
     println!("📊 Performance:");
