@@ -184,17 +184,14 @@ cargo build --workspace
 # Build workspace
 cargo build --workspace
 
-# Run unit tests
-cargo test --workspace
+# Run all quality gates (format, clippy, tests)
+make check
 
-# Run ALL tests including LLM integration tests
-cargo test --workspace -- --include-ignored
-
-# Linting
-cargo clippy --workspace -- -D warnings
-
-# Format check
-cargo fmt --all -- --check
+# Individual quality gates
+make fmt        # Check formatting
+make clippy     # Run clippy with -D warnings
+make test       # Run unit + doc tests
+make test-all   # Include LLM integration tests (requires GEMINI_API_KEY)
 ```
 
 ### Running Examples

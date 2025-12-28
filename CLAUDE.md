@@ -13,36 +13,33 @@ Gemicro is a CLI agent exploration platform for experimenting with AI agent impl
 ## Build Commands
 
 ```bash
-# Build entire workspace
-cargo build --workspace
+# Run all quality gates before pushing (format, clippy, tests)
+make check
 
-# Run tests (unit + doc tests)
-cargo test --workspace
+# Individual commands
+make fmt        # Check formatting
+make clippy     # Run clippy with -D warnings
+make test       # Run unit + doc tests
+make test-all   # Include LLM integration tests (requires GEMINI_API_KEY)
+make docs       # Build documentation
+make clean      # Clean build artifacts
+```
 
-# Run ALL tests including LLM integration tests (requires GEMINI_API_KEY)
-cargo test --workspace -- --include-ignored
+### Direct Cargo Commands
 
+```bash
 # Run a single test
 cargo test test_name
 
 # Run tests in a specific module
 cargo test agent::tests
 
-# Linting
-cargo clippy --workspace -- -D warnings
-
-# Format check
-cargo fmt --all -- --check
-
-# Build docs
-cargo doc --workspace --no-deps
-
-# Run the deep research example
-cargo run -p gemicro-deep-research --example deep_research
-
 # Run specific crate tests
 cargo test -p gemicro-runner
 cargo test -p gemicro-eval
+
+# Run the deep research example
+cargo run -p gemicro-deep-research --example deep_research
 ```
 
 ## Environment Setup
