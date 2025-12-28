@@ -96,11 +96,19 @@ The `SimpleQaAgent` is a minimal reference implementation. See the full source a
 Constants are internal to prevent typos and ensure consistency within the agent. They are **not exported** to the public API - consumers match on string literals.
 
 ```rust
-// Location: gemicro-core/src/agent/simple_qa.rs:23-27
+// Internal constants - private to this module
+const EVENT_SIMPLE_QA_STARTED: &str = "simple_qa_started";
+const EVENT_SIMPLE_QA_RESULT: &str = "simple_qa_result";
+```
 
-// Internal constants (NOT re-exported from lib.rs)
-pub(crate) const EVENT_SIMPLE_QA_STARTED: &str = "simple_qa_started";
-pub(crate) const EVENT_SIMPLE_QA_RESULT: &str = "simple_qa_result";
+Use `AgentUpdate::custom()` with these constants:
+
+```rust
+yield AgentUpdate::custom(
+    EVENT_SIMPLE_QA_STARTED,
+    format!("Processing query: {}", truncate(&query, 50)),
+    json!({ "query": query }),
+);
 ```
 
 ### 2. Configuration

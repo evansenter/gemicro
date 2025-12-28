@@ -20,6 +20,17 @@ use std::time::Instant;
 /// When exceeded, older entries are truncated to stay within bounds.
 const MAX_SCRATCHPAD_CHARS: usize = 20_000;
 
+// ============================================================================
+// Event Type Constants (internal to this module)
+// ============================================================================
+
+const EVENT_REACT_STARTED: &str = "react_started";
+const EVENT_REACT_THOUGHT: &str = "react_thought";
+const EVENT_REACT_ACTION: &str = "react_action";
+const EVENT_REACT_OBSERVATION: &str = "react_observation";
+const EVENT_REACT_COMPLETE: &str = "react_complete";
+const EVENT_REACT_MAX_ITERATIONS: &str = "react_max_iterations";
+
 /// ReAct Agent implementing the Reasoning + Acting pattern.
 ///
 /// The agent iteratively:
@@ -100,7 +111,14 @@ impl ReactAgent {
             let mut total_tokens: u32 = 0;
             let mut tokens_unavailable: usize = 0;
 
-            yield AgentUpdate::react_started(&query, config.max_iterations);
+            yield AgentUpdate::custom(
+                EVENT_REACT_STARTED,
+                "Starting ReAct reasoning loop",
+                json!({
+                    "query": &query,
+                    "max_iterations": config.max_iterations,
+                }),
+            );
 
             for iteration in 1..=config.max_iterations {
                 // Check timeout before each iteration
@@ -141,14 +159,36 @@ impl ReactAgent {
                     )))?;
 
                 // Emit thought event
-                yield AgentUpdate::react_thought(iteration, step.thought.clone());
+                yield AgentUpdate::custom(
+                    EVENT_REACT_THOUGHT,
+                    format!("Thought at iteration {}", iteration),
+                    json!({
+                        "iteration": iteration,
+                        "thought": &step.thought,
+                    }),
+                );
 
                 // Emit action event
-                yield AgentUpdate::react_action(iteration, step.action.tool.clone(), step.action.input.clone());
+                yield AgentUpdate::custom(
+                    EVENT_REACT_ACTION,
+                    format!("Action: {}", step.action.tool),
+                    json!({
+                        "iteration": iteration,
+                        "tool": &step.action.tool,
+                        "input": &step.action.input,
+                    }),
+                );
 
                 // Check for final answer
                 if step.action.tool == "final_answer" {
-                    yield AgentUpdate::react_complete(iteration, step.action.input.clone());
+                    yield AgentUpdate::custom(
+                        EVENT_REACT_COMPLETE,
+                        format!("ReAct complete after {} iterations", iteration),
+                        json!({
+                            "iterations_used": iteration,
+                            "final_answer": &step.action.input,
+                        }),
+                    );
 
                     // Emit standard final_result for ExecutionState/harness compatibility
                     use crate::update::ResultMetadata;
@@ -174,11 +214,19 @@ impl ReactAgent {
                 ).await;
 
                 // Emit observation event
-                yield AgentUpdate::react_observation(
-                    iteration,
-                    step.action.tool.clone(),
-                    observation.clone(),
-                    is_error,
+                yield AgentUpdate::custom(
+                    EVENT_REACT_OBSERVATION,
+                    if is_error {
+                        format!("Observation (error) from {}", step.action.tool)
+                    } else {
+                        format!("Observation from {}", step.action.tool)
+                    },
+                    json!({
+                        "iteration": iteration,
+                        "tool": &step.action.tool,
+                        "result": &observation,
+                        "is_error": is_error,
+                    }),
                 );
 
                 // Append to scratchpad
@@ -211,7 +259,14 @@ impl ReactAgent {
                 .map(|s| s.to_string())
                 .unwrap_or_default();
 
-            yield AgentUpdate::react_max_iterations(config.max_iterations, last_thought);
+            yield AgentUpdate::custom(
+                EVENT_REACT_MAX_ITERATIONS,
+                format!("Reached max iterations ({})", config.max_iterations),
+                json!({
+                    "max_iterations": config.max_iterations,
+                    "last_thought": last_thought,
+                }),
+            );
         }
     }
 
