@@ -226,6 +226,35 @@ MIT
 
 See [SECURITY.md](SECURITY.md) for security policy, vulnerability reporting, and best practices.
 
+## Trajectory Recording
+
+Gemicro supports capturing full LLM interaction traces for offline replay and evaluation:
+
+```rust
+use gemicro_runner::AgentRunner;
+use gemicro_core::{Trajectory, MockLlmClient};
+
+// Record a trajectory during agent execution
+let runner = AgentRunner::new();
+let (metrics, trajectory) = runner.execute_with_trajectory(
+    &agent, "What is Rust?", json!({}), genai_client, llm_config
+).await?;
+
+// Save for later
+trajectory.save("trajectories/run_001.json")?;
+
+// Replay without API calls
+let loaded = Trajectory::load("trajectories/run_001.json")?;
+let mock = MockLlmClient::from_trajectory(&loaded);
+```
+
+Use cases:
+- **Offline testing** without API calls
+- **Evaluation datasets** from production runs
+- **Debugging** with exact request/response inspection
+
+See the [Agent Authoring Guide](docs/AGENT_AUTHORING.md#trajectory-recording-and-replay) for details.
+
 ## Documentation
 
 - [Agent Authoring Guide](docs/AGENT_AUTHORING.md) - Complete walkthrough for implementing new agents

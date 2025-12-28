@@ -20,3 +20,4 @@ rust-genai = { workspace = true }
 tokio = { workspace = true, features = ["test-util", "macros"] }
 tokio-util = { workspace = true }
 futures-util = { workspace = true }
+gemicro-runner = { path = "../../gemicro-runner" }
