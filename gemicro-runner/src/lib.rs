@@ -60,10 +60,7 @@ pub mod utils;
 pub use metrics::{ExecutionMetrics, StepTiming};
 pub use registry::{AgentFactory, AgentRegistry};
 pub use runner::AgentRunner;
-pub use state::{
-    phases, DefaultStateHandler, ExecutionState, ExecutionStep, FinalResultData, StateHandler,
-    StepStatus,
-};
+pub use state::{phases, ExecutionState, ExecutionStep, FinalResultData, StepStatus};
 pub use utils::{first_sentence, format_duration, truncate};
 
 // Backwards compatibility aliases (deprecated)

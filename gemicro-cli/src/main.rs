@@ -5,18 +5,15 @@ mod display;
 mod error;
 mod format;
 mod repl;
-mod state_handlers;
 
 use anyhow::{bail, Context, Result};
 use clap::Parser;
-use display::{phases, ExecutionState, IndicatifRenderer, Renderer};
+use display::{IndicatifRenderer, Renderer};
 use futures_util::StreamExt;
-use gemicro_core::{AgentContext, AgentError, LlmClient};
+use gemicro_core::{Agent, AgentContext, AgentError, LlmClient};
 use gemicro_deep_research::DeepResearchAgent;
-use gemicro_runner::StateHandler;
 use gemicro_tool_agent::{ToolAgent, ToolAgentConfig};
 use repl::Session;
-use state_handlers::DeepResearchStateHandler;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
@@ -95,13 +92,10 @@ async fn run_research(args: &cli::Args, query: &str) -> Result<()> {
     let llm = LlmClient::new(genai_client, args.llm_config());
     let context = AgentContext::new_with_cancellation(llm, cancellation_token.clone());
 
-    // Create agent
+    // Create agent and its tracker
     let agent = DeepResearchAgent::new(args.research_config())
         .context("Failed to create research agent")?;
-
-    // Initialize state, handler, and renderer
-    let mut state = ExecutionState::new();
-    let handler = DeepResearchStateHandler;
+    let mut tracker = agent.create_tracker();
     let mut renderer = IndicatifRenderer::new(args.plain);
 
     // Set up interrupt handling with AtomicU8 for cross-thread visibility.
@@ -158,21 +152,19 @@ async fn run_research(args: &cli::Args, query: &str) -> Result<()> {
                     break;
                 }
 
-                let prev_phase = state.phase().to_string();
-                let updated_id = handler.handle(&mut state, &update);
+                // Update tracker with the event
+                tracker.handle_event(&update);
 
-                // Notify renderer of phase changes
-                if state.phase() != prev_phase {
-                    renderer
-                        .on_phase_change(&state)
-                        .context("Renderer phase change failed")?;
-                }
+                // Update renderer with current status
+                renderer
+                    .on_status(tracker.as_ref())
+                    .context("Renderer status update failed")?;
 
-                // Notify renderer of step updates
-                if let Some(id) = updated_id {
+                // Check if complete
+                if tracker.is_complete() {
                     renderer
-                        .on_step_update(&state, &id)
-                        .context("Renderer step update failed")?;
+                        .on_complete(tracker.as_ref())
+                        .context("Renderer completion failed")?;
                 }
             }
             Err(AgentError::Cancelled) => {
@@ -182,21 +174,18 @@ async fn run_research(args: &cli::Args, query: &str) -> Result<()> {
             }
             Err(e) => {
                 signal_task.abort();
-                renderer.finish().ok();
+                if let Err(finish_err) = renderer.finish() {
+                    log::warn!("Failed to clean up renderer during error: {}", finish_err);
+                }
                 return Err(format_agent_error(e));
             }
         }
     }
 
-    // Render final result or partial results
-    if state.phase() == phases::COMPLETE {
+    // Handle interrupted state
+    if interrupted {
         renderer
-            .on_final_result(&state)
-            .context("Renderer final result failed")?;
-    } else if interrupted {
-        // Show partial results if we were interrupted
-        renderer
-            .on_interrupted(&state)
+            .on_interrupted(tracker.as_ref())
             .context("Renderer interrupted state failed")?;
     }
 

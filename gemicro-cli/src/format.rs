@@ -1,5 +1,6 @@
 //! Text formatting utilities shared across renderers.
 
+use gemicro_core::FinalResultData;
 use std::io::IsTerminal;
 use std::panic;
 use std::time::Duration;
@@ -51,31 +52,14 @@ pub fn render_markdown(text: &str) -> String {
     }
 }
 
-/// Information for printing the final result.
-pub struct FinalResultInfo<'a> {
-    /// The synthesized answer
-    pub answer: &'a str,
-    /// Total duration of the execution
-    pub duration: Duration,
-    /// Estimated sequential execution time (for parallel speedup calculation)
-    pub sequential_time: Option<Duration>,
-    /// Number of steps that succeeded
-    pub steps_succeeded: usize,
-    /// Number of steps that failed
-    pub steps_failed: usize,
-    /// Total tokens used
-    pub total_tokens: u32,
-    /// Whether token data was unavailable for some requests
-    pub tokens_unavailable: bool,
-    /// Whether to use plain text output (no markdown)
-    pub plain: bool,
-}
-
 /// Print the final result with formatting.
+///
+/// Uses `FinalResultData` from gemicro-core which contains the answer,
+/// token counts, and agent-specific metadata in the `extra` field.
 ///
 /// If `plain` is false and stdout is a terminal, the answer will be rendered
 /// as markdown with syntax highlighting and formatting.
-pub fn print_final_result(info: &FinalResultInfo<'_>) {
+pub fn print_final_result(result: &FinalResultData, elapsed: Duration, plain: bool) {
     println!();
     println!("╔══════════════════════════════════════════════════════════════╗");
     println!("║                    SYNTHESIZED ANSWER                        ║");
@@ -83,37 +67,62 @@ pub fn print_final_result(info: &FinalResultInfo<'_>) {
     println!();
 
     // Render as markdown unless plain mode is requested
-    if info.plain {
-        println!("{}", info.answer);
+    if plain {
+        println!("{}", result.answer);
     } else {
-        println!("{}", render_markdown(info.answer));
+        println!("{}", render_markdown(&result.answer));
     }
     println!();
     println!("══════════════════════════════════════════════════════════════");
 
-    let total = info.steps_succeeded + info.steps_failed;
+    // Extract step counts from extra field (agent-specific data)
+    // Use .get() for safe access since extra field contents are agent-specific
+    let steps_succeeded = result
+        .extra
+        .get("steps_succeeded")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as usize;
+    let steps_failed = result
+        .extra
+        .get("steps_failed")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as usize;
+    let total = steps_succeeded + steps_failed;
 
     println!("📊 Performance:");
-    println!("   Total time: {}", format_duration(info.duration));
+    println!("   Total time: {}", format_duration(elapsed));
 
-    // Show parallel speedup if we have sequential timing data
-    if let Some(seq_time) = info.sequential_time {
-        if seq_time > info.duration {
-            let saved = seq_time - info.duration;
-            let speedup = seq_time.as_secs_f64() / info.duration.as_secs_f64();
-            println!(
-                "   Parallel speedup: {:.1}x (saved {})",
-                speedup,
-                format_duration(saved)
-            );
-        }
+    // Show step counts if available
+    if total > 0 {
+        println!("   Steps: {}/{} succeeded", steps_succeeded, total);
     }
 
-    println!("   Steps: {}/{} succeeded", info.steps_succeeded, total);
-
-    if !info.tokens_unavailable && info.total_tokens > 0 {
-        println!("   Tokens used: {}", info.total_tokens);
+    // Show tokens if available and non-zero
+    if result.tokens_unavailable_count == 0 && result.total_tokens > 0 {
+        println!("   Tokens used: {}", result.total_tokens);
     }
+}
+
+/// Print a message when execution is interrupted.
+///
+/// Shows what was in progress and provides a tip about timeout.
+pub fn print_interrupted(status: Option<&str>) {
+    println!();
+    println!("╔══════════════════════════════════════════════════════════════╗");
+    println!("║                      INTERRUPTED                             ║");
+    println!("╚══════════════════════════════════════════════════════════════╝");
+    println!();
+
+    if let Some(msg) = status {
+        println!("Status when interrupted: {}", msg);
+    } else {
+        println!("Execution was interrupted.");
+    }
+
+    println!();
+    println!("💡 Tip: Run again with a higher --timeout to allow more time.");
+    println!();
+    println!("✓ Cancellation complete");
 }
 
 #[cfg(test)]

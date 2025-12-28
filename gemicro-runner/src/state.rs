@@ -10,9 +10,9 @@
 //! - Generic `ExecutionStep`s (replaces DeepResearch-specific "sub-queries")
 //! - Timing and final results
 //!
-//! To parse agent-specific events, use a `StateHandler` implementation.
+//! For agent-specific event handling, use the `ExecutionTracking` trait from
+//! gemicro-core with `agent.create_tracker()`.
 
-use gemicro_core::AgentUpdate;
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 
@@ -231,62 +231,9 @@ impl Default for ExecutionState {
     }
 }
 
-/// Trait for handling agent-specific events and updating ExecutionState.
-///
-/// Implement this trait to parse events from a specific agent type
-/// and update the generic ExecutionState accordingly.
-pub trait StateHandler: Send + Sync {
-    /// Process an event and update the state.
-    ///
-    /// Returns the ID of the step that was updated, if any.
-    fn handle(&self, state: &mut ExecutionState, event: &AgentUpdate) -> Option<String>;
-}
-
-/// Default handler that processes common events.
-///
-/// This handles `final_result` events and logs unknown events.
-/// For agent-specific events, use a specialized handler.
-pub struct DefaultStateHandler;
-
-impl StateHandler for DefaultStateHandler {
-    fn handle(&self, state: &mut ExecutionState, event: &AgentUpdate) -> Option<String> {
-        match event.event_type.as_str() {
-            "final_result" => {
-                if let Some(result) = event.as_final_result() {
-                    // Extract step counts from extra field (agent-specific)
-                    let steps_succeeded = result.metadata.extra["steps_succeeded"]
-                        .as_u64()
-                        .unwrap_or(0) as usize;
-                    let steps_failed =
-                        result.metadata.extra["steps_failed"].as_u64().unwrap_or(0) as usize;
-                    state.set_final_result(FinalResultData {
-                        answer: result.answer,
-                        total_tokens: result.metadata.total_tokens,
-                        tokens_unavailable_count: result.metadata.tokens_unavailable_count,
-                        steps_succeeded,
-                        steps_failed,
-                    });
-                } else {
-                    log::warn!(
-                        "Received final_result event with malformed data: {:?}",
-                        event.data
-                    );
-                }
-                None
-            }
-            _ => {
-                log::debug!("Unhandled event type: {}", event.event_type);
-                None
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gemicro_core::AgentUpdate;
-    use serde_json::json;
 
     #[test]
     fn test_initial_state() {
@@ -349,62 +296,6 @@ mod tests {
             }
             _ => panic!("Expected Failed status"),
         }
-    }
-
-    #[test]
-    fn test_default_handler_final_result() {
-        let handler = DefaultStateHandler;
-        let mut state = ExecutionState::new();
-
-        let metadata = gemicro_core::ResultMetadata::with_extra(
-            100,
-            0,
-            5000,
-            json!({
-                "steps_succeeded": 3,
-                "steps_failed": 1,
-            }),
-        );
-        let event = AgentUpdate::final_result("Final answer".to_string(), metadata);
-        handler.handle(&mut state, &event);
-
-        assert_eq!(state.phase(), phases::COMPLETE);
-        let result = state.final_result().unwrap();
-        assert_eq!(result.answer, "Final answer");
-        assert_eq!(result.total_tokens, 100);
-        assert_eq!(result.steps_succeeded, 3);
-        assert_eq!(result.steps_failed, 1);
-    }
-
-    #[test]
-    fn test_default_handler_unknown_event() {
-        let handler = DefaultStateHandler;
-        let mut state = ExecutionState::new();
-
-        let event = AgentUpdate::custom("unknown_event", "Unknown", json!({}));
-        let result = handler.handle(&mut state, &event);
-
-        // Unknown events should return None and not change state
-        assert!(result.is_none());
-        assert_eq!(state.phase(), phases::NOT_STARTED);
-    }
-
-    #[test]
-    fn test_default_handler_malformed_final_result() {
-        let handler = DefaultStateHandler;
-        let mut state = ExecutionState::new();
-
-        // Create a malformed final_result event (missing required fields)
-        let event = AgentUpdate::custom(
-            "final_result",
-            "Malformed",
-            json!({ "answer": 123 }), // answer should be a string in proper format
-        );
-        let result = handler.handle(&mut state, &event);
-
-        // Should log warning and not crash
-        assert!(result.is_none());
-        assert!(state.final_result().is_none());
     }
 
     #[test]

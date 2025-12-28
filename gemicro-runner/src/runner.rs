@@ -4,7 +4,6 @@
 //! returning structured `ExecutionMetrics` for programmatic consumption.
 
 use crate::metrics::ExecutionMetrics;
-use crate::state::{DefaultStateHandler, ExecutionState, StateHandler};
 use futures_util::StreamExt;
 use gemicro_core::{Agent, AgentContext, AgentError, ExecutionTracking};
 use std::time::Instant;
@@ -33,7 +32,12 @@ use std::time::Instant;
 /// let llm = LlmClient::new(genai_client, LlmConfig::default());
 /// let context = AgentContext::new(llm);
 ///
-/// let metrics = runner.execute(&agent, "What is Rust?", context).await?;
+/// let metrics = runner.execute_with_tracking(
+///     &agent,
+///     "What is Rust?",
+///     context,
+///     |_tracker, status| println!("Status: {}", status),
+/// ).await?;
 /// println!("Completed in {:?}", metrics.total_duration);
 /// println!("Tokens used: {}", metrics.total_tokens);
 /// # Ok(())
@@ -49,84 +53,6 @@ impl AgentRunner {
     }
 
     /// Execute an agent and return final metrics.
-    ///
-    /// Uses `DefaultStateHandler` which handles `final_result` events.
-    /// For agent-specific event parsing, use `execute_with_handler`.
-    ///
-    /// # Arguments
-    ///
-    /// * `agent` - The agent to execute
-    /// * `query` - The user's query
-    /// * `context` - Agent context with LLM client
-    ///
-    /// # Returns
-    ///
-    /// `ExecutionMetrics` containing timing, token usage, and results.
-    ///
-    /// # Errors
-    ///
-    /// Returns `AgentError` if the agent fails during execution.
-    pub async fn execute(
-        &self,
-        agent: &dyn Agent,
-        query: &str,
-        context: AgentContext,
-    ) -> Result<ExecutionMetrics, AgentError> {
-        self.execute_with_handler(agent, query, context, &DefaultStateHandler, |_, _| {})
-            .await
-    }
-
-    /// Execute an agent with a progress callback.
-    ///
-    /// Like `execute()`, but calls `on_update` for each event,
-    /// allowing custom progress tracking or logging.
-    ///
-    /// # Arguments
-    ///
-    /// * `agent` - The agent to execute
-    /// * `query` - The user's query
-    /// * `context` - Agent context with LLM client
-    /// * `on_update` - Callback receiving `(state, changed_step_id)`
-    ///
-    /// # Example
-    ///
-    /// ```text
-    /// // Requires an agent crate like gemicro-deep-research
-    /// use gemicro_runner::{AgentRunner, ExecutionState};
-    /// use gemicro_core::{Agent, AgentContext};
-    ///
-    /// async fn example(agent: &dyn Agent, context: AgentContext) -> Result<(), Box<dyn std::error::Error>> {
-    ///     let runner = AgentRunner::new();
-    ///
-    ///     let metrics = runner.execute_with_callback(
-    ///         agent,
-    ///         "query",
-    ///         context,
-    ///         |state: &ExecutionState, changed_id| {
-    ///             println!("Phase: {}", state.phase());
-    ///             if let Some(id) = changed_id {
-    ///                 println!("Step {} updated", id);
-    ///             }
-    ///         },
-    ///     ).await?;
-    ///     Ok(())
-    /// }
-    /// ```
-    pub async fn execute_with_callback<F>(
-        &self,
-        agent: &dyn Agent,
-        query: &str,
-        context: AgentContext,
-        on_update: F,
-    ) -> Result<ExecutionMetrics, AgentError>
-    where
-        F: FnMut(&ExecutionState, Option<&str>),
-    {
-        self.execute_with_handler(agent, query, context, &DefaultStateHandler, on_update)
-            .await
-    }
-
-    /// Execute an agent using its built-in tracker.
     ///
     /// This is the preferred method for new code. It uses the agent's
     /// `create_tracker()` method instead of requiring external state handlers.
@@ -186,43 +112,6 @@ impl AgentRunner {
             start.elapsed(),
         ))
     }
-
-    /// Execute an agent with a custom state handler.
-    ///
-    /// This is the most flexible execution method, allowing you to provide
-    /// a custom `StateHandler` for agent-specific event parsing.
-    ///
-    /// # Arguments
-    ///
-    /// * `agent` - The agent to execute
-    /// * `query` - The user's query
-    /// * `context` - Agent context with LLM client
-    /// * `handler` - StateHandler for parsing agent-specific events
-    /// * `on_update` - Callback receiving `(state, changed_step_id)`
-    pub async fn execute_with_handler<H, F>(
-        &self,
-        agent: &dyn Agent,
-        query: &str,
-        context: AgentContext,
-        handler: &H,
-        mut on_update: F,
-    ) -> Result<ExecutionMetrics, AgentError>
-    where
-        H: StateHandler,
-        F: FnMut(&ExecutionState, Option<&str>),
-    {
-        let mut state = ExecutionState::new();
-        let stream = agent.execute(query, context);
-        futures_util::pin_mut!(stream);
-
-        while let Some(result) = stream.next().await {
-            let update = result?;
-            let changed_id = handler.handle(&mut state, &update);
-            on_update(&state, changed_id.as_deref());
-        }
-
-        Ok(ExecutionMetrics::from(&state))
-    }
 }
 
 impl Default for AgentRunner {
@@ -236,7 +125,6 @@ mod tests {
     use super::*;
     use async_stream::stream;
     use gemicro_core::{AgentStream, AgentUpdate, ResultMetadata};
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
     struct MockAgent {
@@ -307,74 +195,6 @@ mod tests {
             AgentUpdate::custom("synthesis_started", "Synthesizing results", json!({})),
             AgentUpdate::final_result("Final answer".to_string(), metadata),
         ]
-    }
-
-    #[tokio::test]
-    async fn test_runner_execute_success() {
-        let runner = AgentRunner::new();
-        let agent = MockAgent::new(create_successful_events());
-        let context = create_mock_context();
-
-        let metrics = runner.execute(&agent, "test query", context).await.unwrap();
-
-        // DefaultStateHandler only handles final_result events, not step tracking.
-        // Steps info comes from FinalResultData, not from parsing sub_query_* events.
-        assert_eq!(metrics.steps_total, 0); // No steps added by DefaultStateHandler
-        assert_eq!(metrics.total_tokens, 100); // From final_result
-        assert_eq!(metrics.final_answer, Some("Final answer".to_string()));
-    }
-
-    #[tokio::test]
-    async fn test_runner_with_callback() {
-        let runner = AgentRunner::new();
-        let agent = MockAgent::new(create_successful_events());
-        let context = create_mock_context();
-
-        let callback_count = Arc::new(AtomicUsize::new(0));
-        let callback_count_clone = callback_count.clone();
-
-        let metrics = runner
-            .execute_with_callback(&agent, "query", context, move |_state, _changed_id| {
-                callback_count_clone.fetch_add(1, Ordering::SeqCst);
-            })
-            .await
-            .unwrap();
-
-        // Should be called for each event
-        assert_eq!(callback_count.load(Ordering::SeqCst), 6);
-        assert!(metrics.final_answer.is_some());
-    }
-
-    #[tokio::test]
-    async fn test_runner_with_no_final_result() {
-        use serde_json::json;
-
-        // Stream of events without a final_result (simulating interrupted execution)
-        let events = vec![
-            AgentUpdate::custom("decomposition_started", "Decomposing query", json!({})),
-            AgentUpdate::custom(
-                "decomposition_complete",
-                "Decomposed into 1 sub-query",
-                json!({ "sub_queries": ["Q1"] }),
-            ),
-            AgentUpdate::custom(
-                "sub_query_started",
-                "Sub-query 0 started",
-                json!({ "id": 0, "query": "Q1" }),
-            ),
-        ];
-
-        let runner = AgentRunner::new();
-        let agent = MockAgent::new(events);
-        let context = create_mock_context();
-
-        let metrics = runner.execute(&agent, "query", context).await.unwrap();
-
-        // DefaultStateHandler doesn't track steps from agent-specific events.
-        // Without a final_result event, we have no answer and no metrics from it.
-        assert_eq!(metrics.steps_total, 0);
-        assert_eq!(metrics.steps_failed, 0);
-        assert!(metrics.final_answer.is_none());
     }
 
     #[tokio::test]
