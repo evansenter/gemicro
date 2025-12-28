@@ -5,15 +5,18 @@ mod display;
 mod error;
 mod format;
 mod repl;
+mod state_handlers;
 
 use anyhow::{bail, Context, Result};
 use clap::Parser;
-use display::{ExecutionState, IndicatifRenderer, Phase, Renderer};
+use display::{phases, ExecutionState, IndicatifRenderer, Renderer};
 use futures_util::StreamExt;
 use gemicro_core::{AgentContext, AgentError, LlmClient};
 use gemicro_deep_research::DeepResearchAgent;
+use gemicro_runner::StateHandler;
 use gemicro_tool_agent::{ToolAgent, ToolAgentConfig};
 use repl::Session;
+use state_handlers::DeepResearchStateHandler;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
@@ -96,8 +99,9 @@ async fn run_research(args: &cli::Args, query: &str) -> Result<()> {
     let agent = DeepResearchAgent::new(args.research_config())
         .context("Failed to create research agent")?;
 
-    // Initialize state and renderer
+    // Initialize state, handler, and renderer
     let mut state = ExecutionState::new();
+    let handler = DeepResearchStateHandler;
     let mut renderer = IndicatifRenderer::new(args.plain);
 
     // Set up interrupt handling with AtomicU8 for cross-thread visibility.
@@ -154,8 +158,8 @@ async fn run_research(args: &cli::Args, query: &str) -> Result<()> {
                     break;
                 }
 
-                let prev_phase = state.phase();
-                let updated_id = state.update(&update);
+                let prev_phase = state.phase().to_string();
+                let updated_id = handler.handle(&mut state, &update);
 
                 // Notify renderer of phase changes
                 if state.phase() != prev_phase {
@@ -164,11 +168,11 @@ async fn run_research(args: &cli::Args, query: &str) -> Result<()> {
                         .context("Renderer phase change failed")?;
                 }
 
-                // Notify renderer of sub-query updates
+                // Notify renderer of step updates
                 if let Some(id) = updated_id {
                     renderer
-                        .on_sub_query_update(&state, id)
-                        .context("Renderer sub-query update failed")?;
+                        .on_step_update(&state, &id)
+                        .context("Renderer step update failed")?;
                 }
             }
             Err(AgentError::Cancelled) => {
@@ -185,7 +189,7 @@ async fn run_research(args: &cli::Args, query: &str) -> Result<()> {
     }
 
     // Render final result or partial results
-    if state.phase() == Phase::Complete {
+    if state.phase() == phases::COMPLETE {
         renderer
             .on_final_result(&state)
             .context("Renderer final result failed")?;

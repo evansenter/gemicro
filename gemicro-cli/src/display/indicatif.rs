@@ -3,7 +3,7 @@
 use super::renderer::Renderer;
 use crate::format::{format_duration, print_final_result, truncate, FinalResultInfo};
 use anyhow::Result;
-use gemicro_runner::{ExecutionState, Phase, SubQueryStatus};
+use gemicro_runner::{phases, ExecutionState, StepStatus};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::collections::HashMap;
 use std::time::Duration;
@@ -14,9 +14,9 @@ const SPINNER_TICK_MS: u64 = 120;
 /// Maximum characters for preview strings displayed during execution.
 ///
 /// Used for truncating:
-/// - Sub-query text in spinner progress bars
-/// - Result previews when sub-queries complete (e.g., `[1] ✅ 2.5s → "The answer..."`)
-/// - Error messages when sub-queries fail
+/// - Step text in spinner progress bars
+/// - Result previews when steps complete (e.g., `[1] ✅ 2.5s → "The answer..."`)
+/// - Error messages when steps fail
 ///
 /// This does NOT affect the final synthesized answer, which is always shown in full.
 const PREVIEW_CHARS: usize = 256;
@@ -31,7 +31,7 @@ const INTERRUPTED_CONTEXT_MULTIPLIER: f32 = 1.5;
 pub struct IndicatifRenderer {
     multi: MultiProgress,
     phase_bar: ProgressBar,
-    sub_query_bars: HashMap<usize, ProgressBar>,
+    step_bars: HashMap<String, ProgressBar>,
     /// Whether to use plain text output (no markdown rendering).
     plain: bool,
 }
@@ -54,27 +54,27 @@ impl IndicatifRenderer {
         Self {
             multi,
             phase_bar,
-            sub_query_bars: HashMap::new(),
+            step_bars: HashMap::new(),
             plain,
         }
     }
 
-    /// Create progress bars for all sub-queries when entering execution phase.
-    fn create_sub_query_bars(&mut self, state: &ExecutionState) {
-        for sq in state.sub_queries() {
+    /// Create progress bars for all steps when entering execution phase.
+    fn create_step_bars(&mut self, state: &ExecutionState) {
+        for (idx, step) in state.steps().iter().enumerate() {
             let pb = self.multi.add(ProgressBar::new_spinner());
             pb.set_style(
                 ProgressStyle::default_spinner()
                     .template("   {spinner:.cyan} [{prefix}] {msg}")
                     .expect("Invalid template"),
             );
-            let prefix = format!("{}", sq.id + 1);
-            log::debug!("Creating sub-query bar: id={}, prefix={}", sq.id, prefix);
+            let prefix = format!("{}", idx + 1);
+            log::debug!("Creating step bar: id={}, prefix={}", step.id, prefix);
             pb.set_prefix(prefix);
-            pb.set_message(truncate(&sq.query, PREVIEW_CHARS));
-            self.sub_query_bars.insert(sq.id, pb);
+            pb.set_message(truncate(&step.label, PREVIEW_CHARS));
+            self.step_bars.insert(step.id.clone(), pb);
         }
-        log::debug!("Created {} sub-query bars", self.sub_query_bars.len());
+        log::debug!("Created {} step bars", self.step_bars.len());
     }
 }
 
@@ -87,17 +87,17 @@ impl Default for IndicatifRenderer {
 impl Renderer for IndicatifRenderer {
     fn on_phase_change(&mut self, state: &ExecutionState) -> Result<()> {
         match state.phase() {
-            Phase::NotStarted => {
+            phases::NOT_STARTED => {
                 // Nothing to do
             }
 
-            Phase::Decomposing => {
+            phases::DECOMPOSING => {
                 self.phase_bar
                     .set_message("🔍 Analyzing query and generating research plan...");
             }
 
-            Phase::Executing => {
-                let count = state.sub_queries().len();
+            phases::EXECUTING => {
+                let count = state.steps().len();
                 self.phase_bar
                     .finish_with_message(format!("✓ Decomposed into {} sub-queries", count));
 
@@ -118,13 +118,13 @@ impl Renderer for IndicatifRenderer {
                 self.phase_bar
                     .set_message(format!("⚡ Executing {} queries in parallel...", count));
 
-                // Create bars for all sub-queries
-                self.create_sub_query_bars(state);
+                // Create bars for all steps
+                self.create_step_bars(state);
             }
 
-            Phase::Synthesizing => {
-                // Finish all remaining sub-query bars
-                for pb in self.sub_query_bars.values() {
+            phases::SYNTHESIZING => {
+                // Finish all remaining step bars
+                for pb in self.step_bars.values() {
                     if !pb.is_finished() {
                         pb.finish_and_clear();
                     }
@@ -150,51 +150,61 @@ impl Renderer for IndicatifRenderer {
                 self.phase_bar.set_message("🧠 Synthesizing results...");
             }
 
-            Phase::Complete => {
+            phases::COMPLETE => {
                 self.phase_bar.finish_with_message("✓ Synthesis complete");
             }
 
-            // Handle future phase variants gracefully
+            // Handle other phases (ReAct, etc.) or unknown phases
             _ => {
-                log::warn!("Unknown phase encountered: {:?}", state.phase());
+                log::debug!("Unhandled phase: {}", state.phase());
             }
         }
 
         Ok(())
     }
 
-    fn on_sub_query_update(&mut self, state: &ExecutionState, id: usize) -> Result<()> {
-        let sq = match state.sub_query(id) {
-            Some(sq) => sq,
+    fn on_step_update(&mut self, state: &ExecutionState, id: &str) -> Result<()> {
+        let step = match state.step(id) {
+            Some(step) => step,
             None => return Ok(()),
         };
 
-        let pb = match self.sub_query_bars.get(&id) {
+        let pb = match self.step_bars.get(id) {
             Some(pb) => pb,
             None => return Ok(()),
         };
 
-        match &sq.status {
-            SubQueryStatus::Pending => {
-                // Already showing query text
+        // Parse numeric ID for display (1-based). If not numeric, use raw ID.
+        let display_id: String = id
+            .parse::<usize>()
+            .map(|n| (n + 1).to_string())
+            .unwrap_or_else(|_| id.to_string());
+
+        match &step.status {
+            StepStatus::Pending => {
+                // Already showing step text
             }
 
-            SubQueryStatus::InProgress => {
+            StepStatus::InProgress => {
                 pb.enable_steady_tick(Duration::from_millis(SPINNER_TICK_MS));
             }
 
-            SubQueryStatus::Completed {
+            StepStatus::Completed {
                 result_preview,
                 tokens,
             } => {
-                let duration_str = sq
+                let duration_str = step
                     .duration
                     .map(format_duration)
                     .unwrap_or_else(|| "?".to_string());
 
-                // Only show token count if available (non-zero)
-                let token_info = if *tokens > 0 {
-                    format!(" ({} tokens)", tokens)
+                // Only show token count if available
+                let token_info = if let Some(t) = tokens {
+                    if *t > 0 {
+                        format!(" ({} tokens)", t)
+                    } else {
+                        String::new()
+                    }
                 } else {
                     String::new()
                 };
@@ -203,7 +213,7 @@ impl Renderer for IndicatifRenderer {
                 self.multi.suspend(|| {
                     println!(
                         "   [{}] ✅ {} → \"{}\"{}",
-                        id + 1,
+                        display_id,
                         duration_str,
                         truncate(result_preview, PREVIEW_CHARS),
                         token_info
@@ -212,8 +222,8 @@ impl Renderer for IndicatifRenderer {
                 pb.finish_and_clear();
             }
 
-            SubQueryStatus::Failed { error } => {
-                let duration_str = sq
+            StepStatus::Failed { error } => {
+                let duration_str = step
                     .duration
                     .map(format_duration)
                     .unwrap_or_else(|| "?".to_string());
@@ -221,7 +231,7 @@ impl Renderer for IndicatifRenderer {
                 self.multi.suspend(|| {
                     println!(
                         "   [{}] ❌ {} → Failed: {}",
-                        id + 1,
+                        display_id,
                         duration_str,
                         truncate(error, PREVIEW_CHARS)
                     );
@@ -231,7 +241,7 @@ impl Renderer for IndicatifRenderer {
 
             // Handle future status variants gracefully
             _ => {
-                log::warn!("Unknown sub-query status encountered for id {}", id);
+                log::warn!("Unknown step status encountered for id {}", id);
             }
         }
 
@@ -244,8 +254,8 @@ impl Renderer for IndicatifRenderer {
                 answer: &result.answer,
                 duration: state.elapsed(),
                 sequential_time: state.sequential_time(),
-                sub_queries_succeeded: result.sub_queries_succeeded,
-                sub_queries_failed: result.sub_queries_failed,
+                steps_succeeded: result.steps_succeeded,
+                steps_failed: result.steps_failed,
                 total_tokens: result.total_tokens,
                 tokens_unavailable: result.tokens_unavailable_count > 0,
                 plain: self.plain,
@@ -260,7 +270,7 @@ impl Renderer for IndicatifRenderer {
         self.phase_bar
             .finish_with_message("⚠️  Research interrupted by user");
 
-        for pb in self.sub_query_bars.values() {
+        for pb in self.step_bars.values() {
             if !pb.is_finished() {
                 pb.finish_and_clear();
             }
@@ -274,26 +284,32 @@ impl Renderer for IndicatifRenderer {
         println!();
 
         // Show phase information
-        println!("Research was interrupted during: {:?}", state.phase());
+        println!("Research was interrupted during: {}", state.phase());
         println!();
 
-        // Show completed sub-queries if any
+        // Show completed steps if any
         let completed: Vec<_> = state
-            .sub_queries()
+            .steps()
             .iter()
-            .filter(|sq| matches!(sq.status, SubQueryStatus::Completed { .. }))
+            .filter(|step| matches!(step.status, StepStatus::Completed { .. }))
             .collect();
 
         if !completed.is_empty() {
             println!(
                 "Completed sub-queries ({}/{}):",
                 completed.len(),
-                state.sub_queries().len()
+                state.steps().len()
             );
-            for sq in completed {
-                if let SubQueryStatus::Completed { result_preview, .. } = &sq.status {
+            for step in completed {
+                if let StepStatus::Completed { result_preview, .. } = &step.status {
                     let chars = (PREVIEW_CHARS as f32 * INTERRUPTED_CONTEXT_MULTIPLIER) as usize;
-                    println!("  [{}] {}", sq.id + 1, truncate(result_preview, chars));
+                    // Parse numeric ID for display (1-based). If not numeric, use raw ID.
+                    let display_id: String = step
+                        .id
+                        .parse::<usize>()
+                        .map(|n| (n + 1).to_string())
+                        .unwrap_or_else(|_| step.id.clone());
+                    println!("  [{}] {}", display_id, truncate(result_preview, chars));
                 }
             }
         } else {
@@ -310,7 +326,7 @@ impl Renderer for IndicatifRenderer {
 
     fn finish(&mut self) -> Result<()> {
         // Clean up any remaining progress bars
-        for (_, pb) in self.sub_query_bars.drain() {
+        for (_, pb) in self.step_bars.drain() {
             if !pb.is_finished() {
                 pb.finish_and_clear();
             }

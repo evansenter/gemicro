@@ -127,7 +127,7 @@ fn test_cli_simple_query() {
         "Missing answer section"
     );
     assert!(stdout.contains("Performance:"), "Missing performance stats");
-    assert!(stdout.contains("Sub-queries:"), "Missing sub-query stats");
+    assert!(stdout.contains("Steps:"), "Missing step stats");
 }
 
 #[test]

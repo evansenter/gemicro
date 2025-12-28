@@ -6,8 +6,6 @@ description = "Headless execution runtime for gemicro agents"
 
 [dependencies]
 gemicro-core = { path = "../gemicro-core" }
-# TEMPORARY: Required for DeepResearchEventExt until ExecutionState is generic (issue #120)
-gemicro-deep-research = { path = "../agents/gemicro-deep-research" }
 tokio = { workspace = true }
 futures-util = { workspace = true }
 async-stream = { workspace = true }

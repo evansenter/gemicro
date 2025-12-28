@@ -24,7 +24,10 @@
 //! ## Example
 //!
 //! ```no_run
-//! use gemicro_core::{Agent, AgentContext, AgentStream, AgentUpdate, AgentError, LlmClient, LlmConfig};
+//! use gemicro_core::{
+//!     Agent, AgentContext, AgentStream, AgentUpdate, AgentError,
+//!     LlmClient, LlmConfig, ExecutionTracking, DefaultTracker,
+//! };
 //!
 //! struct MyAgent;
 //!
@@ -35,11 +38,15 @@
 //!         // Implementation would return a stream of updates
 //!         # todo!()
 //!     }
+//!     fn create_tracker(&self) -> Box<dyn ExecutionTracking> {
+//!         Box::new(DefaultTracker::default())
+//!     }
 //! }
 //! ```
 
 use crate::error::AgentError;
 use crate::llm::LlmClient;
+use crate::tracking::ExecutionTracking;
 use crate::update::AgentUpdate;
 
 use futures_util::Stream;
@@ -69,7 +76,10 @@ pub type AgentStream<'a> = Pin<Box<dyn Stream<Item = Result<AgentUpdate, AgentEr
 /// # Example
 ///
 /// ```no_run
-/// use gemicro_core::{Agent, AgentContext, AgentStream, AgentUpdate, AgentError};
+/// use gemicro_core::{
+///     Agent, AgentContext, AgentStream, AgentUpdate, AgentError,
+///     ExecutionTracking, DefaultTracker,
+/// };
 ///
 /// struct MyAgent;
 ///
@@ -79,6 +89,9 @@ pub type AgentStream<'a> = Pin<Box<dyn Stream<Item = Result<AgentUpdate, AgentEr
 ///     fn execute(&self, query: &str, context: AgentContext) -> AgentStream<'_> {
 ///         // Implementation would return a stream of updates
 ///         # todo!()
+///     }
+///     fn create_tracker(&self) -> Box<dyn ExecutionTracking> {
+///         Box::new(DefaultTracker::default())
 ///     }
 /// }
 /// ```
@@ -94,6 +107,24 @@ pub trait Agent: Send + Sync {
     /// The stream yields [`AgentUpdate`] events as the agent progresses.
     /// Consumers should handle unknown event types gracefully (log and ignore).
     fn execute(&self, query: &str, context: AgentContext) -> AgentStream<'_>;
+
+    /// Create a tracker for this agent's execution.
+    ///
+    /// Each agent provides its own tracker implementation that understands
+    /// its specific event types and execution patterns. This enables the CLI
+    /// and runner to remain agent-agnostic while still providing meaningful
+    /// progress updates.
+    ///
+    /// For simple agents without complex tracking needs, use [`DefaultTracker`]:
+    ///
+    /// ```text
+    /// fn create_tracker(&self) -> Box<dyn ExecutionTracking> {
+    ///     Box::new(DefaultTracker::default())
+    /// }
+    /// ```
+    ///
+    /// [`DefaultTracker`]: crate::DefaultTracker
+    fn create_tracker(&self) -> Box<dyn ExecutionTracking>;
 }
 
 /// Shared resources available to all agents during execution.

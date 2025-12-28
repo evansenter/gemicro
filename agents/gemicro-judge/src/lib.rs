@@ -255,6 +255,10 @@ impl Agent for LlmJudgeAgent {
             );
         })
     }
+
+    fn create_tracker(&self) -> Box<dyn gemicro_core::ExecutionTracking> {
+        Box::new(gemicro_core::DefaultTracker::default())
+    }
 }
 
 #[cfg(test)]

@@ -63,16 +63,14 @@ impl Agent for MockAgent {
             } else {
                 yield AgentUpdate::final_result(
                     "Mock answer".to_string(),
-                    ResultMetadata {
-                        total_tokens: 0,
-                        tokens_unavailable_count: 0,
-                        duration_ms: 0,
-                        sub_queries_succeeded: 0,
-                        sub_queries_failed: 0,
-                    },
+                    ResultMetadata::new(0, 0, 0),
                 );
             }
         })
+    }
+
+    fn create_tracker(&self) -> Box<dyn gemicro_core::ExecutionTracking> {
+        Box::new(gemicro_core::DefaultTracker::default())
     }
 }
 

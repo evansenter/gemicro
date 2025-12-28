@@ -4,9 +4,10 @@
 //! returning structured `ExecutionMetrics` for programmatic consumption.
 
 use crate::metrics::ExecutionMetrics;
-use crate::state::ExecutionState;
+use crate::state::{DefaultStateHandler, ExecutionState, StateHandler};
 use futures_util::StreamExt;
-use gemicro_core::{Agent, AgentContext, AgentError};
+use gemicro_core::{Agent, AgentContext, AgentError, ExecutionTracking};
+use std::time::Instant;
 
 /// Headless agent runner for programmatic execution.
 ///
@@ -18,7 +19,8 @@ use gemicro_core::{Agent, AgentContext, AgentError};
 ///
 /// # Example
 ///
-/// ```no_run
+/// ```text
+/// // Requires an agent crate like gemicro-deep-research
 /// use gemicro_runner::AgentRunner;
 /// use gemicro_core::{AgentContext, LlmClient, LlmConfig};
 /// use gemicro_deep_research::{DeepResearchAgent, ResearchConfig};
@@ -48,8 +50,8 @@ impl AgentRunner {
 
     /// Execute an agent and return final metrics.
     ///
-    /// Consumes the entire event stream, tracks state internally,
-    /// and returns `ExecutionMetrics` when complete.
+    /// Uses `DefaultStateHandler` which handles `final_result` events.
+    /// For agent-specific event parsing, use `execute_with_handler`.
     ///
     /// # Arguments
     ///
@@ -70,7 +72,7 @@ impl AgentRunner {
         query: &str,
         context: AgentContext,
     ) -> Result<ExecutionMetrics, AgentError> {
-        self.execute_with_callback(agent, query, context, |_, _| {})
+        self.execute_with_handler(agent, query, context, &DefaultStateHandler, |_, _| {})
             .await
     }
 
@@ -84,41 +86,130 @@ impl AgentRunner {
     /// * `agent` - The agent to execute
     /// * `query` - The user's query
     /// * `context` - Agent context with LLM client
-    /// * `on_update` - Callback receiving `(state, changed_sub_query_id)`
+    /// * `on_update` - Callback receiving `(state, changed_step_id)`
     ///
     /// # Example
     ///
-    /// ```no_run
+    /// ```text
+    /// // Requires an agent crate like gemicro-deep-research
     /// use gemicro_runner::{AgentRunner, ExecutionState};
-    /// # use gemicro_core::AgentContext;
-    /// # use gemicro_deep_research::{DeepResearchAgent, ResearchConfig};
+    /// use gemicro_core::{Agent, AgentContext};
     ///
-    /// # async fn example(agent: &DeepResearchAgent, context: AgentContext) -> Result<(), Box<dyn std::error::Error>> {
-    /// let runner = AgentRunner::new();
+    /// async fn example(agent: &dyn Agent, context: AgentContext) -> Result<(), Box<dyn std::error::Error>> {
+    ///     let runner = AgentRunner::new();
     ///
-    /// let metrics = runner.execute_with_callback(
-    ///     agent,
-    ///     "query",
-    ///     context,
-    ///     |state: &ExecutionState, changed_id| {
-    ///         println!("Phase: {:?}", state.phase());
-    ///         if let Some(id) = changed_id {
-    ///             println!("Sub-query {} updated", id);
-    ///         }
-    ///     },
-    /// ).await?;
-    /// # Ok(())
-    /// # }
+    ///     let metrics = runner.execute_with_callback(
+    ///         agent,
+    ///         "query",
+    ///         context,
+    ///         |state: &ExecutionState, changed_id| {
+    ///             println!("Phase: {}", state.phase());
+    ///             if let Some(id) = changed_id {
+    ///                 println!("Step {} updated", id);
+    ///             }
+    ///         },
+    ///     ).await?;
+    ///     Ok(())
+    /// }
     /// ```
     pub async fn execute_with_callback<F>(
         &self,
         agent: &dyn Agent,
         query: &str,
         context: AgentContext,
+        on_update: F,
+    ) -> Result<ExecutionMetrics, AgentError>
+    where
+        F: FnMut(&ExecutionState, Option<&str>),
+    {
+        self.execute_with_handler(agent, query, context, &DefaultStateHandler, on_update)
+            .await
+    }
+
+    /// Execute an agent using its built-in tracker.
+    ///
+    /// This is the preferred method for new code. It uses the agent's
+    /// `create_tracker()` method instead of requiring external state handlers.
+    ///
+    /// # Arguments
+    ///
+    /// * `agent` - The agent to execute
+    /// * `query` - The user's query
+    /// * `context` - Agent context with LLM client
+    /// * `on_status` - Callback receiving status message updates
+    ///
+    /// # Example
+    ///
+    /// ```text
+    /// use gemicro_runner::AgentRunner;
+    /// use gemicro_core::{Agent, AgentContext};
+    ///
+    /// async fn example(agent: &dyn Agent, context: AgentContext) -> Result<(), Box<dyn std::error::Error>> {
+    ///     let runner = AgentRunner::new();
+    ///
+    ///     let metrics = runner.execute_with_tracking(
+    ///         agent,
+    ///         "query",
+    ///         context,
+    ///         |tracker, status| {
+    ///             println!("Status: {}", status);
+    ///         },
+    ///     ).await?;
+    ///     Ok(())
+    /// }
+    /// ```
+    pub async fn execute_with_tracking<F>(
+        &self,
+        agent: &dyn Agent,
+        query: &str,
+        context: AgentContext,
+        mut on_status: F,
+    ) -> Result<ExecutionMetrics, AgentError>
+    where
+        F: FnMut(&dyn ExecutionTracking, &str),
+    {
+        let mut tracker = agent.create_tracker();
+        let stream = agent.execute(query, context);
+        futures_util::pin_mut!(stream);
+        let start = Instant::now();
+
+        while let Some(result) = stream.next().await {
+            let update = result?;
+            tracker.handle_event(&update);
+            if let Some(msg) = tracker.status_message() {
+                on_status(tracker.as_ref(), msg);
+            }
+        }
+
+        Ok(ExecutionMetrics::from_tracker(
+            tracker.as_ref(),
+            start.elapsed(),
+        ))
+    }
+
+    /// Execute an agent with a custom state handler.
+    ///
+    /// This is the most flexible execution method, allowing you to provide
+    /// a custom `StateHandler` for agent-specific event parsing.
+    ///
+    /// # Arguments
+    ///
+    /// * `agent` - The agent to execute
+    /// * `query` - The user's query
+    /// * `context` - Agent context with LLM client
+    /// * `handler` - StateHandler for parsing agent-specific events
+    /// * `on_update` - Callback receiving `(state, changed_step_id)`
+    pub async fn execute_with_handler<H, F>(
+        &self,
+        agent: &dyn Agent,
+        query: &str,
+        context: AgentContext,
+        handler: &H,
         mut on_update: F,
     ) -> Result<ExecutionMetrics, AgentError>
     where
-        F: FnMut(&ExecutionState, Option<usize>),
+        H: StateHandler,
+        F: FnMut(&ExecutionState, Option<&str>),
     {
         let mut state = ExecutionState::new();
         let stream = agent.execute(query, context);
@@ -126,8 +217,8 @@ impl AgentRunner {
 
         while let Some(result) = stream.next().await {
             let update = result?;
-            let changed_id = state.update(&update);
-            on_update(&state, changed_id);
+            let changed_id = handler.handle(&mut state, &update);
+            on_update(&state, changed_id.as_deref());
         }
 
         Ok(ExecutionMetrics::from(&state))
@@ -175,6 +266,10 @@ mod tests {
                 }
             })
         }
+
+        fn create_tracker(&self) -> Box<dyn gemicro_core::ExecutionTracking> {
+            Box::new(gemicro_core::DefaultTracker::default())
+        }
     }
 
     fn create_mock_context() -> AgentContext {
@@ -190,13 +285,7 @@ mod tests {
     fn create_successful_events() -> Vec<AgentUpdate> {
         use serde_json::json;
 
-        let metadata = ResultMetadata {
-            total_tokens: 100,
-            tokens_unavailable_count: 0,
-            duration_ms: 1000,
-            sub_queries_succeeded: 1,
-            sub_queries_failed: 0,
-        };
+        let metadata = ResultMetadata::new(100, 0, 1000);
 
         vec![
             AgentUpdate::custom("decomposition_started", "Decomposing query", json!({})),
@@ -228,9 +317,10 @@ mod tests {
 
         let metrics = runner.execute(&agent, "test query", context).await.unwrap();
 
-        assert_eq!(metrics.sub_queries_total, 1);
-        assert_eq!(metrics.sub_queries_succeeded, 1);
-        assert_eq!(metrics.total_tokens, 100);
+        // DefaultStateHandler only handles final_result events, not step tracking.
+        // Steps info comes from FinalResultData, not from parsing sub_query_* events.
+        assert_eq!(metrics.steps_total, 0); // No steps added by DefaultStateHandler
+        assert_eq!(metrics.total_tokens, 100); // From final_result
         assert_eq!(metrics.final_answer, Some("Final answer".to_string()));
     }
 
@@ -256,9 +346,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_runner_with_failure() {
+    async fn test_runner_with_no_final_result() {
         use serde_json::json;
 
+        // Stream of events without a final_result (simulating interrupted execution)
         let events = vec![
             AgentUpdate::custom("decomposition_started", "Decomposing query", json!({})),
             AgentUpdate::custom(
@@ -271,11 +362,6 @@ mod tests {
                 "Sub-query 0 started",
                 json!({ "id": 0, "query": "Q1" }),
             ),
-            AgentUpdate::custom(
-                "sub_query_failed",
-                "Sub-query 0 failed",
-                json!({ "id": 0, "error": "Timeout" }),
-            ),
         ];
 
         let runner = AgentRunner::new();
@@ -284,8 +370,10 @@ mod tests {
 
         let metrics = runner.execute(&agent, "query", context).await.unwrap();
 
-        assert_eq!(metrics.sub_queries_failed, 1);
-        assert_eq!(metrics.sub_queries_succeeded, 0);
+        // DefaultStateHandler doesn't track steps from agent-specific events.
+        // Without a final_result event, we have no answer and no metrics from it.
+        assert_eq!(metrics.steps_total, 0);
+        assert_eq!(metrics.steps_failed, 0);
         assert!(metrics.final_answer.is_none());
     }
 
@@ -293,5 +381,33 @@ mod tests {
     async fn test_runner_default() {
         let runner = AgentRunner;
         assert!(std::mem::size_of_val(&runner) == 0); // Zero-size struct
+    }
+
+    #[tokio::test]
+    async fn test_runner_execute_with_tracking() {
+        let runner = AgentRunner::new();
+        let agent = MockAgent::new(create_successful_events());
+        let context = create_mock_context();
+
+        let status_messages = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let messages_clone = status_messages.clone();
+
+        let metrics = runner
+            .execute_with_tracking(&agent, "query", context, move |tracker, msg| {
+                messages_clone.lock().unwrap().push(msg.to_string());
+                // Verify tracker state is accessible during callback
+                if tracker.is_complete() {
+                    assert!(tracker.final_result().is_some());
+                }
+            })
+            .await
+            .unwrap();
+
+        let messages = status_messages.lock().unwrap();
+        // Should have received status updates (one per event with non-empty message)
+        assert!(!messages.is_empty());
+        // Metrics should reflect final result
+        assert_eq!(metrics.total_tokens, 100);
+        assert_eq!(metrics.final_answer, Some("Final answer".to_string()));
     }
 }

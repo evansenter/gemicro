@@ -12,5 +12,5 @@ pub use indicatif::IndicatifRenderer;
 pub use renderer::Renderer;
 
 // Re-export execution state types from gemicro-runner
+pub use gemicro_runner::phases;
 pub use gemicro_runner::ExecutionState;
-pub use gemicro_runner::Phase;

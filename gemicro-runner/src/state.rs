@@ -2,61 +2,110 @@
 //!
 //! This module contains pure state with no terminal dependencies,
 //! making it easy to test and enabling renderer swappability.
+//!
+//! ## Generic Design
+//!
+//! `ExecutionState` is agent-agnostic. It tracks:
+//! - A string-based `phase` (agents define their own phase names)
+//! - Generic `ExecutionStep`s (replaces DeepResearch-specific "sub-queries")
+//! - Timing and final results
+//!
+//! To parse agent-specific events, use a `StateHandler` implementation.
 
-use crate::utils::first_sentence;
 use gemicro_core::AgentUpdate;
-// TEMPORARY: This coupling will be removed when ExecutionState becomes generic (issue #120)
-use gemicro_deep_research::DeepResearchEventExt;
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 
-/// Current execution phase of the agent.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[non_exhaustive]
-pub enum Phase {
-    /// Initial state before any events
-    NotStarted,
-    /// Query is being decomposed into sub-queries
-    Decomposing,
-    /// Sub-queries are being executed in parallel
-    Executing,
-    /// Results are being synthesized
-    Synthesizing,
-    /// Execution is complete
-    Complete,
+/// Well-known phase constants for convenience.
+/// Agents may use these or define their own.
+pub mod phases {
+    pub const NOT_STARTED: &str = "not_started";
+    pub const COMPLETE: &str = "complete";
+    // DeepResearch phases (for backwards compatibility)
+    pub const DECOMPOSING: &str = "decomposing";
+    pub const EXECUTING: &str = "executing";
+    pub const SYNTHESIZING: &str = "synthesizing";
+    // ReAct phases
+    pub const THINKING: &str = "thinking";
+    pub const ACTING: &str = "acting";
+    pub const OBSERVING: &str = "observing";
 }
 
-/// Status of an individual sub-query.
+/// Status of an individual execution step.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
-pub enum SubQueryStatus {
+pub enum StepStatus {
     /// Waiting to start
     Pending,
     /// Currently executing
     InProgress,
     /// Completed successfully
-    Completed { result_preview: String, tokens: u32 },
+    Completed {
+        result_preview: String,
+        tokens: Option<u32>,
+    },
     /// Failed with error
     Failed { error: String },
 }
 
-/// State of an individual sub-query.
+/// State of an individual execution step.
+///
+/// This is a generic replacement for the previous DeepResearch-specific
+/// "SubQueryState". Steps can represent sub-queries, ReAct iterations,
+/// tool calls, or any other discrete unit of work.
 ///
 /// # Serialization
 ///
 /// `start_time` is skipped during serialization (`Instant` is not portable).
 /// Timing data is preserved via `duration`, which is populated when the
-/// sub-query completes. If you serialize mid-execution, in-progress queries
-/// will have `start_time: None` after deserialization.
+/// step completes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SubQueryState {
-    pub id: usize,
-    pub query: String,
-    pub status: SubQueryStatus,
+pub struct ExecutionStep {
+    /// Unique identifier for this step (string for flexibility)
+    pub id: String,
+    /// Human-readable label describing this step
+    pub label: String,
+    /// Current status of this step
+    pub status: StepStatus,
     /// Skipped during serialization. See struct-level docs.
     #[serde(skip)]
     pub start_time: Option<Instant>,
+    /// Duration of this step (populated on completion)
     pub duration: Option<Duration>,
+}
+
+impl ExecutionStep {
+    /// Create a new pending step.
+    pub fn new(id: impl Into<String>, label: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            label: label.into(),
+            status: StepStatus::Pending,
+            start_time: None,
+            duration: None,
+        }
+    }
+
+    /// Mark this step as in-progress.
+    pub fn start(&mut self) {
+        self.status = StepStatus::InProgress;
+        self.start_time = Some(Instant::now());
+    }
+
+    /// Mark this step as completed.
+    pub fn complete(&mut self, result_preview: String, tokens: Option<u32>) {
+        self.duration = self.start_time.map(|s| s.elapsed());
+        self.status = StepStatus::Completed {
+            result_preview,
+            tokens,
+        };
+    }
+
+    /// Mark this step as failed.
+    pub fn fail(&mut self, error: String) {
+        self.duration = self.start_time.map(|s| s.elapsed());
+        self.status = StepStatus::Failed { error };
+    }
 }
 
 /// Data from the final result event.
@@ -65,20 +114,21 @@ pub struct FinalResultData {
     pub answer: String,
     pub total_tokens: u32,
     pub tokens_unavailable_count: usize,
-    // Note: duration_ms from metadata is not stored here.
-    // Use ExecutionState::elapsed() for wall-clock timing instead.
-    pub sub_queries_succeeded: usize,
-    pub sub_queries_failed: usize,
+    /// Number of steps that succeeded (generic, was sub_queries_succeeded)
+    pub steps_succeeded: usize,
+    /// Number of steps that failed (generic, was sub_queries_failed)
+    pub steps_failed: usize,
 }
 
 /// Terminal-agnostic state machine for agent execution.
 ///
-/// Tracks the current phase, sub-query statuses, timing information,
-/// and final results. Updated via `update()` from `AgentUpdate` events.
+/// Tracks the current phase, execution steps, timing information,
+/// and final results. This is a generic state container - use a
+/// `StateHandler` to parse agent-specific events.
 #[derive(Clone)]
 pub struct ExecutionState {
-    phase: Phase,
-    sub_queries: Vec<SubQueryState>,
+    phase: String,
+    steps: Vec<ExecutionStep>,
     start_time: Instant,
     final_result: Option<FinalResultData>,
 }
@@ -87,151 +137,61 @@ impl ExecutionState {
     /// Create a new ExecutionState.
     pub fn new() -> Self {
         Self {
-            phase: Phase::NotStarted,
-            sub_queries: Vec::new(),
+            phase: phases::NOT_STARTED.to_string(),
+            steps: Vec::new(),
             start_time: Instant::now(),
             final_result: None,
         }
     }
 
-    /// Update state from an AgentUpdate event.
-    ///
-    /// Returns the ID of the sub-query that was updated, if any.
-    ///
-    /// # Error Handling
-    ///
-    /// This method follows the Evergreen philosophy of graceful degradation:
-    /// - **Unknown event types** are logged at debug level and ignored
-    /// - **Malformed event data** is logged at warn level and ignored
-    ///
-    /// The state machine continues processing subsequent events even if some
-    /// events are malformed. This ensures robustness against protocol evolution
-    /// and partial failures, but callers should monitor logs if strict validation
-    /// is required.
-    pub fn update(&mut self, event: &AgentUpdate) -> Option<usize> {
-        match event.event_type.as_str() {
-            "decomposition_started" => {
-                self.phase = Phase::Decomposing;
-                None
-            }
-
-            "decomposition_complete" => {
-                if let Some(queries) = event.as_decomposition_complete() {
-                    self.sub_queries = queries
-                        .into_iter()
-                        .enumerate()
-                        .map(|(id, query)| SubQueryState {
-                            id,
-                            query,
-                            status: SubQueryStatus::Pending,
-                            start_time: None,
-                            duration: None,
-                        })
-                        .collect();
-                    self.phase = Phase::Executing;
-                } else {
-                    log::warn!(
-                        "Received decomposition_complete event with malformed data: {:?}",
-                        event.data
-                    );
-                }
-                None
-            }
-
-            "sub_query_started" => {
-                if let Some(id) = event.data.get("id").and_then(|v| v.as_u64()) {
-                    let id = id as usize;
-                    if let Some(sq) = self.sub_queries.get_mut(id) {
-                        sq.status = SubQueryStatus::InProgress;
-                        sq.start_time = Some(Instant::now());
-                        return Some(id);
-                    }
-                }
-                None
-            }
-
-            "sub_query_completed" => {
-                if let Some(result) = event.as_sub_query_completed() {
-                    if let Some(sq) = self.sub_queries.get_mut(result.id) {
-                        sq.duration = sq.start_time.map(|s| s.elapsed());
-                        let preview = first_sentence(&result.result);
-                        sq.status = SubQueryStatus::Completed {
-                            result_preview: preview,
-                            tokens: result.tokens_used,
-                        };
-                        return Some(result.id);
-                    }
-                } else {
-                    log::warn!(
-                        "Received sub_query_completed event with malformed data: {:?}",
-                        event.data
-                    );
-                }
-                None
-            }
-
-            "sub_query_failed" => {
-                if let Some(id) = event.data.get("id").and_then(|v| v.as_u64()) {
-                    let id = id as usize;
-                    if let Some(sq) = self.sub_queries.get_mut(id) {
-                        sq.duration = sq.start_time.map(|s| s.elapsed());
-                        let error = event
-                            .data
-                            .get("error")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("Unknown error")
-                            .to_string();
-                        sq.status = SubQueryStatus::Failed { error };
-                        return Some(id);
-                    }
-                }
-                None
-            }
-
-            "synthesis_started" => {
-                self.phase = Phase::Synthesizing;
-                None
-            }
-
-            "final_result" => {
-                if let Some(result) = event.as_final_result() {
-                    self.final_result = Some(FinalResultData {
-                        answer: result.answer,
-                        total_tokens: result.metadata.total_tokens,
-                        tokens_unavailable_count: result.metadata.tokens_unavailable_count,
-                        sub_queries_succeeded: result.metadata.sub_queries_succeeded,
-                        sub_queries_failed: result.metadata.sub_queries_failed,
-                    });
-                    self.phase = Phase::Complete;
-                } else {
-                    log::warn!(
-                        "Received final_result event with malformed data: {:?}",
-                        event.data
-                    );
-                }
-                None
-            }
-
-            _ => {
-                log::debug!("Unknown event type in ExecutionState: {}", event.event_type);
-                None
-            }
-        }
+    /// Set the current phase.
+    pub fn set_phase(&mut self, phase: impl Into<String>) {
+        self.phase = phase.into();
     }
 
     /// Get the current phase.
-    pub fn phase(&self) -> Phase {
-        self.phase
+    pub fn phase(&self) -> &str {
+        &self.phase
     }
 
-    /// Get a specific sub-query by ID.
-    pub fn sub_query(&self, id: usize) -> Option<&SubQueryState> {
-        self.sub_queries.get(id)
+    /// Check if execution is complete.
+    pub fn is_complete(&self) -> bool {
+        self.phase == phases::COMPLETE
     }
 
-    /// Get all sub-queries.
-    pub fn sub_queries(&self) -> &[SubQueryState] {
-        &self.sub_queries
+    /// Add a new execution step.
+    pub fn add_step(&mut self, step: ExecutionStep) {
+        self.steps.push(step);
+    }
+
+    /// Add multiple steps at once.
+    pub fn add_steps(&mut self, steps: Vec<ExecutionStep>) {
+        self.steps.extend(steps);
+    }
+
+    /// Get a mutable reference to a step by ID.
+    pub fn step_mut(&mut self, id: &str) -> Option<&mut ExecutionStep> {
+        self.steps.iter_mut().find(|s| s.id == id)
+    }
+
+    /// Get a step by ID.
+    pub fn step(&self, id: &str) -> Option<&ExecutionStep> {
+        self.steps.iter().find(|s| s.id == id)
+    }
+
+    /// Get a step by numeric index (for backwards compatibility).
+    pub fn step_by_index(&self, index: usize) -> Option<&ExecutionStep> {
+        self.steps.get(index)
+    }
+
+    /// Get a mutable step by numeric index.
+    pub fn step_by_index_mut(&mut self, index: usize) -> Option<&mut ExecutionStep> {
+        self.steps.get_mut(index)
+    }
+
+    /// Get all steps.
+    pub fn steps(&self) -> &[ExecutionStep] {
+        &self.steps
     }
 
     /// Get the total elapsed time since start.
@@ -239,17 +199,23 @@ impl ExecutionState {
         self.start_time.elapsed()
     }
 
+    /// Set the final result.
+    pub fn set_final_result(&mut self, result: FinalResultData) {
+        self.final_result = Some(result);
+        self.phase = phases::COMPLETE.to_string();
+    }
+
     /// Get the final result data, if available.
     pub fn final_result(&self) -> Option<&FinalResultData> {
         self.final_result.as_ref()
     }
 
-    /// Calculate the total time if sub-queries had run sequentially.
+    /// Calculate the total time if steps had run sequentially.
     ///
-    /// This is the sum of all individual sub-query durations.
-    /// Returns None if no sub-queries have completed with timing data.
+    /// This is the sum of all individual step durations.
+    /// Returns None if no steps have completed with timing data.
     pub fn sequential_time(&self) -> Option<Duration> {
-        let total: Duration = self.sub_queries.iter().filter_map(|sq| sq.duration).sum();
+        let total: Duration = self.steps.iter().filter_map(|s| s.duration).sum();
 
         if total.is_zero() {
             None
@@ -265,6 +231,57 @@ impl Default for ExecutionState {
     }
 }
 
+/// Trait for handling agent-specific events and updating ExecutionState.
+///
+/// Implement this trait to parse events from a specific agent type
+/// and update the generic ExecutionState accordingly.
+pub trait StateHandler: Send + Sync {
+    /// Process an event and update the state.
+    ///
+    /// Returns the ID of the step that was updated, if any.
+    fn handle(&self, state: &mut ExecutionState, event: &AgentUpdate) -> Option<String>;
+}
+
+/// Default handler that processes common events.
+///
+/// This handles `final_result` events and logs unknown events.
+/// For agent-specific events, use a specialized handler.
+pub struct DefaultStateHandler;
+
+impl StateHandler for DefaultStateHandler {
+    fn handle(&self, state: &mut ExecutionState, event: &AgentUpdate) -> Option<String> {
+        match event.event_type.as_str() {
+            "final_result" => {
+                if let Some(result) = event.as_final_result() {
+                    // Extract step counts from extra field (agent-specific)
+                    let steps_succeeded = result.metadata.extra["steps_succeeded"]
+                        .as_u64()
+                        .unwrap_or(0) as usize;
+                    let steps_failed =
+                        result.metadata.extra["steps_failed"].as_u64().unwrap_or(0) as usize;
+                    state.set_final_result(FinalResultData {
+                        answer: result.answer,
+                        total_tokens: result.metadata.total_tokens,
+                        tokens_unavailable_count: result.metadata.tokens_unavailable_count,
+                        steps_succeeded,
+                        steps_failed,
+                    });
+                } else {
+                    log::warn!(
+                        "Received final_result event with malformed data: {:?}",
+                        event.data
+                    );
+                }
+                None
+            }
+            _ => {
+                log::debug!("Unhandled event type: {}", event.event_type);
+                None
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -274,248 +291,134 @@ mod tests {
     #[test]
     fn test_initial_state() {
         let state = ExecutionState::new();
-        assert_eq!(state.phase(), Phase::NotStarted);
-        assert!(state.sub_queries().is_empty());
+        assert_eq!(state.phase(), phases::NOT_STARTED);
+        assert!(state.steps().is_empty());
         assert!(state.final_result().is_none());
     }
 
     #[test]
-    fn test_decomposition_started() {
+    fn test_set_phase() {
         let mut state = ExecutionState::new();
-        let event = AgentUpdate::custom("decomposition_started", "Decomposing query", json!({}));
-
-        state.update(&event);
-
-        assert_eq!(state.phase(), Phase::Decomposing);
+        state.set_phase("custom_phase");
+        assert_eq!(state.phase(), "custom_phase");
     }
 
     #[test]
-    fn test_decomposition_complete() {
+    fn test_add_steps() {
         let mut state = ExecutionState::new();
-        let event = AgentUpdate::custom(
-            "decomposition_complete",
-            "Decomposed into 3 sub-queries",
-            json!({ "sub_queries": ["Query 1", "Query 2", "Query 3"] }),
-        );
+        state.add_step(ExecutionStep::new("0", "Step 1"));
+        state.add_step(ExecutionStep::new("1", "Step 2"));
 
-        state.update(&event);
-
-        assert_eq!(state.phase(), Phase::Executing);
-        assert_eq!(state.sub_queries().len(), 3);
-
-        let sq = state.sub_query(0).unwrap();
-        assert_eq!(sq.query, "Query 1");
-        assert_eq!(sq.status, SubQueryStatus::Pending);
+        assert_eq!(state.steps().len(), 2);
+        assert_eq!(state.step("0").unwrap().label, "Step 1");
+        assert_eq!(state.step("1").unwrap().label, "Step 2");
     }
 
     #[test]
-    fn test_sub_query_started() {
-        let mut state = ExecutionState::new();
-        state.update(&AgentUpdate::custom(
-            "decomposition_complete",
-            "Decomposed into 1 sub-query",
-            json!({ "sub_queries": ["Q1"] }),
-        ));
+    fn test_step_lifecycle() {
+        let mut step = ExecutionStep::new("test", "Test step");
+        assert!(matches!(step.status, StepStatus::Pending));
 
-        let event = AgentUpdate::custom(
-            "sub_query_started",
-            "Sub-query 0 started",
-            json!({ "id": 0, "query": "Q1" }),
-        );
-        let updated_id = state.update(&event);
+        step.start();
+        assert!(matches!(step.status, StepStatus::InProgress));
+        assert!(step.start_time.is_some());
 
-        assert_eq!(updated_id, Some(0));
-        let sq = state.sub_query(0).unwrap();
-        assert_eq!(sq.status, SubQueryStatus::InProgress);
-        assert!(sq.start_time.is_some());
-    }
-
-    #[test]
-    fn test_sub_query_completed() {
-        let mut state = ExecutionState::new();
-        state.update(&AgentUpdate::custom(
-            "decomposition_complete",
-            "Decomposed into 1 sub-query",
-            json!({ "sub_queries": ["Q1"] }),
-        ));
-        state.update(&AgentUpdate::custom(
-            "sub_query_started",
-            "Sub-query 0 started",
-            json!({ "id": 0, "query": "Q1" }),
-        ));
-
-        let event = AgentUpdate::custom(
-            "sub_query_completed",
-            "Sub-query 0 completed",
-            json!({ "id": 0, "result": "This is the result.", "tokens_used": 42 }),
-        );
-        let updated_id = state.update(&event);
-
-        assert_eq!(updated_id, Some(0));
-        let sq = state.sub_query(0).unwrap();
-        match &sq.status {
-            SubQueryStatus::Completed {
+        step.complete("Result preview".to_string(), Some(42));
+        match &step.status {
+            StepStatus::Completed {
                 result_preview,
                 tokens,
             } => {
-                assert!(result_preview.contains("This is the result"));
-                assert_eq!(*tokens, 42);
+                assert_eq!(result_preview, "Result preview");
+                assert_eq!(*tokens, Some(42));
             }
             _ => panic!("Expected Completed status"),
         }
-        assert!(sq.duration.is_some());
+        assert!(step.duration.is_some());
     }
 
     #[test]
-    fn test_sub_query_failed() {
-        let mut state = ExecutionState::new();
-        state.update(&AgentUpdate::custom(
-            "decomposition_complete",
-            "Decomposed into 1 sub-query",
-            json!({ "sub_queries": ["Q1"] }),
-        ));
-        state.update(&AgentUpdate::custom(
-            "sub_query_started",
-            "Sub-query 0 started",
-            json!({ "id": 0, "query": "Q1" }),
-        ));
+    fn test_step_failure() {
+        let mut step = ExecutionStep::new("test", "Test step");
+        step.start();
+        step.fail("Something went wrong".to_string());
 
-        let event = AgentUpdate::custom(
-            "sub_query_failed",
-            "Sub-query 0 failed",
-            json!({ "id": 0, "error": "Timeout" }),
-        );
-        let updated_id = state.update(&event);
-
-        assert_eq!(updated_id, Some(0));
-        let sq = state.sub_query(0).unwrap();
-        match &sq.status {
-            SubQueryStatus::Failed { error } => {
-                assert_eq!(error, "Timeout");
+        match &step.status {
+            StepStatus::Failed { error } => {
+                assert_eq!(error, "Something went wrong");
             }
             _ => panic!("Expected Failed status"),
         }
     }
 
     #[test]
-    fn test_synthesis_started() {
-        let mut state = ExecutionState::new();
-        state.update(&AgentUpdate::custom(
-            "decomposition_complete",
-            "Decomposed into 1 sub-query",
-            json!({ "sub_queries": ["Q1"] }),
-        ));
-
-        let event = AgentUpdate::custom("synthesis_started", "Synthesizing results", json!({}));
-        state.update(&event);
-
-        assert_eq!(state.phase(), Phase::Synthesizing);
-    }
-
-    #[test]
-    fn test_final_result() {
+    fn test_default_handler_final_result() {
+        let handler = DefaultStateHandler;
         let mut state = ExecutionState::new();
 
-        let metadata = gemicro_core::ResultMetadata {
-            total_tokens: 100,
-            tokens_unavailable_count: 0,
-            duration_ms: 5000,
-            sub_queries_succeeded: 3,
-            sub_queries_failed: 1,
-        };
+        let metadata = gemicro_core::ResultMetadata::with_extra(
+            100,
+            0,
+            5000,
+            json!({
+                "steps_succeeded": 3,
+                "steps_failed": 1,
+            }),
+        );
         let event = AgentUpdate::final_result("Final answer".to_string(), metadata);
-        state.update(&event);
+        handler.handle(&mut state, &event);
 
-        assert_eq!(state.phase(), Phase::Complete);
+        assert_eq!(state.phase(), phases::COMPLETE);
         let result = state.final_result().unwrap();
         assert_eq!(result.answer, "Final answer");
         assert_eq!(result.total_tokens, 100);
-        assert_eq!(result.sub_queries_succeeded, 3);
+        assert_eq!(result.steps_succeeded, 3);
+        assert_eq!(result.steps_failed, 1);
     }
 
     #[test]
-    fn test_unknown_event_ignored() {
+    fn test_default_handler_unknown_event() {
+        let handler = DefaultStateHandler;
         let mut state = ExecutionState::new();
-        let event = AgentUpdate {
-            event_type: "unknown_event".to_string(),
-            message: "Unknown".to_string(),
-            timestamp: std::time::SystemTime::now(),
-            data: json!({}),
-        };
 
-        let result = state.update(&event);
+        let event = AgentUpdate::custom("unknown_event", "Unknown", json!({}));
+        let result = handler.handle(&mut state, &event);
 
+        // Unknown events should return None and not change state
         assert!(result.is_none());
-        assert_eq!(state.phase(), Phase::NotStarted);
+        assert_eq!(state.phase(), phases::NOT_STARTED);
     }
 
     #[test]
-    fn test_sequential_time_no_queries() {
-        let state = ExecutionState::new();
-        assert!(state.sequential_time().is_none());
-    }
-
-    #[test]
-    fn test_sequential_time_with_completed_queries() {
+    fn test_default_handler_malformed_final_result() {
+        let handler = DefaultStateHandler;
         let mut state = ExecutionState::new();
 
-        // Set up sub-queries with durations
-        state.update(&AgentUpdate::custom(
-            "decomposition_complete",
-            "Decomposed into 2 sub-queries",
-            json!({ "sub_queries": ["Q1", "Q2"] }),
-        ));
+        // Create a malformed final_result event (missing required fields)
+        let event = AgentUpdate::custom(
+            "final_result",
+            "Malformed",
+            json!({ "answer": 123 }), // answer should be a string in proper format
+        );
+        let result = handler.handle(&mut state, &event);
 
-        // Manually set durations since we can't wait for real time in tests
-        state.sub_queries[0].duration = Some(Duration::from_secs(2));
-        state.sub_queries[1].duration = Some(Duration::from_secs(3));
+        // Should log warning and not crash
+        assert!(result.is_none());
+        assert!(state.final_result().is_none());
+    }
+
+    #[test]
+    fn test_sequential_time() {
+        let mut state = ExecutionState::new();
+        state.add_step(ExecutionStep::new("0", "Step 1"));
+        state.add_step(ExecutionStep::new("1", "Step 2"));
+
+        // Manually set durations
+        state.step_by_index_mut(0).unwrap().duration = Some(Duration::from_secs(2));
+        state.step_by_index_mut(1).unwrap().duration = Some(Duration::from_secs(3));
 
         let seq_time = state.sequential_time();
         assert!(seq_time.is_some());
         assert_eq!(seq_time.unwrap(), Duration::from_secs(5));
-    }
-
-    #[test]
-    fn test_sequential_time_partial_completion() {
-        let mut state = ExecutionState::new();
-
-        state.update(&AgentUpdate::custom(
-            "decomposition_complete",
-            "Decomposed into 3 sub-queries",
-            json!({ "sub_queries": ["Q1", "Q2", "Q3"] }),
-        ));
-
-        // Only two have durations
-        state.sub_queries[0].duration = Some(Duration::from_secs(2));
-        state.sub_queries[2].duration = Some(Duration::from_secs(4));
-
-        let seq_time = state.sequential_time();
-        assert!(seq_time.is_some());
-        assert_eq!(seq_time.unwrap(), Duration::from_secs(6));
-    }
-
-    #[test]
-    fn test_out_of_bounds_sub_query_returns_none() {
-        let mut state = ExecutionState::new();
-        state.update(&AgentUpdate::custom(
-            "decomposition_complete",
-            "Decomposed into 1 sub-query",
-            json!({ "sub_queries": ["Q1"] }),
-        ));
-
-        // Try to start a sub-query that doesn't exist (id=99)
-        let event = AgentUpdate::custom(
-            "sub_query_started",
-            "Sub-query 99 started",
-            json!({ "id": 99, "query": "Invalid" }),
-        );
-        let result = state.update(&event);
-
-        // Should return None since id 99 doesn't exist
-        assert!(result.is_none());
-
-        // Original sub-query should still be pending
-        let sq = state.sub_query(0).unwrap();
-        assert_eq!(sq.status, SubQueryStatus::Pending);
     }
 }

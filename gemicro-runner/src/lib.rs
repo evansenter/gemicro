@@ -24,29 +24,30 @@
 //!
 //! ## Example
 //!
-//! ```no_run
+//! ```text
+//! // Requires an agent crate like gemicro-deep-research
 //! use gemicro_runner::AgentRunner;
 //! use gemicro_core::{AgentContext, LlmClient, LlmConfig};
 //! use gemicro_deep_research::{DeepResearchAgent, ResearchConfig};
 //!
-//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! // Create agent
-//! let agent = DeepResearchAgent::new(ResearchConfig::default())?;
+//! async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//!     // Create agent
+//!     let agent = DeepResearchAgent::new(ResearchConfig::default())?;
 //!
-//! // Create context
-//! let genai_client = rust_genai::Client::builder("api-key".to_string()).build();
-//! let llm = LlmClient::new(genai_client, LlmConfig::default());
-//! let context = AgentContext::new(llm);
+//!     // Create context
+//!     let genai_client = rust_genai::Client::builder("api-key".to_string()).build();
+//!     let llm = LlmClient::new(genai_client, LlmConfig::default());
+//!     let context = AgentContext::new(llm);
 //!
-//! // Execute headlessly
-//! let runner = AgentRunner::new();
-//! let metrics = runner.execute(&agent, "What is Rust?", context).await?;
+//!     // Execute headlessly
+//!     let runner = AgentRunner::new();
+//!     let metrics = runner.execute(&agent, "What is Rust?", context).await?;
 //!
-//! println!("Duration: {:?}", metrics.total_duration);
-//! println!("Tokens: {}", metrics.total_tokens);
-//! println!("Answer: {:?}", metrics.final_answer);
-//! # Ok(())
-//! # }
+//!     println!("Duration: {:?}", metrics.total_duration);
+//!     println!("Tokens: {}", metrics.total_tokens);
+//!     println!("Answer: {:?}", metrics.final_answer);
+//!     Ok(())
+//! }
 //! ```
 
 pub mod metrics;
@@ -56,8 +57,19 @@ pub mod state;
 pub mod utils;
 
 // Re-export public API
-pub use metrics::{ExecutionMetrics, SubQueryTiming};
+pub use metrics::{ExecutionMetrics, StepTiming};
 pub use registry::{AgentFactory, AgentRegistry};
 pub use runner::AgentRunner;
-pub use state::{ExecutionState, FinalResultData, Phase, SubQueryState, SubQueryStatus};
+pub use state::{
+    phases, DefaultStateHandler, ExecutionState, ExecutionStep, FinalResultData, StateHandler,
+    StepStatus,
+};
 pub use utils::{first_sentence, format_duration, truncate};
+
+// Backwards compatibility aliases (deprecated)
+#[deprecated(since = "0.2.0", note = "Use StepTiming instead")]
+pub type SubQueryTiming = StepTiming;
+#[deprecated(since = "0.2.0", note = "Use ExecutionStep instead")]
+pub type SubQueryState = ExecutionStep;
+#[deprecated(since = "0.2.0", note = "Use StepStatus instead")]
+pub type SubQueryStatus = StepStatus;

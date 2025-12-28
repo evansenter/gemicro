@@ -191,13 +191,11 @@ impl ReactAgent {
                     );
 
                     // Emit standard final_result for ExecutionState/harness compatibility
-                    let metadata = ResultMetadata {
+                    let metadata = ResultMetadata::new(
                         total_tokens,
-                        tokens_unavailable_count: tokens_unavailable,
-                        duration_ms: start_time.elapsed().as_millis() as u64,
-                        sub_queries_succeeded: 0,
-                        sub_queries_failed: 0,
-                    };
+                        tokens_unavailable,
+                        start_time.elapsed().as_millis() as u64,
+                    );
                     yield AgentUpdate::final_result(step.action.input, metadata);
                     return;
                 }
@@ -268,13 +266,11 @@ impl ReactAgent {
             );
 
             // Emit final_result per event contract (MUST be last event)
-            let metadata = ResultMetadata {
+            let metadata = ResultMetadata::new(
                 total_tokens,
-                tokens_unavailable_count: tokens_unavailable,
-                duration_ms: start_time.elapsed().as_millis() as u64,
-                sub_queries_succeeded: 0,
-                sub_queries_failed: 0,
-            };
+                tokens_unavailable,
+                start_time.elapsed().as_millis() as u64,
+            );
             let fallback_answer = format!(
                 "Unable to find answer after {} iterations. Last thought: {}",
                 config.max_iterations, last_thought
@@ -397,6 +393,10 @@ impl Agent for ReactAgent {
 
     fn execute(&self, query: &str, context: AgentContext) -> AgentStream<'_> {
         Box::pin(ReactAgent::execute(self, query, context))
+    }
+
+    fn create_tracker(&self) -> Box<dyn gemicro_core::ExecutionTracking> {
+        Box::new(gemicro_core::DefaultTracker::default())
     }
 }
 

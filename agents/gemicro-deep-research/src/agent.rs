@@ -188,13 +188,15 @@ impl DeepResearchAgent {
 
             let duration_ms = start_time.elapsed().as_millis() as u64;
 
-            let metadata = ResultMetadata {
+            let metadata = ResultMetadata::with_extra(
                 total_tokens,
-                tokens_unavailable_count: tokens_unavailable,
+                tokens_unavailable,
                 duration_ms,
-                sub_queries_succeeded: execution_result.succeeded,
-                sub_queries_failed: execution_result.failed,
-            };
+                json!({
+                    "steps_succeeded": execution_result.succeeded,
+                    "steps_failed": execution_result.failed,
+                }),
+            );
 
             yield AgentUpdate::final_result(answer, metadata);
         }
@@ -212,6 +214,10 @@ impl Agent for DeepResearchAgent {
 
     fn execute(&self, query: &str, context: AgentContext) -> AgentStream<'_> {
         Box::pin(DeepResearchAgent::execute(self, query, context))
+    }
+
+    fn create_tracker(&self) -> Box<dyn gemicro_core::ExecutionTracking> {
+        Box::new(gemicro_core::DefaultTracker::default())
     }
 }
 
