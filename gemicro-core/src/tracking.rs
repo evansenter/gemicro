@@ -12,7 +12,7 @@
 //! to know about agent-specific concepts like "sub-queries" or "ReAct iterations".
 //! Instead, they call generic methods like `status_message()` and `is_complete()`.
 //!
-//! # Example
+//! # Usage Example
 //!
 //! ```ignore
 //! use gemicro_core::{Agent, AgentContext, ExecutionTracking};
