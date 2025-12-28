@@ -382,4 +382,32 @@ mod tests {
         let runner = AgentRunner;
         assert!(std::mem::size_of_val(&runner) == 0); // Zero-size struct
     }
+
+    #[tokio::test]
+    async fn test_runner_execute_with_tracking() {
+        let runner = AgentRunner::new();
+        let agent = MockAgent::new(create_successful_events());
+        let context = create_mock_context();
+
+        let status_messages = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let messages_clone = status_messages.clone();
+
+        let metrics = runner
+            .execute_with_tracking(&agent, "query", context, move |tracker, msg| {
+                messages_clone.lock().unwrap().push(msg.to_string());
+                // Verify tracker state is accessible during callback
+                if tracker.is_complete() {
+                    assert!(tracker.final_result().is_some());
+                }
+            })
+            .await
+            .unwrap();
+
+        let messages = status_messages.lock().unwrap();
+        // Should have received status updates (one per event with non-empty message)
+        assert!(!messages.is_empty());
+        // Metrics should reflect final result
+        assert_eq!(metrics.total_tokens, 100);
+        assert_eq!(metrics.final_answer, Some("Final answer".to_string()));
+    }
 }

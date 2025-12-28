@@ -175,18 +175,16 @@ impl ExecutionMetrics {
                     result.extra.clone(),
                 )
             } else {
-                (
-                    0,
-                    0,
-                    None,
-                    if tracker.is_complete() {
-                        "complete"
-                    } else {
-                        "unknown"
-                    }
-                    .to_string(),
-                    serde_json::Value::Null,
-                )
+                let phase = if tracker.is_complete() {
+                    log::debug!(
+                        "Tracker reports complete but has no final_result - metrics will have zero values"
+                    );
+                    "complete"
+                } else {
+                    log::debug!("Creating metrics from incomplete tracker execution");
+                    "unknown"
+                };
+                (0, 0, None, phase.to_string(), serde_json::Value::Null)
             };
 
         // Extract step counts from extra field if present
@@ -348,5 +346,69 @@ mod tests {
         let metrics = ExecutionMetrics::from_state(&state);
 
         assert!(metrics.is_complete());
+    }
+
+    #[test]
+    fn test_metrics_from_tracker_with_final_result() {
+        use gemicro_core::{AgentUpdate, DefaultTracker, ExecutionTracking, ResultMetadata};
+        use serde_json::json;
+        use std::time::Duration;
+
+        let mut tracker = DefaultTracker::default();
+        let metadata = ResultMetadata::with_extra(
+            200,
+            1,
+            3000,
+            json!({ "steps_succeeded": 5, "steps_failed": 2 }),
+        );
+        tracker.handle_event(&AgentUpdate::final_result("Answer".to_string(), metadata));
+
+        let metrics = ExecutionMetrics::from_tracker(&tracker, Duration::from_secs(3));
+
+        assert_eq!(metrics.total_tokens, 200);
+        assert_eq!(metrics.tokens_unavailable_count, 1);
+        assert_eq!(metrics.steps_succeeded, 5);
+        assert_eq!(metrics.steps_failed, 2);
+        assert_eq!(metrics.steps_total, 7);
+        assert_eq!(metrics.final_answer, Some("Answer".to_string()));
+        assert_eq!(metrics.completion_phase, "complete");
+    }
+
+    #[test]
+    fn test_metrics_from_tracker_without_final_result() {
+        use gemicro_core::{AgentUpdate, DefaultTracker, ExecutionTracking};
+        use serde_json::json;
+        use std::time::Duration;
+
+        let mut tracker = DefaultTracker::default();
+        // Only send intermediate event, no final_result
+        tracker.handle_event(&AgentUpdate::custom("progress", "Working...", json!({})));
+
+        let metrics = ExecutionMetrics::from_tracker(&tracker, Duration::from_secs(1));
+
+        assert_eq!(metrics.total_tokens, 0);
+        assert_eq!(metrics.steps_total, 0);
+        assert!(metrics.final_answer.is_none());
+        assert_eq!(metrics.completion_phase, "unknown");
+    }
+
+    #[test]
+    fn test_metrics_from_tracker_missing_extra_fields() {
+        use gemicro_core::{AgentUpdate, DefaultTracker, ExecutionTracking, ResultMetadata};
+        use std::time::Duration;
+
+        let mut tracker = DefaultTracker::default();
+        // final_result with null extra (no steps_succeeded/failed)
+        let metadata = ResultMetadata::new(100, 0, 2000);
+        tracker.handle_event(&AgentUpdate::final_result("Answer".to_string(), metadata));
+
+        let metrics = ExecutionMetrics::from_tracker(&tracker, Duration::from_secs(2));
+
+        // Should default to 0 when extra fields are missing
+        assert_eq!(metrics.steps_succeeded, 0);
+        assert_eq!(metrics.steps_failed, 0);
+        assert_eq!(metrics.steps_total, 0);
+        assert_eq!(metrics.total_tokens, 100);
+        assert_eq!(metrics.final_answer, Some("Answer".to_string()));
     }
 }
