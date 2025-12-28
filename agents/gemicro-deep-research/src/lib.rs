@@ -38,6 +38,3 @@ mod events;
 pub use agent::DeepResearchAgent;
 pub use config::{ResearchConfig, ResearchPrompts};
 pub use events::{DeepResearchEventExt, SubQueryResult};
-
-// Re-export core types for convenience
-pub use gemicro_core::{Agent, AgentContext, AgentError, AgentStream, AgentUpdate};

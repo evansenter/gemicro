@@ -47,9 +47,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::time::Duration;
 
-// Re-export core types for convenience
-pub use gemicro_core::{AgentError as Error, AgentUpdate as Update};
-
 /// Event type for judge starting evaluation
 pub const EVENT_JUDGE_STARTED: &str = "judge_started";
 

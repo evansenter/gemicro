@@ -45,9 +45,6 @@ use async_stream::try_stream;
 use serde_json::json;
 use std::time::{Duration, Instant};
 
-// Re-export core types for convenience
-pub use gemicro_core::{AgentError as Error, AgentUpdate as Update};
-
 // ============================================================================
 // Event Type Constants
 // ============================================================================

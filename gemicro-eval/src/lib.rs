@@ -100,8 +100,3 @@ pub use dataset::{Dataset, DatasetError, GSM8KSplit, HotpotQA, JsonFileDataset, 
 pub use harness::{EvalConfig, EvalError, EvalHarness, EvalProgress};
 pub use results::{EvalQuestion, EvalResult, EvalSummary};
 pub use scorer::{Contains, LlmJudgeScorer, Scorer, Scorers};
-
-// Re-export from gemicro-judge (avoid duplication)
-pub use gemicro_judge::{
-    JudgeConfig, JudgeInput, JudgeOutput, LlmJudgeAgent, EVENT_JUDGE_RESULT, EVENT_JUDGE_STARTED,
-};

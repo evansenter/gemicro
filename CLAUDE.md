@@ -127,6 +127,36 @@ Each agent crate:
 - Has its own tests and examples
 - Can be versioned and released independently
 
+### Import Principles: Single Source of Truth
+
+**NEVER re-export types from other crates for "convenience".** Each type has exactly one canonical home:
+
+| Type | Canonical Import |
+|------|------------------|
+| `Agent`, `AgentContext`, `AgentUpdate`, `AgentError` | `gemicro_core` |
+| `DeepResearchAgent`, `ResearchConfig` | `gemicro_deep_research` |
+| `ReactAgent`, `ReactConfig` | `gemicro_react` |
+| `LlmJudgeAgent`, `JudgeConfig` | `gemicro_judge` |
+| `EvalHarness`, `Scorers` | `gemicro_eval` |
+
+**Why?**
+- One source of truth per type (no sync maintenance)
+- Clear ownership (where does this type live?)
+- No confusion about which import to use
+
+**❌ DON'T: Re-export for convenience**
+```rust
+// In gemicro-deep-research/src/lib.rs - DON'T DO THIS
+pub use gemicro_core::{Agent, AgentContext}; // Creates duplicate paths
+```
+
+**✅ DO: Import from canonical source**
+```rust
+// User code
+use gemicro_deep_research::DeepResearchAgent;
+use gemicro_core::{Agent, AgentContext}; // Always from core
+```
+
 ## Core Design Philosophy: Evergreen-Inspired Soft-Typing
 
 **CRITICAL**: This project follows the [Evergreen spec](https://github.com/google-deepmind/evergreen-spec) philosophy of **pragmatic flexibility over rigid typing**.

@@ -29,6 +29,3 @@ mod config;
 
 pub use agent::ReactAgent;
 pub use config::{ReactConfig, ReactPrompts};
-
-// Re-export core types for convenience
-pub use gemicro_core::{Agent, AgentContext, AgentError, AgentStream, AgentUpdate};

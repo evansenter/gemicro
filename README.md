@@ -49,6 +49,17 @@ gemicro-cli (terminal rendering)
 - **Soft-typed events**: Following [Evergreen spec](https://github.com/google-deepmind/evergreen-spec) philosophy for maximum extensibility
 - **Interactions API**: Uses Gemini's unified Interactions API exclusively
 - **Single model**: Hardcoded to `gemini-3-flash-preview` for consistency
+- **Single source of truth**: Each type has one canonical crate—no convenience re-exports
+
+### Imports
+
+Each type lives in exactly one crate. Import from the canonical source:
+
+```rust
+use gemicro_core::{Agent, AgentContext, AgentUpdate};     // Core types
+use gemicro_deep_research::{DeepResearchAgent, ResearchConfig}; // Agent + config
+use gemicro_judge::LlmJudgeAgent;                          // Judge agent
+```
 
 ## Project Status
 
