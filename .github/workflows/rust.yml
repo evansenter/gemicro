@@ -32,27 +32,33 @@ jobs:
         run: cargo test --workspace --verbose
 
   test-integration:
-    name: Integration Tests (${{ matrix.name }})
+    name: Integration Tests (${{ matrix.group }})
     runs-on: ubuntu-latest
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: cli
-            packages: "-p gemicro-cli"
-          - name: research-qa
-            packages: "-p gemicro-deep-research -p gemicro-simple-qa"
-          - name: react-tools
-            packages: "-p gemicro-react -p gemicro-tool-agent"
+          - group: cli
+            packages: "gemicro-cli"
+          - group: research-qa
+            packages: "gemicro-deep-research gemicro-simple-qa"
+          - group: react-tools
+            packages: "gemicro-react gemicro-tool-agent"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: integration-${{ matrix.name }}
-      - name: Run integration tests
-        run: cargo test ${{ matrix.packages }} --verbose -- --include-ignored
+          shared-key: integration-${{ matrix.group }}
+      - name: Run integration tests (${{ matrix.group }})
+        run: |
+          set -e
+          for pkg in ${{ matrix.packages }}; do
+            echo "::group::Running $pkg"
+            cargo test -p $pkg --verbose -- --include-ignored
+            echo "::endgroup::"
+          done
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 
