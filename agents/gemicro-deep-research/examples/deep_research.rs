@@ -1,10 +1,10 @@
 //! Deep Research Agent Example
 //!
 //! Run with:
-//!   GEMINI_API_KEY=your_key cargo run -p gemicro-core --example deep_research
+//!   GEMINI_API_KEY=your_key cargo run -p gemicro-deep-research --example deep_research
 //!
 //! Or with a custom query:
-//!   GEMINI_API_KEY=your_key cargo run -p gemicro-core --example deep_research -- "Your question here"
+//!   GEMINI_API_KEY=your_key cargo run -p gemicro-deep-research --example deep_research -- "Your question here"
 //!
 //! Press Ctrl+C to cancel gracefully - partial results will be shown.
 //!
@@ -12,10 +12,8 @@
 //!   gemicro "What happened in tech news today?" --google-search
 
 use futures_util::StreamExt;
-use gemicro_core::{
-    AgentContext, AgentError, DeepResearchAgent, DeepResearchEventExt, LlmClient, LlmConfig,
-    ResearchConfig,
-};
+use gemicro_core::{AgentContext, AgentError, LlmClient, LlmConfig};
+use gemicro_deep_research::{DeepResearchAgent, DeepResearchEventExt, ResearchConfig};
 use std::collections::HashMap;
 use std::env;
 use std::sync::atomic::{AtomicBool, Ordering};

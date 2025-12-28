@@ -4,10 +4,10 @@
 //! thinks, acts with tools (calculator, web search), and observes results.
 //!
 //! Run with:
-//!   GEMINI_API_KEY=your_key cargo run -p gemicro-core --example react
+//!   GEMINI_API_KEY=your_key cargo run -p gemicro-react --example react
 //!
 //! Or with a custom query:
-//!   GEMINI_API_KEY=your_key cargo run -p gemicro-core --example react -- "Your question here"
+//!   GEMINI_API_KEY=your_key cargo run -p gemicro-react --example react -- "Your question here"
 //!
 //! Available tools:
 //!   - calculator: Evaluates mathematical expressions
@@ -16,7 +16,8 @@
 //! Press Ctrl+C to cancel gracefully.
 
 use futures_util::StreamExt;
-use gemicro_core::{AgentContext, AgentError, LlmClient, LlmConfig, ReactAgent, ReactConfig};
+use gemicro_core::{AgentContext, AgentError, LlmClient, LlmConfig};
+use gemicro_react::{ReactAgent, ReactConfig};
 use std::env;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;

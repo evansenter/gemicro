@@ -4,7 +4,7 @@
 
 use futures_util::StreamExt;
 use gemicro_core::{Agent, AgentContext, LlmClient, LlmConfig};
-use gemicro_eval::{JudgeConfig, JudgeInput, LlmJudgeAgent};
+use gemicro_judge::{JudgeConfig, JudgeInput, LlmJudgeAgent};
 use std::time::Duration;
 
 fn get_api_key() -> Option<String> {

@@ -20,7 +20,8 @@ use gemicro_core::{Agent, AgentContext, AgentError};
 ///
 /// ```no_run
 /// use gemicro_runner::AgentRunner;
-/// use gemicro_core::{DeepResearchAgent, ResearchConfig, AgentContext, LlmClient, LlmConfig};
+/// use gemicro_core::{AgentContext, LlmClient, LlmConfig};
+/// use gemicro_deep_research::{DeepResearchAgent, ResearchConfig};
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// let runner = AgentRunner::new();
@@ -89,7 +90,8 @@ impl AgentRunner {
     ///
     /// ```no_run
     /// use gemicro_runner::{AgentRunner, ExecutionState};
-    /// # use gemicro_core::{DeepResearchAgent, ResearchConfig, AgentContext};
+    /// # use gemicro_core::AgentContext;
+    /// # use gemicro_deep_research::{DeepResearchAgent, ResearchConfig};
     ///
     /// # async fn example(agent: &DeepResearchAgent, context: AgentContext) -> Result<(), Box<dyn std::error::Error>> {
     /// let runner = AgentRunner::new();

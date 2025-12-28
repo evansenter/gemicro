@@ -26,7 +26,8 @@
 //!
 //! ```no_run
 //! use gemicro_runner::AgentRunner;
-//! use gemicro_core::{DeepResearchAgent, ResearchConfig, AgentContext, LlmClient, LlmConfig};
+//! use gemicro_core::{AgentContext, LlmClient, LlmConfig};
+//! use gemicro_deep_research::{DeepResearchAgent, ResearchConfig};
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! // Create agent

@@ -3,15 +3,16 @@
 //! Run evaluations against HotpotQA or custom JSON datasets.
 
 use clap::Parser;
-use gemicro_core::{
-    DeepResearchAgent, LlmClient, LlmConfig, ReactAgent, ReactConfig, ResearchConfig,
-    SimpleQaAgent, SimpleQaConfig, ToolAgent, ToolAgentConfig,
-};
+use gemicro_core::{LlmClient, LlmConfig};
+use gemicro_deep_research::{DeepResearchAgent, ResearchConfig};
 use gemicro_eval::{
     Contains, Dataset, EvalConfig, EvalHarness, EvalProgress, EvalSummary, HotpotQA,
     JsonFileDataset, LlmJudgeScorer, Scorers, GSM8K,
 };
+use gemicro_react::{ReactAgent, ReactConfig};
 use gemicro_runner::AgentRegistry;
+use gemicro_simple_qa::{SimpleQaAgent, SimpleQaConfig};
+use gemicro_tool_agent::{ToolAgent, ToolAgentConfig};
 use indicatif::{ProgressBar, ProgressStyle};
 use std::path::PathBuf;
 use std::process::ExitCode;

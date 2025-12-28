@@ -1,13 +1,14 @@
 //! Integration tests for SimpleQaAgent
 //!
 //! These tests require a valid GEMINI_API_KEY environment variable.
-//! Run with: cargo test --package gemicro-core -- --include-ignored
+//! Run with: cargo test -p gemicro-simple-qa -- --include-ignored
 
 mod common;
 
 use common::{create_test_context, create_test_context_with_cancellation, get_api_key};
 use futures_util::StreamExt;
-use gemicro_core::{Agent, AgentError, SimpleQaAgent, SimpleQaConfig};
+use gemicro_core::{Agent, AgentError};
+use gemicro_simple_qa::{SimpleQaAgent, SimpleQaConfig};
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
@@ -93,7 +94,6 @@ async fn test_simple_qa_respects_system_prompt() {
         }
     }
 
-    // The answer should have some pirate-like elements
     println!("Pirate response: {}", final_answer);
     assert!(!final_answer.is_empty());
 }
@@ -123,20 +123,17 @@ async fn test_simple_qa_cancellation() {
     let stream = agent.execute("What is the meaning of life?", context);
     futures_util::pin_mut!(stream);
 
-    // Should get a cancellation error
     let mut got_cancelled = false;
     while let Some(result) = stream.next().await {
         match result {
             Ok(update) => {
                 println!("[{}] {}", update.event_type, update.message);
-                // If we get a started event before cancellation kicks in, that's OK
             }
             Err(AgentError::Cancelled) => {
                 got_cancelled = true;
                 break;
             }
             Err(e) => {
-                // Timeout or other error - cancellation might have caused this
                 println!("Got error (possibly from cancellation): {:?}", e);
                 got_cancelled = true;
                 break;
@@ -158,8 +155,6 @@ async fn test_simple_qa_timeout() {
 
     let context = create_test_context(&api_key);
 
-    // Use a very short timeout (10ms) to trigger timeout behavior
-    // Note: 1ms could be flaky on slow CI, 10ms is more reliable
     let config = SimpleQaConfig {
         timeout: Duration::from_millis(10),
         system_prompt: "You are a helpful assistant.".to_string(),
@@ -182,7 +177,6 @@ async fn test_simple_qa_timeout() {
                 break;
             }
             Err(e) => {
-                // Other errors might occur with very short timeouts
                 println!("Got error: {:?}", e);
                 got_timeout = true;
                 break;
@@ -214,14 +208,12 @@ async fn test_simple_qa_event_data() {
         if let Ok(update) = result {
             match update.event_type.as_str() {
                 "simple_qa_started" => {
-                    // Should have query in data
                     assert!(
                         update.data.get("query").is_some(),
                         "Should have query field"
                     );
                 }
                 "simple_qa_result" => {
-                    // Should have answer, duration, and optionally tokens
                     assert!(
                         update.data.get("answer").is_some(),
                         "Should have answer field"

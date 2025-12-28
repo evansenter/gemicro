@@ -10,9 +10,9 @@ use anyhow::{bail, Context, Result};
 use clap::Parser;
 use display::{ExecutionState, IndicatifRenderer, Phase, Renderer};
 use futures_util::StreamExt;
-use gemicro_core::{
-    AgentContext, AgentError, DeepResearchAgent, LlmClient, ToolAgent, ToolAgentConfig,
-};
+use gemicro_core::{AgentContext, AgentError, LlmClient};
+use gemicro_deep_research::DeepResearchAgent;
+use gemicro_tool_agent::{ToolAgent, ToolAgentConfig};
 use repl::Session;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;

@@ -1,0 +1,27 @@
+[package]
+name = "gemicro-deep-research"
+version = "0.1.0"
+edition = "2021"
+description = "Deep Research agent: query decomposition, parallel sub-query execution, synthesis"
+
+[dependencies]
+gemicro-core = { path = "../../gemicro-core" }
+rust-genai = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+async-stream = { workspace = true }
+futures-util = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+log = { workspace = true }
+
+[[example]]
+name = "deep_research"
+path = "examples/deep_research.rs"
+
+[dev-dependencies]
+rstest = { workspace = true }
+rust-genai = { workspace = true }
+tokio = { workspace = true, features = ["test-util", "macros"] }
+tokio-util = { workspace = true }
+futures-util = { workspace = true }

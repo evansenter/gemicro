@@ -7,13 +7,39 @@
 //! - Streaming execution with `async_stream`
 //!
 //! See `docs/AGENT_AUTHORING.md` for a detailed walkthrough of these patterns.
+//!
+//! # Example
+//!
+//! ```no_run
+//! use gemicro_simple_qa::{SimpleQaAgent, SimpleQaConfig};
+//! use gemicro_core::{Agent, AgentContext, LlmClient, LlmConfig};
+//! use futures_util::StreamExt;
+//!
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let agent = SimpleQaAgent::new(SimpleQaConfig::default())?;
+//!
+//! let genai = rust_genai::Client::builder("api-key".to_string()).build();
+//! let context = AgentContext::new(LlmClient::new(genai, LlmConfig::default()));
+//!
+//! let stream = agent.execute("What is Rust?", context);
+//! futures_util::pin_mut!(stream);
+//!
+//! while let Some(update) = stream.next().await {
+//!     let update = update?;
+//!     match update.event_type.as_str() {
+//!         "simple_qa_started" => println!("Processing..."),
+//!         "simple_qa_result" => println!("Answer: {}", update.message),
+//!         _ => {} // Ignore unknown events
+//!     }
+//! }
+//! # Ok(())
+//! # }
+//! ```
 
-use crate::agent::{remaining_time, timeout_error, with_timeout_and_cancellation};
-use crate::agent::{Agent, AgentContext, AgentStream};
-use crate::error::AgentError;
-use crate::llm::LlmRequest;
-use crate::update::AgentUpdate;
-use crate::utils::{extract_total_tokens, truncate};
+use gemicro_core::{
+    remaining_time, timeout_error, truncate, with_timeout_and_cancellation, Agent, AgentContext,
+    AgentError, AgentStream, AgentUpdate, LlmRequest, ResultMetadata,
+};
 
 use async_stream::try_stream;
 use serde_json::json;
@@ -24,10 +50,10 @@ use std::time::{Duration, Instant};
 // ============================================================================
 
 /// Event emitted when the agent starts processing a query.
-pub(crate) const EVENT_SIMPLE_QA_STARTED: &str = "simple_qa_started";
+const EVENT_SIMPLE_QA_STARTED: &str = "simple_qa_started";
 
 /// Event emitted when the agent produces its final result.
-pub(crate) const EVENT_SIMPLE_QA_RESULT: &str = "simple_qa_result";
+const EVENT_SIMPLE_QA_RESULT: &str = "simple_qa_result";
 
 // ============================================================================
 // Configuration
@@ -38,7 +64,7 @@ pub(crate) const EVENT_SIMPLE_QA_RESULT: &str = "simple_qa_result";
 /// # Example
 ///
 /// ```
-/// use gemicro_core::SimpleQaConfig;
+/// use gemicro_simple_qa::SimpleQaConfig;
 /// use std::time::Duration;
 ///
 /// let config = SimpleQaConfig {
@@ -78,7 +104,7 @@ impl SimpleQaConfig {
     /// # Example
     ///
     /// ```
-    /// use gemicro_core::SimpleQaConfig;
+    /// use gemicro_simple_qa::SimpleQaConfig;
     /// use std::time::Duration;
     ///
     /// let invalid = SimpleQaConfig {
@@ -120,7 +146,8 @@ impl SimpleQaConfig {
 /// # Example
 ///
 /// ```no_run
-/// use gemicro_core::{SimpleQaAgent, SimpleQaConfig, AgentContext, Agent, LlmClient, LlmConfig};
+/// use gemicro_simple_qa::{SimpleQaAgent, SimpleQaConfig};
+/// use gemicro_core::{AgentContext, Agent, LlmClient, LlmConfig};
 /// use futures_util::StreamExt;
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -204,7 +231,7 @@ impl Agent for SimpleQaAgent {
             .await?;
 
             let answer = response.text().unwrap_or("").to_string();
-            let tokens_used = extract_total_tokens(&response);
+            let tokens_used = gemicro_core::extract_total_tokens(&response);
             let duration_ms = start.elapsed().as_millis() as u64;
 
             // Emit agent-specific result event
@@ -219,7 +246,6 @@ impl Agent for SimpleQaAgent {
             );
 
             // Emit standard final_result for ExecutionState/harness compatibility
-            use crate::update::ResultMetadata;
             let metadata = ResultMetadata {
                 total_tokens: tokens_used.unwrap_or(0),
                 tokens_unavailable_count: if tokens_used.is_none() { 1 } else { 0 },

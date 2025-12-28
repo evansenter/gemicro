@@ -14,11 +14,10 @@
 //! 5. Compares performance metrics
 
 use futures_util::StreamExt;
-use gemicro_core::{AgentContext, DeepResearchAgent, LlmClient, LlmConfig, ResearchConfig};
-use gemicro_eval::{
-    EvalConfig, EvalHarness, EvalProgress, JsonFileDataset, JudgeConfig, JudgeInput, LlmJudgeAgent,
-    Scorers,
-};
+use gemicro_core::{AgentContext, LlmClient, LlmConfig};
+use gemicro_deep_research::{DeepResearchAgent, ResearchConfig};
+use gemicro_eval::{EvalConfig, EvalHarness, EvalProgress, JsonFileDataset, Scorers};
+use gemicro_judge::{JudgeConfig, JudgeInput, LlmJudgeAgent};
 use gemicro_runner::AgentRegistry;
 use std::env;
 use std::io::Write;

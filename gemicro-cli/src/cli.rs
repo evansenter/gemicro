@@ -1,7 +1,8 @@
 //! Command-line argument parsing.
 
 use clap::Parser;
-use gemicro_core::{LlmConfig, ResearchConfig};
+use gemicro_core::LlmConfig;
+use gemicro_deep_research::ResearchConfig;
 use std::time::Duration;
 
 /// AI agent exploration platform

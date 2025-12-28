@@ -1,0 +1,26 @@
+[package]
+name = "gemicro-tool-agent"
+version = "0.1.0"
+edition = "2021"
+description = "Tool agent: native function calling with calculator/datetime tools"
+
+[dependencies]
+gemicro-core = { path = "../../gemicro-core" }
+rust-genai = { workspace = true }
+rust-genai-macros = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+async-stream = { workspace = true }
+futures-util = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+log = { workspace = true }
+meval = "0.2"
+chrono = "0.4"
+
+[dev-dependencies]
+rstest = { workspace = true }
+rust-genai = { workspace = true }
+tokio = { workspace = true, features = ["test-util", "macros"] }
+futures-util = { workspace = true }

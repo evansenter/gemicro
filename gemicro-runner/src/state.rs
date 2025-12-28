@@ -4,7 +4,9 @@
 //! making it easy to test and enabling renderer swappability.
 
 use crate::utils::first_sentence;
-use gemicro_core::{AgentUpdate, DeepResearchEventExt};
+use gemicro_core::AgentUpdate;
+// TEMPORARY: This coupling will be removed when ExecutionState becomes generic (issue #120)
+use gemicro_deep_research::DeepResearchEventExt;
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 

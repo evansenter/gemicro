@@ -3,11 +3,34 @@
 //! Unlike the ReAct agent which explicitly reasons about tool usage,
 //! this agent delegates tool selection and execution to rust-genai's
 //! automatic function calling loop.
+//!
+//! # Example
+//!
+//! ```no_run
+//! use gemicro_tool_agent::{ToolAgent, ToolAgentConfig, ToolType};
+//! use gemicro_core::{AgentContext, LlmClient, LlmConfig};
+//! use futures_util::StreamExt;
+//!
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let config = ToolAgentConfig::default().with_tools(vec![ToolType::Calculator]);
+//! let agent = ToolAgent::new(config)?;
+//!
+//! let genai_client = rust_genai::Client::builder("api-key".to_string()).build();
+//! let context = AgentContext::new(LlmClient::new(genai_client, LlmConfig::default()));
+//!
+//! let stream = agent.execute("What is 25 * 4?", context);
+//! futures_util::pin_mut!(stream);
+//! while let Some(update) = stream.next().await {
+//!     println!("{:?}", update?);
+//! }
+//! # Ok(())
+//! # }
+//! ```
 
-use super::{remaining_time, timeout_error, with_timeout_and_cancellation, Agent, AgentContext};
-use crate::config::MODEL;
-use crate::error::AgentError;
-use crate::update::{AgentUpdate, ResultMetadata};
+use gemicro_core::{
+    remaining_time, timeout_error, with_timeout_and_cancellation, Agent, AgentContext, AgentError,
+    AgentStream, AgentUpdate, ResultMetadata, MODEL,
+};
 
 use async_stream::try_stream;
 use futures_util::Stream;
@@ -21,10 +44,10 @@ use std::time::{Duration, Instant};
 // ============================================================================
 
 /// Emitted when the tool agent starts processing
-pub(crate) const EVENT_TOOL_AGENT_STARTED: &str = "tool_agent_started";
+const EVENT_TOOL_AGENT_STARTED: &str = "tool_agent_started";
 
 /// Emitted when the agent completes successfully
-pub(crate) const EVENT_TOOL_AGENT_COMPLETE: &str = "tool_agent_complete";
+const EVENT_TOOL_AGENT_COMPLETE: &str = "tool_agent_complete";
 
 // ============================================================================
 // Tool Definitions using #[tool] macro
@@ -259,7 +282,8 @@ impl ToolAgentConfig {
 /// # Example
 ///
 /// ```no_run
-/// use gemicro_core::{AgentContext, ToolAgent, ToolAgentConfig, LlmClient, LlmConfig};
+/// use gemicro_tool_agent::{ToolAgent, ToolAgentConfig};
+/// use gemicro_core::{AgentContext, LlmClient, LlmConfig};
 /// use futures_util::StreamExt;
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -432,7 +456,7 @@ impl Agent for ToolAgent {
         "An agent that uses native function calling for tool execution"
     }
 
-    fn execute(&self, query: &str, context: AgentContext) -> super::AgentStream<'_> {
+    fn execute(&self, query: &str, context: AgentContext) -> AgentStream<'_> {
         Box::pin(ToolAgent::execute(self, query, context))
     }
 }
@@ -603,24 +627,7 @@ mod tests {
         // Jan 1, 1971 (365 days after epoch)
         assert_eq!(days_to_ymd(365), (1971, 1, 1));
 
-        // Dec 31, 2024 (known date for validation)
-        // Days from 1970-01-01 to 2024-12-31:
-        // 55 years, accounting for leap years (1972, 1976, ..., 2024)
-        // Leap years from 1970-2024: 1972, 1976, 1980, 1984, 1988, 1992, 1996, 2000, 2004, 2008, 2012, 2016, 2020, 2024 = 14
-        // Regular years: 55 - 14 = 41
-        // Days: 41*365 + 14*366 = 14965 + 5124 = 20089, then + 365 days in 2024 = 20089, minus 1 for Dec 31 = 20088
-        // Actually: let's compute more carefully
-        // 2024-12-31 is day 20088 since epoch (can verify with online calculator)
-        // But since 2024 is a leap year with 366 days, Dec 31 is the 366th day of 2024
-        // Let me use a simpler known date: 2000-03-01 (after Feb 29 in leap year 2000)
-        // Days from 1970-01-01 to 2000-03-01:
-        // 30 years from 1970 to 2000
-        // Leap years: 1972, 1976, 1980, 1984, 1988, 1992, 1996 = 7 leap years in 1970-1999
-        // 2000 is also a leap year (divisible by 400)
-        // Days through 1999: 23*365 + 7*366 = 8395 + 2562 = 10957
-        // Days in Jan 2000: 31
-        // Days in Feb 2000: 29 (leap year)
-        // Total: 10957 + 31 + 29 = 11017
+        // 2000-03-01 (known date for validation)
         assert_eq!(days_to_ymd(11017), (2000, 3, 1));
     }
 

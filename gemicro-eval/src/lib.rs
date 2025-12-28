@@ -25,7 +25,8 @@
 //!
 //! ```no_run
 //! use gemicro_eval::{EvalHarness, EvalConfig, HotpotQA, Scorers, Dataset};
-//! use gemicro_core::{DeepResearchAgent, ResearchConfig, LlmClient, LlmConfig};
+//! use gemicro_core::{LlmClient, LlmConfig};
+//! use gemicro_deep_research::{DeepResearchAgent, ResearchConfig};
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! // Create agent
@@ -91,15 +92,11 @@
 
 pub mod dataset;
 pub mod harness;
-pub mod judge;
 pub mod results;
 pub mod scorer;
 
 // Re-export public API
 pub use dataset::{Dataset, DatasetError, GSM8KSplit, HotpotQA, JsonFileDataset, GSM8K};
 pub use harness::{EvalConfig, EvalError, EvalHarness, EvalProgress};
-pub use judge::{
-    JudgeConfig, JudgeInput, JudgeOutput, LlmJudgeAgent, EVENT_JUDGE_RESULT, EVENT_JUDGE_STARTED,
-};
 pub use results::{EvalQuestion, EvalResult, EvalSummary};
 pub use scorer::{Contains, LlmJudgeScorer, Scorer, Scorers};
