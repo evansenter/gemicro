@@ -583,7 +583,7 @@ mod tests {
         futures_util::pin_mut!(wrapped);
 
         let mut count = 0;
-        while let Some(_) = wrapped.next().await {
+        while (wrapped.next().await).is_some() {
             count += 1;
         }
 
