@@ -161,9 +161,14 @@ mod tests {
     use crate::update::{AgentUpdate, ResultMetadata};
 
     fn sample_events() -> Vec<AgentUpdate> {
+        use serde_json::json;
         vec![
-            AgentUpdate::decomposition_started(),
-            AgentUpdate::decomposition_complete(vec!["Q1".to_string(), "Q2".to_string()]),
+            AgentUpdate::custom("decomposition_started", "Decomposing query", json!({})),
+            AgentUpdate::custom(
+                "decomposition_complete",
+                "Decomposed into 2 sub-queries",
+                json!({ "sub_queries": ["Q1", "Q2"] }),
+            ),
             AgentUpdate::final_result(
                 "The answer is 42".to_string(),
                 ResultMetadata {

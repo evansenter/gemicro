@@ -516,17 +516,23 @@ mod tests {
 
     #[test]
     fn test_extract_tokens_no_final_result() {
+        use serde_json::json;
         let events = vec![
-            AgentUpdate::decomposition_started(),
-            AgentUpdate::decomposition_complete(vec!["Q1".to_string()]),
+            AgentUpdate::custom("decomposition_started", "Decomposing query", json!({})),
+            AgentUpdate::custom(
+                "decomposition_complete",
+                "Decomposed into 1 sub-query",
+                json!({ "sub_queries": ["Q1"] }),
+            ),
         ];
         assert_eq!(extract_tokens_from_events(&events), 0);
     }
 
     #[test]
     fn test_extract_tokens_with_final_result() {
+        use serde_json::json;
         let events = vec![
-            AgentUpdate::decomposition_started(),
+            AgentUpdate::custom("decomposition_started", "Decomposing query", json!({})),
             AgentUpdate::final_result(
                 "The answer".to_string(),
                 ResultMetadata {

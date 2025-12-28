@@ -144,7 +144,7 @@ mod tests {
 
         fn execute(&self, _query: &str, _context: AgentContext) -> AgentStream<'_> {
             Box::pin(async_stream::try_stream! {
-                yield AgentUpdate::decomposition_started();
+                yield AgentUpdate::custom("mock_started", "Mock agent started", serde_json::json!({}));
             })
         }
     }

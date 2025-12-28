@@ -46,8 +46,8 @@ pub mod utils;
 
 // Re-export public API
 pub use agent::{
-    Agent, AgentContext, AgentStream, DeepResearchAgent, ReactAgent, SimpleQaAgent, SimpleQaConfig,
-    ToolAgent, ToolAgentConfig, ToolType,
+    Agent, AgentContext, AgentStream, DeepResearchAgent, DeepResearchEventExt, ReactAgent,
+    SimpleQaAgent, SimpleQaConfig, SubQueryResult, ToolAgent, ToolAgentConfig, ToolType,
 };
 pub use config::{
     GemicroConfig, LlmConfig, ReactConfig, ReactPrompts, ResearchConfig, ResearchPrompts, MODEL,
@@ -57,5 +57,5 @@ pub use history::{ConversationHistory, HistoryEntry};
 pub use llm::{LlmClient, LlmRequest, LlmStreamChunk};
 // Re-export rust-genai types for convenience
 pub use rust_genai::{InteractionResponse, UsageMetadata};
-pub use update::{AgentUpdate, FinalResult, ResultMetadata, SubQueryResult};
+pub use update::{AgentUpdate, FinalResult, ResultMetadata};
 pub use utils::{extract_total_tokens, first_sentence, truncate, truncate_with_count};

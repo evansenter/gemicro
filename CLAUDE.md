@@ -102,6 +102,7 @@ gemicro-cli (terminal rendering)
 | **Graceful Unknown Handling** | Unknown event_types and data fields MUST be ignored, not errors |
 | **Idempotent Events** | Events should be safely re-processable without side effects |
 | **Agent-Specific Config Isolation** | Config belongs to agent constructors, not shared context |
+| **No Agent/Dataset Leakage** | Agent-specific functionality (constructors, accessors, types, configs) belongs in agent modules, NOT in core. Dataset-specific logic belongs in eval, NOT in core |
 
 ### What This Means in Practice
 
@@ -116,16 +117,23 @@ pub struct AgentUpdate {
     pub data: serde_json::Value,     // Arbitrary JSON
 }
 
-// Helper constructors for ergonomics
+// Core only provides two constructors: custom() and final_result()
 impl AgentUpdate {
-    pub fn sub_query_completed(id: usize, result: String, tokens: u32) -> Self {
-        Self {
-            event_type: "sub_query_completed".into(),
-            data: json!({ "id": id, "result": result, "tokens_used": tokens }),
-            // ...
-        }
-    }
+    // Universal constructor - use for ALL agent-specific events
+    // Uses impl Into<String> for ergonomic &str or String arguments
+    pub fn custom(
+        event_type: impl Into<String>,
+        message: impl Into<String>,
+        data: Value,
+    ) -> Self { /* ... */ }
+
+    // Required completion signal - the ONLY cross-agent constructor
+    pub fn final_result(answer: String, metadata: ResultMetadata) -> Self { /* ... */ }
 }
+
+// Agents define their own constants locally (NOT exported from core):
+const EVENT_MY_STEP: &str = "my_step";  // in agent/my_agent.rs
+yield Ok(AgentUpdate::custom(EVENT_MY_STEP, "Step complete", json!({})));
 ```
 
 #### ❌ DON'T: Rigid Enums for Extensible Types

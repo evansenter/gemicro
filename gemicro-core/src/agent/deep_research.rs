@@ -35,6 +35,86 @@ const EVENT_SUB_QUERY_COMPLETED: &str = "sub_query_completed";
 const EVENT_SUB_QUERY_FAILED: &str = "sub_query_failed";
 const EVENT_SYNTHESIS_STARTED: &str = "synthesis_started";
 
+// ============================================================================
+// Deep Research Event Accessors
+//
+// Extension trait for parsing DeepResearch-specific events. These accessors
+// belong here (not in update.rs) per the "No Agent/Dataset Leakage" principle.
+// ============================================================================
+
+use serde::{Deserialize, Serialize};
+
+/// Strongly-typed result struct for sub_query_completed events.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubQueryResult {
+    pub id: usize,
+    pub result: String,
+    pub tokens_used: u32,
+}
+
+/// Extension trait for parsing DeepResearch-specific events from AgentUpdate.
+///
+/// Import this trait to use the accessor methods on AgentUpdate:
+///
+/// ```
+/// use gemicro_core::agent::DeepResearchEventExt;
+/// use gemicro_core::AgentUpdate;
+/// use serde_json::json;
+///
+/// let update = AgentUpdate::custom(
+///     "decomposition_complete",
+///     "Decomposed into 2 sub-queries",
+///     json!({ "sub_queries": ["Q1", "Q2"] }),
+/// );
+///
+/// if let Some(queries) = update.as_decomposition_complete() {
+///     println!("Got {} sub-queries", queries.len());
+/// }
+/// ```
+pub trait DeepResearchEventExt {
+    /// Parse decomposition_complete event data.
+    ///
+    /// Returns `None` if this is not a decomposition_complete event
+    /// or if the data doesn't match the expected schema.
+    fn as_decomposition_complete(&self) -> Option<Vec<String>>;
+
+    /// Parse sub_query_completed event data.
+    ///
+    /// Returns `None` if this is not a sub_query_completed event
+    /// or if the data doesn't match the expected schema.
+    fn as_sub_query_completed(&self) -> Option<SubQueryResult>;
+}
+
+impl DeepResearchEventExt for AgentUpdate {
+    fn as_decomposition_complete(&self) -> Option<Vec<String>> {
+        if self.event_type == EVENT_DECOMPOSITION_COMPLETE {
+            self.data
+                .get("sub_queries")
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+                .or_else(|| {
+                    log::warn!(
+                        "Failed to parse decomposition_complete data: {:?}",
+                        self.data
+                    );
+                    None
+                })
+        } else {
+            None
+        }
+    }
+
+    fn as_sub_query_completed(&self) -> Option<SubQueryResult> {
+        if self.event_type == EVENT_SUB_QUERY_COMPLETED {
+            serde_json::from_value(self.data.clone()).ok().or_else(|| {
+                log::warn!("Failed to parse sub_query_completed data: {:?}", self.data);
+                None
+            })
+        } else {
+            None
+        }
+    }
+}
+
 /// Deep Research Agent.
 ///
 /// Implements the "decompose → parallel execute → synthesize" pattern:

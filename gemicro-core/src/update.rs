@@ -23,7 +23,7 @@ pub(crate) const EVENT_FINAL_RESULT: &str = "final_result";
 /// use gemicro_core::AgentUpdate;
 /// use serde_json::json;
 ///
-/// // Create a custom event (preferred for new agents)
+/// // Create events using custom() - the universal constructor
 /// let update = AgentUpdate::custom(
 ///     "my_agent_step",
 ///     "Step completed",
@@ -31,11 +31,9 @@ pub(crate) const EVENT_FINAL_RESULT: &str = "final_result";
 /// );
 /// assert_eq!(update.event_type, "my_agent_step");
 ///
-/// // Or use built-in helpers for standard events
-/// let update = AgentUpdate::sub_query_completed(0, "Result text".to_string(), 42);
-/// if let Some(result) = update.as_sub_query_completed() {
-///     println!("Sub-query {} used {} tokens", result.id, result.tokens_used);
-/// }
+/// // Access event data directly via the flexible JSON field
+/// assert_eq!(update.data["step"], 1);
+/// assert_eq!(update.data["result"], "success");
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentUpdate {
@@ -58,13 +56,13 @@ pub struct AgentUpdate {
     pub data: serde_json::Value,
 }
 
-/// Type-safe helper constructors for common Deep Research events
+/// Constructors and accessors for AgentUpdate
 impl AgentUpdate {
     /// Create a custom event with any event type
     ///
-    /// This generic constructor allows new agent types to define their own
-    /// event types without modifying gemicro-core, following
+    /// This is the universal constructor for all agent events, following
     /// [Evergreen spec](https://github.com/google-deepmind/evergreen-spec) philosophy.
+    /// Agents define their own event types without modifying gemicro-core.
     ///
     /// # Example
     ///
@@ -92,210 +90,20 @@ impl AgentUpdate {
         }
     }
 
-    /// Create a decomposition_started event
-    pub fn decomposition_started() -> Self {
-        Self {
-            event_type: "decomposition_started".into(),
-            message: "Decomposing query into sub-queries".into(),
-            timestamp: SystemTime::now(),
-            data: json!({}),
-        }
-    }
-
-    /// Create a decomposition_complete event
-    pub fn decomposition_complete(sub_queries: Vec<String>) -> Self {
-        Self {
-            event_type: "decomposition_complete".into(),
-            message: format!("Decomposed into {} sub-queries", sub_queries.len()),
-            timestamp: SystemTime::now(),
-            data: json!({ "sub_queries": sub_queries }),
-        }
-    }
-
-    /// Create a sub_query_started event
-    pub fn sub_query_started(id: usize, query: String) -> Self {
-        Self {
-            event_type: "sub_query_started".into(),
-            message: format!("Sub-query {} started", id),
-            timestamp: SystemTime::now(),
-            data: json!({ "id": id, "query": query }),
-        }
-    }
-
-    /// Create a sub_query_completed event
-    pub fn sub_query_completed(id: usize, result: String, tokens_used: u32) -> Self {
-        Self {
-            event_type: "sub_query_completed".into(),
-            message: format!("Sub-query {} completed", id),
-            timestamp: SystemTime::now(),
-            data: json!({
-                "id": id,
-                "result": result,
-                "tokens_used": tokens_used,
-            }),
-        }
-    }
-
-    /// Create a sub_query_failed event
-    pub fn sub_query_failed(id: usize, error: String) -> Self {
-        Self {
-            event_type: "sub_query_failed".into(),
-            message: format!("Sub-query {} failed", id),
-            timestamp: SystemTime::now(),
-            data: json!({ "id": id, "error": error }),
-        }
-    }
-
-    /// Create a synthesis_started event
-    pub fn synthesis_started() -> Self {
-        Self {
-            event_type: "synthesis_started".into(),
-            message: "Synthesizing results".into(),
-            timestamp: SystemTime::now(),
-            data: json!({}),
-        }
-    }
-
-    /// Create a final_result event
+    /// Create a final_result event (required by all agents per event contract)
+    ///
+    /// This is the only dedicated constructor besides `custom()` because
+    /// `final_result` is the universal completion signal that ALL agents must emit.
+    /// It is cross-agent, not agent-specific.
     pub fn final_result(answer: String, metadata: ResultMetadata) -> Self {
         Self {
             event_type: EVENT_FINAL_RESULT.into(),
-            message: "Research complete".into(),
+            message: "Query complete".into(),
             timestamp: SystemTime::now(),
             data: json!({
                 "answer": answer,
                 "metadata": metadata,
             }),
-        }
-    }
-
-    // =========================================================================
-    // ReAct Agent Events
-    // =========================================================================
-
-    /// Create a react_started event
-    pub fn react_started(query: &str, max_iterations: usize) -> Self {
-        Self {
-            event_type: "react_started".into(),
-            message: "Starting ReAct reasoning loop".into(),
-            timestamp: SystemTime::now(),
-            data: json!({
-                "query": query,
-                "max_iterations": max_iterations,
-            }),
-        }
-    }
-
-    /// Create a react_thought event
-    pub fn react_thought(iteration: usize, thought: String) -> Self {
-        Self {
-            event_type: "react_thought".into(),
-            message: format!("Thought at iteration {}", iteration),
-            timestamp: SystemTime::now(),
-            data: json!({
-                "iteration": iteration,
-                "thought": thought,
-            }),
-        }
-    }
-
-    /// Create a react_action event
-    pub fn react_action(iteration: usize, tool: String, input: String) -> Self {
-        Self {
-            event_type: "react_action".into(),
-            message: format!("Action: {}", tool),
-            timestamp: SystemTime::now(),
-            data: json!({
-                "iteration": iteration,
-                "tool": tool,
-                "input": input,
-            }),
-        }
-    }
-
-    /// Create a react_observation event
-    pub fn react_observation(
-        iteration: usize,
-        tool: String,
-        result: String,
-        is_error: bool,
-    ) -> Self {
-        Self {
-            event_type: "react_observation".into(),
-            message: if is_error {
-                format!("Observation (error) from {}", tool)
-            } else {
-                format!("Observation from {}", tool)
-            },
-            timestamp: SystemTime::now(),
-            data: json!({
-                "iteration": iteration,
-                "tool": tool,
-                "result": result,
-                "is_error": is_error,
-            }),
-        }
-    }
-
-    /// Create a react_complete event
-    pub fn react_complete(iterations_used: usize, final_answer: String) -> Self {
-        Self {
-            event_type: "react_complete".into(),
-            message: format!("ReAct complete after {} iterations", iterations_used),
-            timestamp: SystemTime::now(),
-            data: json!({
-                "iterations_used": iterations_used,
-                "final_answer": final_answer,
-            }),
-        }
-    }
-
-    /// Create a react_max_iterations event
-    pub fn react_max_iterations(max_iterations: usize, last_thought: String) -> Self {
-        Self {
-            event_type: "react_max_iterations".into(),
-            message: format!("Reached max iterations ({})", max_iterations),
-            timestamp: SystemTime::now(),
-            data: json!({
-                "max_iterations": max_iterations,
-                "last_thought": last_thought,
-            }),
-        }
-    }
-
-    /// Typed accessor for decomposition_complete events
-    ///
-    /// Returns `None` if this is not a decomposition_complete event
-    /// or if the data doesn't match the expected schema.
-    pub fn as_decomposition_complete(&self) -> Option<Vec<String>> {
-        if self.event_type == "decomposition_complete" {
-            self.data
-                .get("sub_queries")
-                .and_then(|v| serde_json::from_value(v.clone()).ok())
-                .or_else(|| {
-                    log::warn!(
-                        "Failed to parse decomposition_complete data: {:?}",
-                        self.data
-                    );
-                    None
-                })
-        } else {
-            None
-        }
-    }
-
-    /// Typed accessor for sub_query_completed events
-    ///
-    /// Returns `None` if this is not a sub_query_completed event
-    /// or if the data doesn't match the expected schema.
-    pub fn as_sub_query_completed(&self) -> Option<SubQueryResult> {
-        if self.event_type == "sub_query_completed" {
-            serde_json::from_value(self.data.clone()).ok().or_else(|| {
-                log::warn!("Failed to parse sub_query_completed data: {:?}", self.data);
-                None
-            })
-        } else {
-            None
         }
     }
 
@@ -313,14 +121,6 @@ impl AgentUpdate {
             None
         }
     }
-}
-
-/// Strongly-typed result struct for sub_query_completed events
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SubQueryResult {
-    pub id: usize,
-    pub result: String,
-    pub tokens_used: u32,
 }
 
 /// Strongly-typed result struct for final_result events
@@ -359,43 +159,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_decomposition_started() {
-        let update = AgentUpdate::decomposition_started();
-        assert_eq!(update.event_type, "decomposition_started");
-        assert_eq!(update.message, "Decomposing query into sub-queries");
+    fn test_custom_event() {
+        let update = AgentUpdate::custom("my_event", "Something happened", json!({"key": "value"}));
+        assert_eq!(update.event_type, "my_event");
+        assert_eq!(update.message, "Something happened");
+        assert_eq!(update.data["key"], "value");
     }
 
-    #[test]
-    fn test_decomposition_complete() {
-        let queries = vec!["Q1".to_string(), "Q2".to_string()];
-        let update = AgentUpdate::decomposition_complete(queries.clone());
-
-        assert_eq!(update.event_type, "decomposition_complete");
-        assert!(update.message.contains("2 sub-queries"));
-
-        let extracted = update.as_decomposition_complete().unwrap();
-        assert_eq!(extracted, queries);
-    }
-
-    #[test]
-    fn test_sub_query_completed() {
-        let update = AgentUpdate::sub_query_completed(0, "Result".to_string(), 42);
-
-        assert_eq!(update.event_type, "sub_query_completed");
-
-        let result = update.as_sub_query_completed().unwrap();
-        assert_eq!(result.id, 0);
-        assert_eq!(result.result, "Result");
-        assert_eq!(result.tokens_used, 42);
-    }
-
-    #[test]
-    fn test_sub_query_failed() {
-        let update = AgentUpdate::sub_query_failed(1, "Timeout".to_string());
-
-        assert_eq!(update.event_type, "sub_query_failed");
-        assert!(update.message.contains("failed"));
-    }
+    // Note: Tests for as_decomposition_complete() and as_sub_query_completed()
+    // are in agent/deep_research.rs where those accessors now live.
 
     #[test]
     fn test_final_result() {
@@ -434,61 +206,44 @@ mod tests {
 
     #[test]
     fn test_accessor_wrong_type() {
-        let update = AgentUpdate::decomposition_started();
+        let update = AgentUpdate::custom("some_other_event", "Message", json!({}));
 
         // Should return None for wrong event type
-        assert!(update.as_sub_query_completed().is_none());
         assert!(update.as_final_result().is_none());
     }
 
     #[test]
     fn test_accessor_malformed_data() {
-        use serde_json::json;
-
-        // Correct event_type but wrong data structure
-        let update = AgentUpdate {
-            event_type: "decomposition_complete".into(),
-            message: "Test".into(),
-            timestamp: std::time::SystemTime::now(),
-            data: json!({ "wrong_field": "not sub_queries" }),
-        };
+        // Test final_result with malformed data
+        let update = AgentUpdate::custom(
+            "final_result",
+            "Test",
+            json!({ "answer": 123 }), // answer should be string
+        );
 
         // Should return None and log warning (not panic)
-        assert!(update.as_decomposition_complete().is_none());
-
-        // Test sub_query_completed with malformed data
-        let update = AgentUpdate {
-            event_type: "sub_query_completed".into(),
-            message: "Test".into(),
-            timestamp: std::time::SystemTime::now(),
-            data: json!({ "id": "not_a_number" }), // id should be usize
-        };
-
-        assert!(update.as_sub_query_completed().is_none());
-
-        // Test final_result with malformed data
-        let update = AgentUpdate {
-            event_type: "final_result".into(),
-            message: "Test".into(),
-            timestamp: std::time::SystemTime::now(),
-            data: json!({ "answer": 123 }), // answer should be string
-        };
-
         assert!(update.as_final_result().is_none());
     }
 
     #[test]
     fn test_serialization_roundtrip() {
-        let original = AgentUpdate::sub_query_completed(5, "Test".to_string(), 99);
+        let metadata = ResultMetadata {
+            total_tokens: 100,
+            tokens_unavailable_count: 0,
+            duration_ms: 5000,
+            sub_queries_succeeded: 2,
+            sub_queries_failed: 0,
+        };
+        let original = AgentUpdate::final_result("Test answer".to_string(), metadata);
 
-        let json = serde_json::to_string(&original).unwrap();
-        let deserialized: AgentUpdate = serde_json::from_str(&json).unwrap();
+        let json_str = serde_json::to_string(&original).unwrap();
+        let deserialized: AgentUpdate = serde_json::from_str(&json_str).unwrap();
 
         assert_eq!(deserialized.event_type, original.event_type);
         assert_eq!(deserialized.message, original.message);
 
-        let result = deserialized.as_sub_query_completed().unwrap();
-        assert_eq!(result.id, 5);
-        assert_eq!(result.tokens_used, 99);
+        let result = deserialized.as_final_result().unwrap();
+        assert_eq!(result.answer, "Test answer");
+        assert_eq!(result.metadata.total_tokens, 100);
     }
 }

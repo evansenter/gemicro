@@ -167,33 +167,59 @@ mod tests {
     use gemicro_core::{AgentUpdate, ResultMetadata};
 
     fn create_completed_state() -> ExecutionState {
+        use serde_json::json;
+
         let mut state = ExecutionState::new();
-        state.update(&AgentUpdate::decomposition_started());
-        state.update(&AgentUpdate::decomposition_complete(vec![
-            "Q1".to_string(),
-            "Q2".to_string(),
-            "Q3".to_string(),
-        ]));
+        state.update(&AgentUpdate::custom(
+            "decomposition_started",
+            "Decomposing query",
+            json!({}),
+        ));
+        state.update(&AgentUpdate::custom(
+            "decomposition_complete",
+            "Decomposed into 3 sub-queries",
+            json!({ "sub_queries": ["Q1", "Q2", "Q3"] }),
+        ));
 
         // Simulate sub-query execution
-        state.update(&AgentUpdate::sub_query_started(0, "Q1".to_string()));
-        state.update(&AgentUpdate::sub_query_completed(
-            0,
-            "Result 1".to_string(),
-            50,
+        state.update(&AgentUpdate::custom(
+            "sub_query_started",
+            "Sub-query 0 started",
+            json!({ "id": 0, "query": "Q1" }),
+        ));
+        state.update(&AgentUpdate::custom(
+            "sub_query_completed",
+            "Sub-query 0 completed",
+            json!({ "id": 0, "result": "Result 1", "tokens_used": 50 }),
         ));
 
-        state.update(&AgentUpdate::sub_query_started(1, "Q2".to_string()));
-        state.update(&AgentUpdate::sub_query_completed(
-            1,
-            "Result 2".to_string(),
-            60,
+        state.update(&AgentUpdate::custom(
+            "sub_query_started",
+            "Sub-query 1 started",
+            json!({ "id": 1, "query": "Q2" }),
+        ));
+        state.update(&AgentUpdate::custom(
+            "sub_query_completed",
+            "Sub-query 1 completed",
+            json!({ "id": 1, "result": "Result 2", "tokens_used": 60 }),
         ));
 
-        state.update(&AgentUpdate::sub_query_started(2, "Q3".to_string()));
-        state.update(&AgentUpdate::sub_query_failed(2, "Timeout".to_string()));
+        state.update(&AgentUpdate::custom(
+            "sub_query_started",
+            "Sub-query 2 started",
+            json!({ "id": 2, "query": "Q3" }),
+        ));
+        state.update(&AgentUpdate::custom(
+            "sub_query_failed",
+            "Sub-query 2 failed",
+            json!({ "id": 2, "error": "Timeout" }),
+        ));
 
-        state.update(&AgentUpdate::synthesis_started());
+        state.update(&AgentUpdate::custom(
+            "synthesis_started",
+            "Synthesizing results",
+            json!({}),
+        ));
 
         let metadata = ResultMetadata {
             total_tokens: 150,
@@ -245,12 +271,19 @@ mod tests {
 
     #[test]
     fn test_metrics_from_partial_state() {
+        use serde_json::json;
+
         let mut state = ExecutionState::new();
-        state.update(&AgentUpdate::decomposition_started());
-        state.update(&AgentUpdate::decomposition_complete(vec![
-            "Q1".to_string(),
-            "Q2".to_string(),
-        ]));
+        state.update(&AgentUpdate::custom(
+            "decomposition_started",
+            "Decomposing query",
+            json!({}),
+        ));
+        state.update(&AgentUpdate::custom(
+            "decomposition_complete",
+            "Decomposed into 2 sub-queries",
+            json!({ "sub_queries": ["Q1", "Q2"] }),
+        ));
 
         let metrics = ExecutionMetrics::from(&state);
 

@@ -186,6 +186,8 @@ mod tests {
     }
 
     fn create_successful_events() -> Vec<AgentUpdate> {
+        use serde_json::json;
+
         let metadata = ResultMetadata {
             total_tokens: 100,
             tokens_unavailable_count: 0,
@@ -195,11 +197,23 @@ mod tests {
         };
 
         vec![
-            AgentUpdate::decomposition_started(),
-            AgentUpdate::decomposition_complete(vec!["Q1".to_string()]),
-            AgentUpdate::sub_query_started(0, "Q1".to_string()),
-            AgentUpdate::sub_query_completed(0, "Result".to_string(), 50),
-            AgentUpdate::synthesis_started(),
+            AgentUpdate::custom("decomposition_started", "Decomposing query", json!({})),
+            AgentUpdate::custom(
+                "decomposition_complete",
+                "Decomposed into 1 sub-query",
+                json!({ "sub_queries": ["Q1"] }),
+            ),
+            AgentUpdate::custom(
+                "sub_query_started",
+                "Sub-query 0 started",
+                json!({ "id": 0, "query": "Q1" }),
+            ),
+            AgentUpdate::custom(
+                "sub_query_completed",
+                "Sub-query 0 completed",
+                json!({ "id": 0, "result": "Result", "tokens_used": 50 }),
+            ),
+            AgentUpdate::custom("synthesis_started", "Synthesizing results", json!({})),
             AgentUpdate::final_result("Final answer".to_string(), metadata),
         ]
     }
@@ -241,11 +255,25 @@ mod tests {
 
     #[tokio::test]
     async fn test_runner_with_failure() {
+        use serde_json::json;
+
         let events = vec![
-            AgentUpdate::decomposition_started(),
-            AgentUpdate::decomposition_complete(vec!["Q1".to_string()]),
-            AgentUpdate::sub_query_started(0, "Q1".to_string()),
-            AgentUpdate::sub_query_failed(0, "Timeout".to_string()),
+            AgentUpdate::custom("decomposition_started", "Decomposing query", json!({})),
+            AgentUpdate::custom(
+                "decomposition_complete",
+                "Decomposed into 1 sub-query",
+                json!({ "sub_queries": ["Q1"] }),
+            ),
+            AgentUpdate::custom(
+                "sub_query_started",
+                "Sub-query 0 started",
+                json!({ "id": 0, "query": "Q1" }),
+            ),
+            AgentUpdate::custom(
+                "sub_query_failed",
+                "Sub-query 0 failed",
+                json!({ "id": 0, "error": "Timeout" }),
+            ),
         ];
 
         let runner = AgentRunner::new();

@@ -7,7 +7,7 @@ mod common;
 
 use common::{create_test_context, create_test_context_with_cancellation, get_api_key};
 use futures_util::StreamExt;
-use gemicro_core::{AgentError, DeepResearchAgent, ResearchConfig};
+use gemicro_core::{AgentError, DeepResearchAgent, DeepResearchEventExt, ResearchConfig};
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
