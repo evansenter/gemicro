@@ -7,7 +7,7 @@ use super::{remaining_time, timeout_error, with_timeout_and_cancellation, Agent,
 use crate::config::ReactConfig;
 use crate::error::AgentError;
 use crate::llm::LlmRequest;
-use crate::update::AgentUpdate;
+use crate::update::{AgentUpdate, ResultMetadata};
 use crate::utils::extract_total_tokens;
 
 use async_stream::try_stream;
@@ -264,9 +264,23 @@ impl ReactAgent {
                 format!("Reached max iterations ({})", config.max_iterations),
                 json!({
                     "max_iterations": config.max_iterations,
-                    "last_thought": last_thought,
+                    "last_thought": &last_thought,
                 }),
             );
+
+            // Emit final_result per event contract (MUST be last event)
+            let metadata = ResultMetadata {
+                total_tokens,
+                tokens_unavailable_count: tokens_unavailable,
+                duration_ms: start_time.elapsed().as_millis() as u64,
+                sub_queries_succeeded: 0,
+                sub_queries_failed: 0,
+            };
+            let fallback_answer = format!(
+                "Unable to find answer after {} iterations. Last thought: {}",
+                config.max_iterations, last_thought
+            );
+            yield AgentUpdate::final_result(fallback_answer, metadata);
         }
     }
 
