@@ -245,6 +245,66 @@ async fn test_react_event_ordering() {
     }
 }
 
+/// Test max_iterations path emits final_result per event contract
+#[tokio::test]
+#[ignore] // Requires GEMINI_API_KEY
+async fn test_react_max_iterations_emits_final_result() {
+    let Some(api_key) = get_api_key() else {
+        eprintln!("Skipping test: GEMINI_API_KEY not set");
+        return;
+    };
+
+    let context = create_test_context(&api_key);
+
+    // Configure with max_iterations=1 and a complex query that won't complete
+    let config = ReactConfig {
+        max_iterations: 1,
+        available_tools: vec!["calculator".to_string()],
+        use_google_search: false,
+        total_timeout: Duration::from_secs(60),
+        ..Default::default()
+    };
+
+    let agent = ReactAgent::new(config).expect("Should create agent");
+    // Query complex enough that it won't complete in 1 iteration
+    let stream = agent.execute(
+        "Calculate the factorial of 5, then multiply by 2, then add 100",
+        context,
+    );
+    futures_util::pin_mut!(stream);
+
+    let mut events: Vec<String> = Vec::new();
+
+    while let Some(result) = stream.next().await {
+        if let Ok(update) = result {
+            println!("[{}] {}", update.event_type, update.message);
+            events.push(update.event_type.clone());
+        }
+    }
+
+    // Verify react_max_iterations was emitted (hit the limit)
+    assert!(
+        events.contains(&"react_max_iterations".to_string()),
+        "Should emit react_max_iterations when hitting limit. Events: {:?}",
+        events
+    );
+
+    // Verify final_result is emitted per event contract
+    assert!(
+        events.contains(&"final_result".to_string()),
+        "Should emit final_result even on max_iterations path. Events: {:?}",
+        events
+    );
+
+    // Verify final_result is last (event contract requirement)
+    assert_eq!(
+        events.last(),
+        Some(&"final_result".to_string()),
+        "final_result MUST be the last event. Events: {:?}",
+        events
+    );
+}
+
 /// Test invalid config
 #[tokio::test]
 async fn test_react_invalid_config() {
