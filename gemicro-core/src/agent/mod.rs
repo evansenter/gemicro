@@ -49,8 +49,9 @@ use crate::llm::LlmClient;
 use crate::tracking::ExecutionTracking;
 use crate::update::AgentUpdate;
 
-use futures_util::Stream;
+use futures_util::{Stream, StreamExt};
 use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
@@ -248,6 +249,69 @@ where
     }
 }
 
+// ============================================================================
+// Contract enforcement
+// ============================================================================
+
+/// The event type that signals agent completion.
+pub const EVENT_FINAL_RESULT: &str = "final_result";
+
+/// Wraps an agent stream to enforce the `final_result` contract.
+///
+/// The event contract states that `final_result` **MUST** be the last event
+/// emitted by any agent. This wrapper detects violations and logs warnings
+/// when events are yielded after `final_result`.
+///
+/// # Why This Matters
+///
+/// If an agent yields events after `final_result`:
+/// - Some consumers might ignore them (already in "done" state)
+/// - Others might process them unexpectedly
+/// - Metrics could be wrong (duration/tokens already captured)
+///
+/// # Usage
+///
+/// ```no_run
+/// use gemicro_core::{Agent, AgentContext, enforce_final_result_contract};
+///
+/// async fn run_agent(agent: &dyn Agent, query: &str, context: AgentContext) {
+///     let stream = agent.execute(query, context);
+///     let validated_stream = enforce_final_result_contract(stream);
+///     // Use validated_stream instead of stream
+/// }
+/// ```
+///
+/// # Behavior
+///
+/// - Events before `final_result` pass through unchanged
+/// - The `final_result` event passes through unchanged
+/// - Events after `final_result` pass through but trigger a warning log
+/// - Errors pass through unchanged (no contract checking on errors)
+///
+/// # Future Considerations
+///
+/// Currently logs warnings for violations. Once all agents are verified
+/// compliant, this could be promoted to return errors for violations.
+pub fn enforce_final_result_contract(stream: AgentStream<'_>) -> AgentStream<'_> {
+    let seen_final = Arc::new(AtomicBool::new(false));
+
+    Box::pin(stream.map(move |result| {
+        if let Ok(ref update) = result {
+            if seen_final.load(Ordering::SeqCst) {
+                log::warn!(
+                    "Contract violation: event '{}' yielded after final_result (message: '{}')",
+                    update.event_type,
+                    update.message
+                );
+            }
+            if update.event_type == EVENT_FINAL_RESULT {
+                seen_final.store(true, Ordering::SeqCst);
+            }
+        }
+        result
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -414,4 +478,181 @@ mod tests {
     }
 
     // Note: AgentError display tests are in error.rs to avoid duplication
+
+    // Contract enforcement tests
+
+    use crate::update::ResultMetadata;
+    use async_stream::stream;
+    use serde_json::json;
+
+    /// Creates a test stream from a vector of events.
+    fn test_stream(events: Vec<Result<AgentUpdate, AgentError>>) -> AgentStream<'static> {
+        Box::pin(stream! {
+            for event in events {
+                yield event;
+            }
+        })
+    }
+
+    /// Verifies that events before final_result pass through unchanged.
+    #[tokio::test]
+    async fn test_contract_events_before_final_result_pass_through() {
+        let events = vec![
+            Ok(AgentUpdate::custom("step_1", "Step 1", json!({}))),
+            Ok(AgentUpdate::custom("step_2", "Step 2", json!({}))),
+            Ok(AgentUpdate::final_result(
+                "Answer".to_string(),
+                ResultMetadata::new(100, 0, 1000),
+            )),
+        ];
+
+        let stream = test_stream(events);
+        let wrapped = enforce_final_result_contract(stream);
+        futures_util::pin_mut!(wrapped);
+
+        let mut collected = Vec::new();
+        while let Some(result) = wrapped.next().await {
+            collected.push(result);
+        }
+
+        assert_eq!(collected.len(), 3);
+        assert!(collected[0].as_ref().unwrap().event_type == "step_1");
+        assert!(collected[1].as_ref().unwrap().event_type == "step_2");
+        assert!(collected[2].as_ref().unwrap().event_type == "final_result");
+    }
+
+    /// Verifies that events after final_result still pass through (with warning logged).
+    #[tokio::test]
+    async fn test_contract_events_after_final_result_pass_through() {
+        let events = vec![
+            Ok(AgentUpdate::custom("step_1", "Step 1", json!({}))),
+            Ok(AgentUpdate::final_result(
+                "Answer".to_string(),
+                ResultMetadata::new(100, 0, 1000),
+            )),
+            // This violates the contract - events after final_result
+            Ok(AgentUpdate::custom("post_final", "Should warn", json!({}))),
+        ];
+
+        let stream = test_stream(events);
+        let wrapped = enforce_final_result_contract(stream);
+        futures_util::pin_mut!(wrapped);
+
+        let mut collected = Vec::new();
+        while let Some(result) = wrapped.next().await {
+            collected.push(result);
+        }
+
+        // All events should still pass through
+        assert_eq!(collected.len(), 3);
+        assert!(collected[2].as_ref().unwrap().event_type == "post_final");
+        // Note: The warning is logged but we can't easily test log output
+    }
+
+    /// Verifies that errors pass through without contract checking.
+    #[tokio::test]
+    async fn test_contract_errors_pass_through() {
+        let events = vec![
+            Ok(AgentUpdate::custom("step_1", "Step 1", json!({}))),
+            Err(AgentError::Llm(crate::error::LlmError::Other(
+                "Test error".to_string(),
+            ))),
+        ];
+
+        let stream = test_stream(events);
+        let wrapped = enforce_final_result_contract(stream);
+        futures_util::pin_mut!(wrapped);
+
+        let mut collected = Vec::new();
+        while let Some(result) = wrapped.next().await {
+            collected.push(result);
+        }
+
+        assert_eq!(collected.len(), 2);
+        assert!(collected[0].is_ok());
+        assert!(collected[1].is_err());
+    }
+
+    /// Verifies that an empty stream works correctly.
+    #[tokio::test]
+    async fn test_contract_empty_stream() {
+        let events: Vec<Result<AgentUpdate, AgentError>> = vec![];
+
+        let stream = test_stream(events);
+        let wrapped = enforce_final_result_contract(stream);
+        futures_util::pin_mut!(wrapped);
+
+        let mut count = 0;
+        while (wrapped.next().await).is_some() {
+            count += 1;
+        }
+
+        assert_eq!(count, 0);
+    }
+
+    /// Verifies that stream with only final_result works correctly.
+    #[tokio::test]
+    async fn test_contract_only_final_result() {
+        let events = vec![Ok(AgentUpdate::final_result(
+            "Direct answer".to_string(),
+            ResultMetadata::new(50, 0, 500),
+        ))];
+
+        let stream = test_stream(events);
+        let wrapped = enforce_final_result_contract(stream);
+        futures_util::pin_mut!(wrapped);
+
+        let mut collected = Vec::new();
+        while let Some(result) = wrapped.next().await {
+            collected.push(result);
+        }
+
+        assert_eq!(collected.len(), 1);
+        assert!(collected[0].as_ref().unwrap().event_type == "final_result");
+    }
+
+    /// Verifies the EVENT_FINAL_RESULT constant matches the expected value.
+    #[test]
+    fn test_event_final_result_constant() {
+        assert_eq!(EVENT_FINAL_RESULT, "final_result");
+    }
+
+    /// Verifies that multiple final_result events trigger warnings for all but the first.
+    #[tokio::test]
+    async fn test_contract_multiple_final_results_warn() {
+        let events = vec![
+            Ok(AgentUpdate::custom("step_1", "Step 1", json!({}))),
+            Ok(AgentUpdate::final_result(
+                "First answer".to_string(),
+                ResultMetadata::new(100, 0, 1000),
+            )),
+            // Second final_result - violates contract
+            Ok(AgentUpdate::final_result(
+                "Second answer".to_string(),
+                ResultMetadata::new(50, 0, 500),
+            )),
+            // Third final_result - also violates contract
+            Ok(AgentUpdate::final_result(
+                "Third answer".to_string(),
+                ResultMetadata::new(25, 0, 250),
+            )),
+        ];
+
+        let stream = test_stream(events);
+        let wrapped = enforce_final_result_contract(stream);
+        futures_util::pin_mut!(wrapped);
+
+        let mut collected = Vec::new();
+        while let Some(result) = wrapped.next().await {
+            collected.push(result);
+        }
+
+        // All events should still pass through (graceful degradation)
+        assert_eq!(collected.len(), 4);
+        assert!(collected[0].as_ref().unwrap().event_type == "step_1");
+        assert!(collected[1].as_ref().unwrap().event_type == "final_result");
+        assert!(collected[2].as_ref().unwrap().event_type == "final_result");
+        assert!(collected[3].as_ref().unwrap().event_type == "final_result");
+        // Note: Warnings are logged for collected[2] and collected[3] but we can't easily verify logs
+    }
 }

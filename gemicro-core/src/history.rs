@@ -48,7 +48,7 @@ impl HistoryEntry {
     pub fn final_result(&self) -> Option<&str> {
         self.events
             .iter()
-            .find(|e| e.event_type == crate::update::EVENT_FINAL_RESULT)
+            .find(|e| e.event_type == crate::agent::EVENT_FINAL_RESULT)
             .and_then(|e| e.data.get("answer"))
             .and_then(|v| v.as_str())
     }

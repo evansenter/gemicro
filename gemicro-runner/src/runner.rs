@@ -5,7 +5,9 @@
 
 use crate::metrics::ExecutionMetrics;
 use futures_util::StreamExt;
-use gemicro_core::{Agent, AgentContext, AgentError, ExecutionTracking};
+use gemicro_core::{
+    enforce_final_result_contract, Agent, AgentContext, AgentError, ExecutionTracking,
+};
 use std::time::Instant;
 
 /// Headless agent runner for programmatic execution.
@@ -96,6 +98,8 @@ impl AgentRunner {
     {
         let mut tracker = agent.create_tracker();
         let stream = agent.execute(query, context);
+        // Wrap stream with contract enforcement to detect violations
+        let stream = enforce_final_result_contract(stream);
         futures_util::pin_mut!(stream);
         let start = Instant::now();
 

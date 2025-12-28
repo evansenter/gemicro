@@ -10,7 +10,7 @@ use anyhow::{bail, Context, Result};
 use clap::Parser;
 use display::{IndicatifRenderer, Renderer};
 use futures_util::StreamExt;
-use gemicro_core::{Agent, AgentContext, AgentError, LlmClient};
+use gemicro_core::{enforce_final_result_contract, Agent, AgentContext, AgentError, LlmClient};
 use gemicro_deep_research::DeepResearchAgent;
 use gemicro_tool_agent::{ToolAgent, ToolAgentConfig};
 use repl::Session;
@@ -129,8 +129,9 @@ async fn run_research(args: &cli::Args, query: &str) -> Result<()> {
     // Helper to check for interrupts
     let is_interrupted = || interrupt_count.load(Ordering::SeqCst) > 0;
 
-    // Get stream
+    // Get stream with contract enforcement
     let stream = agent.execute(query, context);
+    let stream = enforce_final_result_contract(Box::pin(stream));
     futures_util::pin_mut!(stream);
 
     // Track if we were interrupted
