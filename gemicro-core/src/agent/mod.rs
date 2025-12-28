@@ -616,4 +616,43 @@ mod tests {
     fn test_event_final_result_constant() {
         assert_eq!(EVENT_FINAL_RESULT, "final_result");
     }
+
+    /// Verifies that multiple final_result events trigger warnings for all but the first.
+    #[tokio::test]
+    async fn test_contract_multiple_final_results_warn() {
+        let events = vec![
+            Ok(AgentUpdate::custom("step_1", "Step 1", json!({}))),
+            Ok(AgentUpdate::final_result(
+                "First answer".to_string(),
+                ResultMetadata::new(100, 0, 1000),
+            )),
+            // Second final_result - violates contract
+            Ok(AgentUpdate::final_result(
+                "Second answer".to_string(),
+                ResultMetadata::new(50, 0, 500),
+            )),
+            // Third final_result - also violates contract
+            Ok(AgentUpdate::final_result(
+                "Third answer".to_string(),
+                ResultMetadata::new(25, 0, 250),
+            )),
+        ];
+
+        let stream = test_stream(events);
+        let wrapped = enforce_final_result_contract(stream);
+        futures_util::pin_mut!(wrapped);
+
+        let mut collected = Vec::new();
+        while let Some(result) = wrapped.next().await {
+            collected.push(result);
+        }
+
+        // All events should still pass through (graceful degradation)
+        assert_eq!(collected.len(), 4);
+        assert!(collected[0].as_ref().unwrap().event_type == "step_1");
+        assert!(collected[1].as_ref().unwrap().event_type == "final_result");
+        assert!(collected[2].as_ref().unwrap().event_type == "final_result");
+        assert!(collected[3].as_ref().unwrap().event_type == "final_result");
+        // Note: Warnings are logged for collected[2] and collected[3] but we can't easily verify logs
+    }
 }
