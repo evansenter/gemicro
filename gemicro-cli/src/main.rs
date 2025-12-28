@@ -174,7 +174,9 @@ async fn run_research(args: &cli::Args, query: &str) -> Result<()> {
             }
             Err(e) => {
                 signal_task.abort();
-                renderer.finish().ok();
+                if let Err(finish_err) = renderer.finish() {
+                    log::warn!("Failed to clean up renderer during error: {}", finish_err);
+                }
                 return Err(format_agent_error(e));
             }
         }

@@ -71,6 +71,8 @@ impl Renderer for IndicatifRenderer {
 
         if let Some(result) = tracker.final_result() {
             print_final_result(result, self.start_time.elapsed(), self.plain);
+        } else {
+            log::warn!("on_complete called but tracker.final_result() returned None");
         }
 
         Ok(())
