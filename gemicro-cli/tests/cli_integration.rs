@@ -188,34 +188,11 @@ fn test_cli_token_counts_displayed() {
     );
 }
 
-#[test]
-#[ignore] // Requires GEMINI_API_KEY
-fn test_cli_parallel_speedup_displayed() {
-    if !has_api_key() {
-        eprintln!("Skipping test: GEMINI_API_KEY not set");
-        return;
-    }
-
-    let output = run_cli(&[
-        "Compare cats and dogs",
-        "--min-sub-queries",
-        "3",
-        "--max-sub-queries",
-        "4",
-        "--timeout",
-        "180",
-    ]);
-
-    assert!(output.status.success(), "CLI failed: {:?}", output);
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-
-    // Parallel speedup should be displayed
-    assert!(
-        stdout.contains("Parallel speedup:") || stdout.contains("saved"),
-        "Parallel speedup should be displayed"
-    );
-}
+// NOTE: test_cli_parallel_speedup_displayed was removed in #124.
+// The simplified CLI no longer tracks step-level timing for parallel speedup
+// calculation. This is an intentional breaking change when migrating to the
+// ExecutionTracking pattern (which is agent-agnostic and doesn't provide
+// step-level timing data).
 
 // ============================================================================
 // Interactive REPL Tests
