@@ -6,7 +6,8 @@
 use crate::metrics::ExecutionMetrics;
 use futures_util::StreamExt;
 use gemicro_core::{
-    enforce_final_result_contract, Agent, AgentContext, AgentError, ExecutionTracking,
+    enforce_final_result_contract, Agent, AgentContext, AgentError, AgentUpdate, ExecutionTracking,
+    LlmClient, LlmConfig, Trajectory, TrajectoryBuilder,
 };
 use std::time::Instant;
 
@@ -115,6 +116,103 @@ impl AgentRunner {
             tracker.as_ref(),
             start.elapsed(),
         ))
+    }
+
+    /// Execute an agent and capture a full trajectory for offline replay.
+    ///
+    /// This method:
+    /// - Creates a recording LLM client from the provided rust-genai client
+    /// - Executes the agent while capturing all LLM interactions
+    /// - Returns both execution metrics and a complete trajectory
+    ///
+    /// The trajectory can be saved for later replay or analysis.
+    ///
+    /// # Arguments
+    ///
+    /// * `agent` - The agent to execute
+    /// * `query` - The user's query
+    /// * `agent_config` - Agent configuration as JSON (for trajectory metadata)
+    /// * `genai_client` - The rust-genai client to use
+    /// * `llm_config` - LLM configuration
+    ///
+    /// # Returns
+    ///
+    /// A tuple of `(ExecutionMetrics, Trajectory)` on success.
+    ///
+    /// # Example
+    ///
+    /// ```text
+    /// use gemicro_runner::AgentRunner;
+    /// use gemicro_core::LlmConfig;
+    /// use serde_json::json;
+    ///
+    /// async fn example(agent: &dyn Agent) -> Result<(), Box<dyn std::error::Error>> {
+    ///     let runner = AgentRunner::new();
+    ///     let genai_client = rust_genai::Client::builder("key".to_string()).build();
+    ///
+    ///     let (metrics, trajectory) = runner.execute_with_trajectory(
+    ///         agent,
+    ///         "What is Rust?",
+    ///         json!({}),
+    ///         genai_client,
+    ///         LlmConfig::default(),
+    ///     ).await?;
+    ///
+    ///     // Save for later replay
+    ///     trajectory.save("runs/run_001.json")?;
+    ///     Ok(())
+    /// }
+    /// ```
+    pub async fn execute_with_trajectory(
+        &self,
+        agent: &dyn Agent,
+        query: &str,
+        agent_config: serde_json::Value,
+        genai_client: rust_genai::Client,
+        llm_config: LlmConfig,
+    ) -> Result<(ExecutionMetrics, Trajectory), AgentError> {
+        // Create recording LLM client
+        let llm = LlmClient::with_recording(genai_client, llm_config.clone());
+        let context = AgentContext::new(llm);
+
+        // Get a reference to the LLM client for extracting steps later
+        let llm_ref = context.llm.clone();
+
+        // Execute agent and collect events
+        let mut tracker = agent.create_tracker();
+        let stream = agent.execute(query, context);
+        let stream = enforce_final_result_contract(stream);
+        futures_util::pin_mut!(stream);
+
+        let start = Instant::now();
+        let mut events: Vec<AgentUpdate> = Vec::new();
+
+        while let Some(result) = stream.next().await {
+            let update = result?;
+            events.push(update.clone());
+            tracker.handle_event(&update);
+        }
+
+        let total_duration = start.elapsed();
+        let metrics = ExecutionMetrics::from_tracker(tracker.as_ref(), total_duration);
+
+        // Extract recorded steps from the LLM client
+        let steps = llm_ref.take_steps();
+
+        // Build trajectory
+        let trajectory = TrajectoryBuilder::default()
+            .query(query)
+            .agent_name(agent.name())
+            .agent_config(agent_config)
+            .model(gemicro_core::MODEL)
+            .build(
+                steps,
+                events,
+                total_duration.as_millis() as u64,
+                metrics.final_answer.clone(),
+            );
+
+        Ok((metrics, trajectory))
     }
 }
 
@@ -233,5 +331,40 @@ mod tests {
         // Metrics should reflect final result
         assert_eq!(metrics.total_tokens, 100);
         assert_eq!(metrics.final_answer, Some("Final answer".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_runner_execute_with_trajectory() {
+        let runner = AgentRunner::new();
+        let agent = MockAgent::new(create_successful_events());
+        let genai_client = rust_genai::Client::builder("test-key".to_string()).build();
+        let llm_config = LlmConfig::default();
+
+        let (metrics, trajectory) = runner
+            .execute_with_trajectory(
+                &agent,
+                "test query",
+                serde_json::json!({"temperature": 0.7}),
+                genai_client,
+                llm_config,
+            )
+            .await
+            .unwrap();
+
+        // Verify metrics
+        assert_eq!(metrics.total_tokens, 100);
+        assert_eq!(metrics.final_answer, Some("Final answer".to_string()));
+
+        // Verify trajectory metadata
+        assert_eq!(trajectory.query, "test query");
+        assert_eq!(trajectory.agent_name, "mock_agent");
+        assert_eq!(trajectory.agent_config["temperature"], 0.7);
+
+        // Verify trajectory contains events
+        assert_eq!(trajectory.events.len(), 6);
+
+        // MockAgent doesn't make LLM calls, so steps should be empty
+        // (In real tests with actual agents, steps would be populated)
+        assert_eq!(trajectory.steps.len(), 0);
     }
 }

@@ -48,7 +48,9 @@ pub mod config;
 pub mod error;
 pub mod history;
 pub mod llm;
+pub mod mock_llm;
 pub mod tracking;
+pub mod trajectory;
 pub mod update;
 pub mod utils;
 
@@ -61,8 +63,13 @@ pub use config::{GemicroConfig, LlmConfig, MODEL};
 pub use error::{AgentError, GemicroError, LlmError};
 pub use history::{ConversationHistory, HistoryEntry};
 pub use llm::{LlmClient, LlmRequest, LlmStreamChunk};
+pub use mock_llm::MockLlmClient;
 // Re-export rust-genai types for convenience
 pub use rust_genai::{InteractionResponse, UsageMetadata};
 pub use tracking::{DefaultTracker, ExecutionTracking, FinalResultData};
+pub use trajectory::{
+    LlmResponseData, SerializableLlmRequest, SerializableStreamChunk, Trajectory,
+    TrajectoryBuilder, TrajectoryMetadata, TrajectoryStep, SCHEMA_VERSION,
+};
 pub use update::{AgentUpdate, FinalResult, ResultMetadata};
 pub use utils::{extract_total_tokens, first_sentence, truncate, truncate_with_count};

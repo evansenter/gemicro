@@ -96,7 +96,9 @@ pub mod results;
 pub mod scorer;
 
 // Re-export public API
-pub use dataset::{Dataset, DatasetError, GSM8KSplit, HotpotQA, JsonFileDataset, GSM8K};
+pub use dataset::{
+    Dataset, DatasetError, GSM8KSplit, HotpotQA, JsonFileDataset, TrajectoryDataset, GSM8K,
+};
 pub use harness::{EvalConfig, EvalError, EvalHarness, EvalProgress};
 pub use results::{EvalQuestion, EvalResult, EvalSummary};
 pub use scorer::{Contains, LlmJudgeScorer, Scorer, Scorers};

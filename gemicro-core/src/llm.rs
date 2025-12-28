@@ -28,17 +28,39 @@
 
 use crate::config::{LlmConfig, MODEL};
 use crate::error::LlmError;
+use crate::trajectory::{
+    LlmResponseData, SerializableLlmRequest, SerializableStreamChunk, TrajectoryStep,
+};
 use futures_util::stream::{Stream, StreamExt};
 use rust_genai::GenerationConfig;
+use std::sync::{Arc, RwLock};
+use std::time::{Instant, SystemTime};
 use tokio_util::sync::CancellationToken;
 
 /// LLM client wrapping rust-genai with timeout and configuration
+///
+/// Optionally supports trajectory recording for offline replay and evaluation.
+/// Recording is disabled by default for zero overhead. Use [`LlmClient::with_recording`]
+/// to enable it.
 pub struct LlmClient {
     /// Underlying rust-genai client
     client: rust_genai::Client,
 
     /// LLM configuration (timeout, tokens, temperature, etc.)
     config: LlmConfig,
+
+    /// Optional recorder for trajectory capture
+    ///
+    /// When `Some`, all LLM interactions are recorded as `TrajectoryStep`s.
+    /// Use `take_steps()` to retrieve recorded steps.
+    recorder: Option<Arc<RwLock<Vec<TrajectoryStep>>>>,
+
+    /// Current phase label for recorded steps
+    ///
+    /// This is a semantic identifier like "decomposition" or "sub_query_2"
+    /// that helps identify what part of the agent's execution each LLM call
+    /// belongs to. Call `set_phase()` before making LLM calls.
+    current_phase: Arc<RwLock<String>>,
 }
 
 impl std::fmt::Debug for LlmClient {
@@ -47,6 +69,7 @@ impl std::fmt::Debug for LlmClient {
             .field("model", &MODEL)
             .field("client", &"[REDACTED]")
             .field("config", &self.config)
+            .field("is_recording", &self.is_recording())
             .finish()
     }
 }
@@ -166,8 +189,134 @@ impl LlmRequest {
 
 impl LlmClient {
     /// Create a new LLM client with the given rust-genai client and configuration
+    ///
+    /// Recording is disabled by default. Use [`with_recording`](Self::with_recording)
+    /// to create a client that captures LLM interactions.
     pub fn new(client: rust_genai::Client, config: LlmConfig) -> Self {
-        Self { client, config }
+        Self {
+            client,
+            config,
+            recorder: None,
+            current_phase: Arc::new(RwLock::new("default".to_string())),
+        }
+    }
+
+    /// Create a new LLM client with trajectory recording enabled
+    ///
+    /// All LLM interactions will be recorded as `TrajectoryStep`s.
+    /// Use [`set_phase`](Self::set_phase) to label steps with semantic context,
+    /// and [`take_steps`](Self::take_steps) to retrieve recorded steps.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use gemicro_core::{LlmClient, LlmRequest, LlmConfig};
+    ///
+    /// # async fn example() -> Result<(), gemicro_core::LlmError> {
+    /// let genai_client = rust_genai::Client::builder("key".to_string()).build();
+    /// let client = LlmClient::with_recording(genai_client, LlmConfig::default());
+    ///
+    /// client.set_phase("decomposition");
+    /// let _response = client.generate(LlmRequest::new("Break this down")).await?;
+    ///
+    /// client.set_phase("synthesis");
+    /// let _response = client.generate(LlmRequest::new("Combine these")).await?;
+    ///
+    /// let steps = client.take_steps();
+    /// assert_eq!(steps.len(), 2);
+    /// assert_eq!(steps[0].phase, "decomposition");
+    /// assert_eq!(steps[1].phase, "synthesis");
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn with_recording(client: rust_genai::Client, config: LlmConfig) -> Self {
+        Self {
+            client,
+            config,
+            recorder: Some(Arc::new(RwLock::new(Vec::new()))),
+            current_phase: Arc::new(RwLock::new("default".to_string())),
+        }
+    }
+
+    /// Check if this client is recording LLM interactions
+    pub fn is_recording(&self) -> bool {
+        self.recorder.is_some()
+    }
+
+    /// Set the current phase label for recorded steps
+    ///
+    /// Call this before making LLM calls to label them with semantic context.
+    /// The phase is a soft-typed string following Evergreen principles - use
+    /// any identifier that makes sense for your agent (e.g., "decomposition",
+    /// "sub_query_3", "synthesis", "reflection").
+    pub fn set_phase(&self, phase: impl Into<String>) {
+        let phase_str = phase.into();
+        match self.current_phase.write() {
+            Ok(mut current) => *current = phase_str,
+            Err(poisoned) => {
+                log::warn!("Phase lock poisoned while setting phase - recovering");
+                *poisoned.into_inner() = phase_str;
+            }
+        }
+    }
+
+    /// Get the current phase label
+    pub fn current_phase(&self) -> String {
+        match self.current_phase.read() {
+            Ok(p) => p.clone(),
+            Err(poisoned) => {
+                log::warn!("Phase lock poisoned while reading phase - recovering");
+                poisoned.into_inner().clone()
+            }
+        }
+    }
+
+    /// Take all recorded steps, leaving the recorder empty
+    ///
+    /// Returns an empty vector if recording is disabled.
+    /// After calling this, new steps will start accumulating again.
+    pub fn take_steps(&self) -> Vec<TrajectoryStep> {
+        let Some(ref recorder) = self.recorder else {
+            return Vec::new();
+        };
+
+        match recorder.write() {
+            Ok(mut steps) => std::mem::take(&mut *steps),
+            Err(poisoned) => {
+                log::warn!("Trajectory recorder lock poisoned - recovering recorded steps");
+                std::mem::take(&mut *poisoned.into_inner())
+            }
+        }
+    }
+
+    /// Get the number of recorded steps without consuming them
+    pub fn step_count(&self) -> usize {
+        let Some(ref recorder) = self.recorder else {
+            return 0;
+        };
+
+        match recorder.read() {
+            Ok(steps) => steps.len(),
+            Err(poisoned) => {
+                log::warn!("Trajectory recorder lock poisoned while reading count - recovering");
+                poisoned.into_inner().len()
+            }
+        }
+    }
+
+    /// Record a step if recording is enabled
+    fn record_step(&self, step: TrajectoryStep) {
+        let Some(ref recorder) = self.recorder else {
+            return;
+        };
+
+        match recorder.write() {
+            Ok(mut steps) => steps.push(step),
+            Err(poisoned) => {
+                log::warn!("Trajectory recorder lock poisoned - recovering and recording step");
+                poisoned.into_inner().push(step);
+            }
+        }
     }
 
     /// Get a reference to the underlying rust-genai client.
@@ -342,6 +491,10 @@ impl LlmClient {
     ) -> Result<rust_genai::InteractionResponse, LlmError> {
         let interaction = self.build_interaction(request);
 
+        // Capture timing for recording
+        let started_at = SystemTime::now();
+        let start_instant = Instant::now();
+
         // Execute with timeout
         let timeout_duration = self.config.timeout;
         let response = tokio::time::timeout(timeout_duration, interaction.create())
@@ -352,6 +505,27 @@ impl LlmClient {
         // Validate response has content
         if response.text().is_none() {
             return Err(LlmError::NoContent);
+        }
+
+        // Record the step if recording is enabled
+        if self.is_recording() {
+            let duration_ms = start_instant.elapsed().as_millis() as u64;
+
+            // Serialize the response to JSON for storage
+            let response_data = serde_json::to_value(&response)
+                .map(LlmResponseData::Buffered)
+                .unwrap_or_else(|e| {
+                    log::warn!("Failed to serialize LLM response: {}", e);
+                    LlmResponseData::Buffered(serde_json::json!({"error": "serialization_failed"}))
+                });
+
+            self.record_step(TrajectoryStep {
+                phase: self.current_phase(),
+                request: SerializableLlmRequest::from(request),
+                response: response_data,
+                duration_ms,
+                started_at,
+            });
         }
 
         Ok(response)
@@ -421,6 +595,14 @@ impl LlmClient {
 
             let interaction = self.build_interaction(&request);
 
+            // Capture timing and chunks for recording
+            let started_at = SystemTime::now();
+            let start_instant = Instant::now();
+            let mut recorded_chunks: Vec<SerializableStreamChunk> = Vec::new();
+            let is_recording = self.is_recording();
+            let serializable_request = SerializableLlmRequest::from(&request);
+            let phase = self.current_phase();
+
             // Get the stream (not async - returns immediately)
             let stream = interaction.create_stream();
             futures_util::pin_mut!(stream);
@@ -437,8 +619,18 @@ impl LlmClient {
                         match stream_chunk {
                             StreamChunk::Delta(delta) => {
                                 if let Some(text) = delta.text() {
+                                    let text_str = text.to_string();
+
+                                    // Record chunk if recording is enabled
+                                    if is_recording {
+                                        recorded_chunks.push(SerializableStreamChunk {
+                                            text: text_str.clone(),
+                                            offset_ms: start_instant.elapsed().as_millis() as u64,
+                                        });
+                                    }
+
                                     yield LlmStreamChunk {
-                                        text: text.to_string(),
+                                        text: text_str,
                                     };
                                 }
                                 // Skip deltas with no text (e.g., thought deltas)
@@ -458,6 +650,18 @@ impl LlmClient {
                     }
                     None => break,
                 }
+            }
+
+            // Record the step at the end of streaming
+            if is_recording {
+                let duration_ms = start_instant.elapsed().as_millis() as u64;
+                self.record_step(TrajectoryStep {
+                    phase,
+                    request: serializable_request,
+                    response: LlmResponseData::Streaming(recorded_chunks),
+                    duration_ms,
+                    started_at,
+                });
             }
             // Stream ends naturally - no artificial final marker needed
         }
@@ -507,6 +711,14 @@ impl LlmClient {
 
             let interaction = self.build_interaction(&request);
 
+            // Capture timing and chunks for recording
+            let started_at = SystemTime::now();
+            let start_instant = Instant::now();
+            let mut recorded_chunks: Vec<SerializableStreamChunk> = Vec::new();
+            let is_recording = self.is_recording();
+            let serializable_request = SerializableLlmRequest::from(&request);
+            let phase = self.current_phase();
+
             // Get the stream (not async - returns immediately)
             let stream = interaction.create_stream();
             futures_util::pin_mut!(stream);
@@ -534,8 +746,18 @@ impl LlmClient {
                         match stream_chunk {
                             StreamChunk::Delta(delta) => {
                                 if let Some(text) = delta.text() {
+                                    let text_str = text.to_string();
+
+                                    // Record chunk if recording is enabled
+                                    if is_recording {
+                                        recorded_chunks.push(SerializableStreamChunk {
+                                            text: text_str.clone(),
+                                            offset_ms: start_instant.elapsed().as_millis() as u64,
+                                        });
+                                    }
+
                                     yield LlmStreamChunk {
-                                        text: text.to_string(),
+                                        text: text_str,
                                     };
                                 }
                                 // Skip deltas with no text (e.g., thought deltas)
@@ -554,6 +776,18 @@ impl LlmClient {
                     }
                     None => break,
                 }
+            }
+
+            // Record the step at the end of streaming
+            if is_recording {
+                let duration_ms = start_instant.elapsed().as_millis() as u64;
+                self.record_step(TrajectoryStep {
+                    phase,
+                    request: serializable_request,
+                    response: LlmResponseData::Streaming(recorded_chunks),
+                    duration_ms,
+                    started_at,
+                });
             }
         }
     }
@@ -802,6 +1036,97 @@ mod tests {
         assert!(
             !debug_output.contains("12345"),
             "Debug output must not contain API key suffix"
+        );
+    }
+
+    // Recording functionality tests
+
+    #[test]
+    fn test_llm_client_not_recording_by_default() {
+        let genai_client = rust_genai::Client::builder("test-key".to_string()).build();
+        let client = LlmClient::new(genai_client, LlmConfig::default());
+
+        assert!(!client.is_recording());
+        assert_eq!(client.step_count(), 0);
+        assert!(client.take_steps().is_empty());
+    }
+
+    #[test]
+    fn test_llm_client_with_recording() {
+        let genai_client = rust_genai::Client::builder("test-key".to_string()).build();
+        let client = LlmClient::with_recording(genai_client, LlmConfig::default());
+
+        assert!(client.is_recording());
+        assert_eq!(client.step_count(), 0);
+    }
+
+    #[test]
+    fn test_set_and_get_phase() {
+        let genai_client = rust_genai::Client::builder("test-key".to_string()).build();
+        let client = LlmClient::new(genai_client, LlmConfig::default());
+
+        // Default phase
+        assert_eq!(client.current_phase(), "default");
+
+        // Set a new phase
+        client.set_phase("decomposition");
+        assert_eq!(client.current_phase(), "decomposition");
+
+        // Set another phase
+        client.set_phase("synthesis");
+        assert_eq!(client.current_phase(), "synthesis");
+    }
+
+    #[test]
+    fn test_take_steps_clears_recorder() {
+        let genai_client = rust_genai::Client::builder("test-key".to_string()).build();
+        let client = LlmClient::with_recording(genai_client, LlmConfig::default());
+
+        // Manually record a step for testing
+        let step = TrajectoryStep {
+            phase: "test".to_string(),
+            request: SerializableLlmRequest {
+                prompt: "Test prompt".to_string(),
+                system_instruction: None,
+                use_google_search: false,
+                response_format: None,
+            },
+            response: LlmResponseData::Buffered(serde_json::json!({"text": "Test"})),
+            duration_ms: 100,
+            started_at: SystemTime::now(),
+        };
+        client.record_step(step);
+
+        assert_eq!(client.step_count(), 1);
+
+        // Take steps should return 1 and clear
+        let steps = client.take_steps();
+        assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0].phase, "test");
+
+        // Now empty
+        assert_eq!(client.step_count(), 0);
+        assert!(client.take_steps().is_empty());
+    }
+
+    #[test]
+    fn test_debug_shows_recording_status() {
+        let genai_client = rust_genai::Client::builder("test-key".to_string()).build();
+        let recording_client = LlmClient::with_recording(genai_client, LlmConfig::default());
+        let debug_output = format!("{:?}", recording_client);
+
+        assert!(
+            debug_output.contains("is_recording: true"),
+            "Debug output should show is_recording: true"
+        );
+
+        let genai_client2 = rust_genai::Client::builder("test-key".to_string()).build();
+        let non_recording = LlmClient::new(genai_client2, LlmConfig::default());
+        let debug_output2 = format!("{:?}", non_recording);
+
+        assert!(
+            debug_output2.contains("is_recording: false"),
+            "Debug output should show is_recording: false"
         );
     }
 }

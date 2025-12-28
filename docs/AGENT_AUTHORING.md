@@ -549,9 +549,104 @@ members = [
 
 **Note:** Each agent crate depends ONLY on gemicro-core, never on other agent crates. This enforces hermetic isolation at compile time.
 
+## Trajectory Recording and Replay
+
+Gemicro supports capturing full LLM interaction traces during agent execution for offline replay, evaluation, and debugging.
+
+### Recording Trajectories
+
+Use `AgentRunner::execute_with_trajectory()` to capture execution traces:
+
+```rust
+use gemicro_core::{LlmConfig, Trajectory};
+use gemicro_runner::AgentRunner;
+use serde_json::json;
+
+async fn record_trajectory(agent: &impl Agent, query: &str) -> Result<Trajectory, AgentError> {
+    let genai_client = rust_genai::Client::builder(api_key).build();
+    let llm_config = LlmConfig::default();
+
+    // Use AgentRunner for trajectory capture
+    let runner = AgentRunner::new();
+    let (metrics, trajectory) = runner.execute_with_trajectory(
+        agent,
+        query,
+        json!({"temperature": 0.7}),  // Agent config as JSON
+        genai_client,
+        llm_config,
+    ).await?;
+
+    // Save for later replay
+    trajectory.save("trajectories/run_001.json")?;
+    Ok(trajectory)
+}
+```
+
+### Replaying Trajectories
+
+Use `MockLlmClient` to replay recorded trajectories without API calls:
+
+```rust
+use gemicro_core::{MockLlmClient, Trajectory, LlmRequest};
+
+async fn replay_trajectory() -> Result<(), Box<dyn std::error::Error>> {
+    // Load previously recorded trajectory
+    let trajectory = Trajectory::load("trajectories/run_001.json")?;
+
+    // Create mock client that replays the recorded responses
+    let mock = MockLlmClient::from_trajectory(&trajectory);
+
+    // Use like a regular LlmClient - returns recorded responses in order
+    let response = mock.generate(LlmRequest::new("Any prompt")).await?;
+    println!("Replayed: {}", response["text"]);
+
+    Ok(())
+}
+```
+
+### Trajectory Structure
+
+A trajectory contains:
+
+| Field | Description |
+|-------|-------------|
+| `id` | Unique UUID |
+| `query` | Original user query |
+| `agent_name` | Agent that executed |
+| `agent_config` | Agent configuration (soft-typed JSON) |
+| `steps` | Raw LLM request/response pairs with timing |
+| `events` | High-level `AgentUpdate` events |
+| `metadata` | Tokens, duration, schema version |
+
+### Use Cases
+
+1. **Offline Testing**: Run agents without API calls for fast unit tests
+2. **Evaluation**: Score agent responses against ground truth
+3. **Debugging**: Inspect exact LLM requests and responses
+4. **Dataset Creation**: Build evaluation datasets from production runs
+
+### Integration with Eval Framework
+
+Load trajectories as evaluation datasets with `TrajectoryDataset`:
+
+```rust
+use gemicro_eval::{TrajectoryDataset, Dataset};
+use std::path::PathBuf;
+
+async fn evaluate_from_trajectories() -> Result<(), Box<dyn std::error::Error>> {
+    // Load trajectories from a directory
+    let dataset = TrajectoryDataset::new(PathBuf::from("trajectories/"));
+    let questions = dataset.load(Some(100)).await?;
+
+    println!("Loaded {} questions from trajectories", questions.len());
+    Ok(())
+}
+```
+
 ## See Also
 
 - `agents/gemicro-simple-qa/src/lib.rs` - Full reference implementation
 - `agents/gemicro-deep-research/src/` - Complex multi-phase example
 - `agents/gemicro-simple-qa/tests/integration.rs` - Integration test examples
+- `agents/gemicro-simple-qa/examples/trajectory_recording.rs` - Trajectory recording example
 - `CLAUDE.md` - Project design philosophy and crate responsibilities

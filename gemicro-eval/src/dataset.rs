@@ -3,6 +3,7 @@
 //! Provides the [`Dataset`] trait and built-in loaders for common benchmarks.
 
 use crate::results::EvalQuestion;
+use gemicro_core::Trajectory;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 use tokio::fs;
@@ -542,6 +543,146 @@ struct GSM8KEntry {
     answer: String,
 }
 
+/// A dataset created from saved trajectory files.
+///
+/// This allows evaluating agents on previously recorded runs, enabling:
+/// - Regression testing against known-good trajectories
+/// - Offline evaluation without API calls (using MockLlmClient for replay)
+/// - Building evaluation sets from production data
+///
+/// # Directory Structure
+///
+/// The dataset expects a directory containing JSON trajectory files:
+/// ```text
+/// trajectories/
+/// ├── run_001.json
+/// ├── run_002.json
+/// └── run_003.json
+/// ```
+///
+/// Each file should be a valid `Trajectory` JSON (as created by `Trajectory::save()`).
+/// Files without `.json` extension are ignored.
+///
+/// # Example
+///
+/// ```no_run
+/// use gemicro_eval::{TrajectoryDataset, Dataset};
+/// use std::path::PathBuf;
+///
+/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// let dataset = TrajectoryDataset::new(PathBuf::from("trajectories/"));
+/// let questions = dataset.load(Some(10)).await?;
+///
+/// // Each question comes from a trajectory:
+/// // - id: trajectory.id
+/// // - question: trajectory.query
+/// // - ground_truth: trajectory.metadata.final_answer
+/// println!("Loaded {} trajectory-based questions", questions.len());
+/// # Ok(())
+/// # }
+/// ```
+pub struct TrajectoryDataset {
+    /// Directory containing trajectory JSON files
+    dir: PathBuf,
+    /// Custom name for the dataset
+    name: String,
+}
+
+impl TrajectoryDataset {
+    /// Create a dataset from a directory of trajectory files.
+    pub fn new(dir: PathBuf) -> Self {
+        let name = dir
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("trajectories")
+            .to_string();
+
+        Self { dir, name }
+    }
+
+    /// Create a dataset with a custom name.
+    pub fn with_name(dir: PathBuf, name: impl Into<String>) -> Self {
+        Self {
+            dir,
+            name: name.into(),
+        }
+    }
+
+    /// Get the directory path.
+    pub fn dir(&self) -> &Path {
+        &self.dir
+    }
+
+    /// Load all trajectories from the directory.
+    ///
+    /// Returns the full `Trajectory` objects for cases where you need
+    /// more than just the question/answer pairs (e.g., for replay).
+    pub async fn load_trajectories(
+        &self,
+        sample_size: Option<usize>,
+    ) -> Result<Vec<Trajectory>, DatasetError> {
+        let mut trajectories = Vec::new();
+
+        if !self.dir.exists() {
+            return Err(DatasetError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("Trajectory directory not found: {:?}", self.dir),
+            )));
+        }
+
+        let mut entries = fs::read_dir(&self.dir).await?;
+        while let Some(entry) = entries.next_entry().await? {
+            let path = entry.path();
+
+            // Only process .json files
+            if path.extension().and_then(|s| s.to_str()) != Some("json") {
+                continue;
+            }
+
+            match Trajectory::load(&path) {
+                Ok(trajectory) => trajectories.push(trajectory),
+                Err(e) => {
+                    log::warn!("Failed to load trajectory {:?}: {}", path, e);
+                }
+            }
+        }
+
+        // Sort by trajectory ID for deterministic ordering
+        trajectories.sort_by(|a, b| a.id.cmp(&b.id));
+
+        // Apply sample size limit
+        if let Some(size) = sample_size {
+            trajectories.truncate(size);
+        }
+
+        Ok(trajectories)
+    }
+}
+
+impl Dataset for TrajectoryDataset {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    async fn load(&self, sample_size: Option<usize>) -> Result<Vec<EvalQuestion>, DatasetError> {
+        let trajectories = self.load_trajectories(sample_size).await?;
+
+        let questions = trajectories
+            .into_iter()
+            .filter_map(|t| {
+                // Only include trajectories that have a final answer
+                t.metadata.final_answer.map(|answer| EvalQuestion {
+                    id: t.id,
+                    question: t.query,
+                    ground_truth: answer,
+                })
+            })
+            .collect();
+
+        Ok(questions)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -679,5 +820,175 @@ mod tests {
         let questions = loader.load(Some(2)).await.unwrap();
 
         assert_eq!(questions.len(), 2);
+    }
+
+    // TrajectoryDataset tests
+
+    #[test]
+    fn test_trajectory_dataset_name() {
+        let dataset = TrajectoryDataset::new(PathBuf::from("/path/to/trajectories"));
+        assert_eq!(dataset.name(), "trajectories");
+
+        let dataset =
+            TrajectoryDataset::with_name(PathBuf::from("/path/to/data"), "my_custom_name");
+        assert_eq!(dataset.name(), "my_custom_name");
+    }
+
+    #[test]
+    fn test_trajectory_dataset_dir() {
+        let dir = PathBuf::from("/path/to/trajectories");
+        let dataset = TrajectoryDataset::new(dir.clone());
+        assert_eq!(dataset.dir(), dir);
+    }
+
+    #[tokio::test]
+    async fn test_trajectory_dataset_load_empty_dir() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let dataset = TrajectoryDataset::new(temp_dir.path().to_path_buf());
+
+        let questions = dataset.load(None).await.unwrap();
+        assert!(questions.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_trajectory_dataset_load_nonexistent_dir() {
+        let dataset = TrajectoryDataset::new(PathBuf::from("/nonexistent/path/xyz"));
+
+        let result = dataset.load(None).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_trajectory_dataset_load_trajectories() {
+        use gemicro_core::trajectory::{TrajectoryMetadata, SCHEMA_VERSION};
+
+        // Create a temporary directory with trajectory files
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        // Create a sample trajectory
+        let trajectory = Trajectory {
+            id: "test-123".to_string(),
+            query: "What is 2+2?".to_string(),
+            agent_name: "test_agent".to_string(),
+            agent_config: serde_json::json!({}),
+            steps: vec![],
+            events: vec![],
+            metadata: TrajectoryMetadata {
+                created_at: std::time::SystemTime::now(),
+                total_duration_ms: 100,
+                total_tokens: 50,
+                tokens_unavailable_count: 0,
+                final_answer: Some("4".to_string()),
+                model: "test-model".to_string(),
+                schema_version: SCHEMA_VERSION.to_string(),
+            },
+        };
+
+        // Save trajectory
+        trajectory.save(temp_dir.path().join("test.json")).unwrap();
+
+        // Load via TrajectoryDataset
+        let dataset = TrajectoryDataset::new(temp_dir.path().to_path_buf());
+        let questions = dataset.load(None).await.unwrap();
+
+        assert_eq!(questions.len(), 1);
+        assert_eq!(questions[0].id, "test-123");
+        assert_eq!(questions[0].question, "What is 2+2?");
+        assert_eq!(questions[0].ground_truth, "4");
+    }
+
+    #[tokio::test]
+    async fn test_trajectory_dataset_ignores_non_json() {
+        use gemicro_core::trajectory::{TrajectoryMetadata, SCHEMA_VERSION};
+
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        // Create a valid trajectory file
+        let trajectory = Trajectory {
+            id: "valid-123".to_string(),
+            query: "Valid query".to_string(),
+            agent_name: "test".to_string(),
+            agent_config: serde_json::json!({}),
+            steps: vec![],
+            events: vec![],
+            metadata: TrajectoryMetadata {
+                created_at: std::time::SystemTime::now(),
+                total_duration_ms: 100,
+                total_tokens: 50,
+                tokens_unavailable_count: 0,
+                final_answer: Some("Valid answer".to_string()),
+                model: "test".to_string(),
+                schema_version: SCHEMA_VERSION.to_string(),
+            },
+        };
+        trajectory.save(temp_dir.path().join("valid.json")).unwrap();
+
+        // Create a non-JSON file (should be ignored)
+        std::fs::write(temp_dir.path().join("notes.txt"), "some notes").unwrap();
+
+        let dataset = TrajectoryDataset::new(temp_dir.path().to_path_buf());
+        let questions = dataset.load(None).await.unwrap();
+
+        // Only the valid JSON should be loaded
+        assert_eq!(questions.len(), 1);
+        assert_eq!(questions[0].id, "valid-123");
+    }
+
+    #[tokio::test]
+    async fn test_trajectory_dataset_filters_no_answer() {
+        use gemicro_core::trajectory::{TrajectoryMetadata, SCHEMA_VERSION};
+
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        // Create trajectory WITH answer
+        let with_answer = Trajectory {
+            id: "with-answer".to_string(),
+            query: "Q1".to_string(),
+            agent_name: "test".to_string(),
+            agent_config: serde_json::json!({}),
+            steps: vec![],
+            events: vec![],
+            metadata: TrajectoryMetadata {
+                created_at: std::time::SystemTime::now(),
+                total_duration_ms: 100,
+                total_tokens: 50,
+                tokens_unavailable_count: 0,
+                final_answer: Some("A1".to_string()),
+                model: "test".to_string(),
+                schema_version: SCHEMA_VERSION.to_string(),
+            },
+        };
+        with_answer
+            .save(temp_dir.path().join("with_answer.json"))
+            .unwrap();
+
+        // Create trajectory WITHOUT answer (failed run)
+        let without_answer = Trajectory {
+            id: "without-answer".to_string(),
+            query: "Q2".to_string(),
+            agent_name: "test".to_string(),
+            agent_config: serde_json::json!({}),
+            steps: vec![],
+            events: vec![],
+            metadata: TrajectoryMetadata {
+                created_at: std::time::SystemTime::now(),
+                total_duration_ms: 100,
+                total_tokens: 50,
+                tokens_unavailable_count: 0,
+                final_answer: None, // No answer
+                model: "test".to_string(),
+                schema_version: SCHEMA_VERSION.to_string(),
+            },
+        };
+        without_answer
+            .save(temp_dir.path().join("without_answer.json"))
+            .unwrap();
+
+        let dataset = TrajectoryDataset::new(temp_dir.path().to_path_buf());
+        let questions = dataset.load(None).await.unwrap();
+
+        // Only trajectories with answers should be included
+        assert_eq!(questions.len(), 1);
+        assert_eq!(questions[0].id, "with-answer");
     }
 }
