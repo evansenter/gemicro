@@ -115,7 +115,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let request = LlmRequest::new("Any prompt - the recorded response is returned");
     let response = mock.generate(request).await?;
 
-    if let Some(text) = response.get("text").and_then(|t| t.as_str()) {
+    // Extract text from rust-genai's InteractionResponse structure
+    // The response has outputs: [{type: "thought"}, {type: "text", text: "..."}]
+    let text = response
+        .get("outputs")
+        .and_then(|outputs| outputs.as_array())
+        .and_then(|arr| {
+            arr.iter().find_map(|output| {
+                if output.get("type").and_then(|t| t.as_str()) == Some("text") {
+                    output.get("text").and_then(|t| t.as_str())
+                } else {
+                    None
+                }
+            })
+        });
+
+    if let Some(text) = text {
         println!(
             "  Replayed response: {}...",
             text.chars().take(100).collect::<String>()

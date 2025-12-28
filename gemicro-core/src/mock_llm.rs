@@ -186,7 +186,20 @@ impl MockLlmClient {
                 }
                 LlmResponseData::Buffered(response) => {
                     // Fallback: if buffered response, yield the full response as one chunk
-                    if let Some(text) = response.get("text").and_then(|t| t.as_str()) {
+                    // rust-genai InteractionResponse: { "outputs": [{"type": "text", "text": "..."}] }
+                    let text = response
+                        .get("outputs")
+                        .and_then(|outputs| outputs.as_array())
+                        .and_then(|arr| {
+                            arr.iter().find_map(|output| {
+                                if output.get("type").and_then(|t| t.as_str()) == Some("text") {
+                                    output.get("text").and_then(|t| t.as_str())
+                                } else {
+                                    None
+                                }
+                            })
+                        });
+                    if let Some(text) = text {
                         yield LlmStreamChunk { text: text.to_string() };
                     }
                 }
@@ -213,8 +226,9 @@ mod tests {
                 use_google_search: false,
                 response_format: None,
             },
+            // Use rust-genai InteractionResponse structure
             response: LlmResponseData::Buffered(json!({
-                "text": "The answer is 4.",
+                "outputs": [{"type": "text", "text": "The answer is 4."}],
                 "usage": {"total_tokens": 10}
             })),
             duration_ms: 100,
@@ -276,35 +290,54 @@ mod tests {
         assert_eq!(mock.step_count(), 2);
     }
 
+    /// Helper to extract text from rust-genai InteractionResponse structure
+    fn extract_text(response: &serde_json::Value) -> Option<&str> {
+        response
+            .get("outputs")?
+            .as_array()?
+            .iter()
+            .find_map(|output| {
+                if output.get("type")?.as_str()? == "text" {
+                    output.get("text")?.as_str()
+                } else {
+                    None
+                }
+            })
+    }
+
     #[tokio::test]
     async fn test_generate_returns_recorded_response() {
         let mock = MockLlmClient::from_steps(vec![sample_buffered_step()]);
 
         let response = mock.generate(LlmRequest::new("Any prompt")).await.unwrap();
 
-        assert_eq!(response["text"], "The answer is 4.");
+        assert_eq!(extract_text(&response), Some("The answer is 4."));
         assert!(mock.is_exhausted());
     }
 
     #[tokio::test]
     async fn test_generate_advances_through_steps() {
         let step1 = TrajectoryStep {
-            response: LlmResponseData::Buffered(json!({"text": "First response"})),
+            response: LlmResponseData::Buffered(json!({
+                "outputs": [{"type": "text", "text": "First response"}]
+            })),
             ..sample_buffered_step()
         };
         let step2 = TrajectoryStep {
-            response: LlmResponseData::Buffered(json!({"text": "Second response"})),
+            response: LlmResponseData::Buffered(json!({
+                "outputs": [{"type": "text", "text": "Second response"}]
+            })),
             ..sample_buffered_step()
         };
 
         let mock = MockLlmClient::from_steps(vec![step1, step2]);
 
         let r1 = mock.generate(LlmRequest::new("First")).await.unwrap();
-        assert_eq!(r1["text"], "First response");
+        assert_eq!(extract_text(&r1), Some("First response"));
         assert_eq!(mock.current_index(), 1);
 
         let r2 = mock.generate(LlmRequest::new("Second")).await.unwrap();
-        assert_eq!(r2["text"], "Second response");
+        assert_eq!(extract_text(&r2), Some("Second response"));
         assert!(mock.is_exhausted());
     }
 
