@@ -24,7 +24,7 @@
 //!
 //! ## Example
 //!
-//! ```ignore
+//! ```text
 //! // Requires an agent crate like gemicro-deep-research
 //! use gemicro_runner::AgentRunner;
 //! use gemicro_core::{AgentContext, LlmClient, LlmConfig};

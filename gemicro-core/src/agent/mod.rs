@@ -117,7 +117,7 @@ pub trait Agent: Send + Sync {
     ///
     /// For simple agents without complex tracking needs, use [`DefaultTracker`]:
     ///
-    /// ```ignore
+    /// ```text
     /// fn create_tracker(&self) -> Box<dyn ExecutionTracking> {
     ///     Box::new(DefaultTracker::default())
     /// }

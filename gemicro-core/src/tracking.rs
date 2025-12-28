@@ -14,9 +14,7 @@
 //!
 //! # Usage Example
 //!
-//! ```ignore
-//! use gemicro_core::{Agent, AgentContext, ExecutionTracking};
-//!
+//! ```text
 //! async fn run_with_progress(agent: &dyn Agent, query: &str, context: AgentContext) {
 //!     let mut tracker = agent.create_tracker();
 //!     let stream = agent.execute(query, context);

@@ -19,7 +19,7 @@ use std::time::Instant;
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```text
 /// // Requires an agent crate like gemicro-deep-research
 /// use gemicro_runner::AgentRunner;
 /// use gemicro_core::{AgentContext, LlmClient, LlmConfig};
@@ -90,7 +90,7 @@ impl AgentRunner {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```text
     /// // Requires an agent crate like gemicro-deep-research
     /// use gemicro_runner::{AgentRunner, ExecutionState};
     /// use gemicro_core::{Agent, AgentContext};
@@ -140,7 +140,7 @@ impl AgentRunner {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```text
     /// use gemicro_runner::AgentRunner;
     /// use gemicro_core::{Agent, AgentContext};
     ///

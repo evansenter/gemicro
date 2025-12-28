@@ -5,7 +5,7 @@
 //!
 //! # Example
 //!
-//! ```ignore
+//! ```text
 //! // Requires an agent crate like gemicro-deep-research
 //! use gemicro_runner::AgentRegistry;
 //! use gemicro_deep_research::{DeepResearchAgent, ResearchConfig};
@@ -36,7 +36,7 @@ pub type AgentFactory = Arc<dyn Fn() -> Box<dyn Agent> + Send + Sync>;
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```text
 /// // Requires an agent crate like gemicro-deep-research
 /// use gemicro_runner::AgentRegistry;
 /// use gemicro_deep_research::{DeepResearchAgent, ResearchConfig};
@@ -73,7 +73,7 @@ impl AgentRegistry {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```text
     /// // Requires an agent crate like gemicro-deep-research
     /// use gemicro_runner::AgentRegistry;
     /// use gemicro_deep_research::{DeepResearchAgent, ResearchConfig};
