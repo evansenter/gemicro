@@ -408,4 +408,73 @@ mod tests {
 
         assert!(mock.simulate_timing);
     }
+
+    #[tokio::test]
+    async fn test_generate_stream_validates_empty_prompt() {
+        let mock = MockLlmClient::from_steps(vec![sample_streaming_step()]);
+
+        let stream = mock.generate_stream(LlmRequest::new(""));
+        futures_util::pin_mut!(stream);
+
+        let result = stream.next().await;
+        assert!(matches!(result, Some(Err(LlmError::InvalidRequest(_)))));
+    }
+
+    #[tokio::test]
+    async fn test_generate_stream_returns_error_when_exhausted() {
+        let mock = MockLlmClient::from_steps(vec![]);
+
+        let stream = mock.generate_stream(LlmRequest::new("Test"));
+        futures_util::pin_mut!(stream);
+
+        let result = stream.next().await;
+        assert!(matches!(result, Some(Err(LlmError::NoContent))));
+    }
+
+    #[tokio::test]
+    async fn test_generate_stream_timing_simulation() {
+        let step = TrajectoryStep {
+            phase: "timed".to_string(),
+            request: SerializableLlmRequest {
+                prompt: "Count".to_string(),
+                system_instruction: None,
+                use_google_search: false,
+                response_format: None,
+            },
+            response: LlmResponseData::Streaming(vec![
+                SerializableStreamChunk {
+                    text: "One".to_string(),
+                    offset_ms: 0,
+                },
+                SerializableStreamChunk {
+                    text: " Two".to_string(),
+                    offset_ms: 1000, // 1 second gap -> 10ms with 100x scaling
+                },
+            ]),
+            duration_ms: 1000,
+            started_at: SystemTime::now(),
+        };
+
+        let mock = MockLlmClient::from_steps(vec![step]).with_timing_simulation();
+
+        let start = std::time::Instant::now();
+        let stream = mock.generate_stream(LlmRequest::new("Count"));
+        futures_util::pin_mut!(stream);
+
+        let mut collected = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            collected.push(chunk.unwrap().text);
+        }
+
+        let elapsed = start.elapsed();
+
+        assert_eq!(collected, vec!["One", " Two"]);
+        // With timing simulation, there should be at least some delay
+        // (1000ms offset / 100 = 10ms minimum)
+        assert!(
+            elapsed.as_millis() >= 5,
+            "Expected delay from timing simulation, got {:?}",
+            elapsed
+        );
+    }
 }
