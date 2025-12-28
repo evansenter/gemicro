@@ -9,7 +9,8 @@ use crate::format::truncate;
 use anyhow::{Context, Result};
 use futures_util::StreamExt;
 use gemicro_core::{
-    AgentContext, AgentError, AgentUpdate, ConversationHistory, HistoryEntry, LlmClient,
+    enforce_final_result_contract, AgentContext, AgentError, AgentUpdate, ConversationHistory,
+    HistoryEntry, LlmClient,
 };
 use gemicro_runner::AgentRegistry;
 use rustyline::error::ReadlineError;
@@ -205,8 +206,9 @@ impl Session {
         let mut events = Vec::new();
         let mut interrupted = false;
 
-        // Execute and stream
+        // Execute and stream with contract enforcement
         let stream = agent.execute(&full_query, self.agent_context(cancellation_token));
+        let stream = enforce_final_result_contract(stream);
         futures_util::pin_mut!(stream);
 
         while let Some(result) = stream.next().await {

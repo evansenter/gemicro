@@ -447,6 +447,20 @@ For interoperability, all agents should emit `final_result` when complete:
 - Consumers **MUST** gracefully ignore unknown event types (log and continue)
 - Event data schemas are soft-typed (JSON) and may evolve
 
+**Contract Enforcement:**
+
+Use `enforce_final_result_contract()` to wrap agent streams with runtime validation:
+
+```rust
+use gemicro_core::enforce_final_result_contract;
+
+let stream = agent.execute(query, context);
+let validated = enforce_final_result_contract(Box::pin(stream));
+// Violations are logged as warnings, events still pass through
+```
+
+This is already applied in `AgentRunner` and CLI stream consumption.
+
 ### Consuming Events in CLI
 
 ```rust
