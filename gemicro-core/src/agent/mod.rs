@@ -44,7 +44,7 @@ mod react;
 mod simple_qa;
 mod tool_agent;
 
-pub use deep_research::DeepResearchAgent;
+pub use deep_research::{DeepResearchAgent, DeepResearchEventExt, SubQueryResult};
 pub use react::ReactAgent;
 pub use simple_qa::{SimpleQaAgent, SimpleQaConfig};
 pub use tool_agent::{ToolAgent, ToolAgentConfig, ToolType};

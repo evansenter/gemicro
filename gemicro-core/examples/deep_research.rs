@@ -13,7 +13,8 @@
 
 use futures_util::StreamExt;
 use gemicro_core::{
-    AgentContext, AgentError, DeepResearchAgent, LlmClient, LlmConfig, ResearchConfig,
+    AgentContext, AgentError, DeepResearchAgent, DeepResearchEventExt, LlmClient, LlmConfig,
+    ResearchConfig,
 };
 use std::collections::HashMap;
 use std::env;

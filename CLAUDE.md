@@ -102,6 +102,7 @@ gemicro-cli (terminal rendering)
 | **Graceful Unknown Handling** | Unknown event_types and data fields MUST be ignored, not errors |
 | **Idempotent Events** | Events should be safely re-processable without side effects |
 | **Agent-Specific Config Isolation** | Config belongs to agent constructors, not shared context |
+| **No Agent/Dataset Leakage** | Agent-specific functionality (constructors, accessors, types, configs) belongs in agent modules, NOT in core. Dataset-specific logic belongs in eval, NOT in core |
 
 ### What This Means in Practice
 
@@ -116,16 +117,23 @@ pub struct AgentUpdate {
     pub data: serde_json::Value,     // Arbitrary JSON
 }
 
-// Helper constructors for ergonomics
+// Core only provides two constructors: custom() and final_result()
 impl AgentUpdate {
-    pub fn sub_query_completed(id: usize, result: String, tokens: u32) -> Self {
-        Self {
-            event_type: "sub_query_completed".into(),
-            data: json!({ "id": id, "result": result, "tokens_used": tokens }),
-            // ...
-        }
-    }
+    // Universal constructor - use for ALL agent-specific events
+    // Uses impl Into<String> for ergonomic &str or String arguments
+    pub fn custom(
+        event_type: impl Into<String>,
+        message: impl Into<String>,
+        data: Value,
+    ) -> Self { /* ... */ }
+
+    // Required completion signal - the ONLY cross-agent constructor
+    pub fn final_result(answer: String, metadata: ResultMetadata) -> Self { /* ... */ }
 }
+
+// Agents define their own constants locally (NOT exported from core):
+const EVENT_MY_STEP: &str = "my_step";  // in agent/my_agent.rs
+yield Ok(AgentUpdate::custom(EVENT_MY_STEP, "Step complete", json!({})));
 ```
 
 #### ❌ DON'T: Rigid Enums for Extensible Types
@@ -323,26 +331,31 @@ yield Ok(AgentUpdate::custom(EVENT_MY_STEP, "Step complete", json!({})));
 
 For interoperability, all agents should emit `final_result` when complete:
 
-| Event Type | Purpose | Emitted By |
-|------------|---------|------------|
-| `final_result` | Signals completion with answer | All agents (required) |
-| `decomposition_started` | Query decomposition begins | DeepResearchAgent |
-| `decomposition_complete` | Sub-queries determined | DeepResearchAgent |
-| `sub_query_started` | Individual query starts | DeepResearchAgent |
-| `sub_query_completed` | Individual query finishes | DeepResearchAgent |
-| `synthesis_started` | Result synthesis begins | DeepResearchAgent |
-| `react_started` | ReAct loop begins | ReactAgent |
-| `react_thought` | Agent reasoning | ReactAgent |
-| `react_action` | Tool invocation | ReactAgent |
-| `react_observation` | Tool result | ReactAgent |
-| `react_complete` | Answer found | ReactAgent |
-| `react_max_iterations` | Max iterations reached | ReactAgent |
-| `simple_qa_started` | Query starts | SimpleQaAgent |
-| `simple_qa_result` | Response received | SimpleQaAgent |
-| `tool_agent_started` | Tool agent starts | ToolAgent |
-| `tool_agent_complete` | Tool agent finishes | ToolAgent |
+| Event Type | Purpose | Emitted By | Required |
+|------------|---------|------------|----------|
+| `final_result` | Signals completion with answer | All agents | **Yes** |
+| `decomposition_started` | Query decomposition begins | DeepResearchAgent | No |
+| `decomposition_complete` | Sub-queries determined | DeepResearchAgent | No |
+| `sub_query_started` | Individual query starts | DeepResearchAgent | No |
+| `sub_query_completed` | Individual query finishes | DeepResearchAgent | No |
+| `sub_query_failed` | Individual query fails | DeepResearchAgent | No |
+| `synthesis_started` | Result synthesis begins | DeepResearchAgent | No |
+| `react_started` | ReAct loop begins | ReactAgent | No |
+| `react_thought` | Agent reasoning | ReactAgent | No |
+| `react_action` | Tool invocation | ReactAgent | No |
+| `react_observation` | Tool result | ReactAgent | No |
+| `react_complete` | Answer found | ReactAgent | No |
+| `react_max_iterations` | Max iterations reached | ReactAgent | No |
+| `simple_qa_started` | Query starts | SimpleQaAgent | No |
+| `simple_qa_result` | Response received | SimpleQaAgent | No |
+| `tool_agent_started` | Tool agent starts | ToolAgent | No |
+| `tool_agent_complete` | Tool agent finishes | ToolAgent | No |
 
-Consumers must handle unknown event types gracefully (log and ignore).
+**Event Contract:**
+- `final_result` **MUST** be the last event emitted by any agent
+- All other events are informational/observability only
+- Consumers **MUST** gracefully ignore unknown event types (log and continue)
+- Event data schemas are soft-typed (JSON) and may evolve
 
 ### Consuming Events in CLI
 

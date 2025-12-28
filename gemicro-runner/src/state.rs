@@ -4,7 +4,7 @@
 //! making it easy to test and enabling renderer swappability.
 
 use crate::utils::first_sentence;
-use gemicro_core::AgentUpdate;
+use gemicro_core::{AgentUpdate, DeepResearchEventExt};
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 
@@ -280,7 +280,7 @@ mod tests {
     #[test]
     fn test_decomposition_started() {
         let mut state = ExecutionState::new();
-        let event = AgentUpdate::decomposition_started();
+        let event = AgentUpdate::custom("decomposition_started", "Decomposing query", json!({}));
 
         state.update(&event);
 
@@ -290,11 +290,11 @@ mod tests {
     #[test]
     fn test_decomposition_complete() {
         let mut state = ExecutionState::new();
-        let event = AgentUpdate::decomposition_complete(vec![
-            "Query 1".to_string(),
-            "Query 2".to_string(),
-            "Query 3".to_string(),
-        ]);
+        let event = AgentUpdate::custom(
+            "decomposition_complete",
+            "Decomposed into 3 sub-queries",
+            json!({ "sub_queries": ["Query 1", "Query 2", "Query 3"] }),
+        );
 
         state.update(&event);
 
@@ -309,9 +309,17 @@ mod tests {
     #[test]
     fn test_sub_query_started() {
         let mut state = ExecutionState::new();
-        state.update(&AgentUpdate::decomposition_complete(vec!["Q1".to_string()]));
+        state.update(&AgentUpdate::custom(
+            "decomposition_complete",
+            "Decomposed into 1 sub-query",
+            json!({ "sub_queries": ["Q1"] }),
+        ));
 
-        let event = AgentUpdate::sub_query_started(0, "Q1".to_string());
+        let event = AgentUpdate::custom(
+            "sub_query_started",
+            "Sub-query 0 started",
+            json!({ "id": 0, "query": "Q1" }),
+        );
         let updated_id = state.update(&event);
 
         assert_eq!(updated_id, Some(0));
@@ -323,10 +331,22 @@ mod tests {
     #[test]
     fn test_sub_query_completed() {
         let mut state = ExecutionState::new();
-        state.update(&AgentUpdate::decomposition_complete(vec!["Q1".to_string()]));
-        state.update(&AgentUpdate::sub_query_started(0, "Q1".to_string()));
+        state.update(&AgentUpdate::custom(
+            "decomposition_complete",
+            "Decomposed into 1 sub-query",
+            json!({ "sub_queries": ["Q1"] }),
+        ));
+        state.update(&AgentUpdate::custom(
+            "sub_query_started",
+            "Sub-query 0 started",
+            json!({ "id": 0, "query": "Q1" }),
+        ));
 
-        let event = AgentUpdate::sub_query_completed(0, "This is the result.".to_string(), 42);
+        let event = AgentUpdate::custom(
+            "sub_query_completed",
+            "Sub-query 0 completed",
+            json!({ "id": 0, "result": "This is the result.", "tokens_used": 42 }),
+        );
         let updated_id = state.update(&event);
 
         assert_eq!(updated_id, Some(0));
@@ -347,10 +367,22 @@ mod tests {
     #[test]
     fn test_sub_query_failed() {
         let mut state = ExecutionState::new();
-        state.update(&AgentUpdate::decomposition_complete(vec!["Q1".to_string()]));
-        state.update(&AgentUpdate::sub_query_started(0, "Q1".to_string()));
+        state.update(&AgentUpdate::custom(
+            "decomposition_complete",
+            "Decomposed into 1 sub-query",
+            json!({ "sub_queries": ["Q1"] }),
+        ));
+        state.update(&AgentUpdate::custom(
+            "sub_query_started",
+            "Sub-query 0 started",
+            json!({ "id": 0, "query": "Q1" }),
+        ));
 
-        let event = AgentUpdate::sub_query_failed(0, "Timeout".to_string());
+        let event = AgentUpdate::custom(
+            "sub_query_failed",
+            "Sub-query 0 failed",
+            json!({ "id": 0, "error": "Timeout" }),
+        );
         let updated_id = state.update(&event);
 
         assert_eq!(updated_id, Some(0));
@@ -366,9 +398,13 @@ mod tests {
     #[test]
     fn test_synthesis_started() {
         let mut state = ExecutionState::new();
-        state.update(&AgentUpdate::decomposition_complete(vec!["Q1".to_string()]));
+        state.update(&AgentUpdate::custom(
+            "decomposition_complete",
+            "Decomposed into 1 sub-query",
+            json!({ "sub_queries": ["Q1"] }),
+        ));
 
-        let event = AgentUpdate::synthesis_started();
+        let event = AgentUpdate::custom("synthesis_started", "Synthesizing results", json!({}));
         state.update(&event);
 
         assert_eq!(state.phase(), Phase::Synthesizing);
@@ -422,10 +458,11 @@ mod tests {
         let mut state = ExecutionState::new();
 
         // Set up sub-queries with durations
-        state.update(&AgentUpdate::decomposition_complete(vec![
-            "Q1".to_string(),
-            "Q2".to_string(),
-        ]));
+        state.update(&AgentUpdate::custom(
+            "decomposition_complete",
+            "Decomposed into 2 sub-queries",
+            json!({ "sub_queries": ["Q1", "Q2"] }),
+        ));
 
         // Manually set durations since we can't wait for real time in tests
         state.sub_queries[0].duration = Some(Duration::from_secs(2));
@@ -440,11 +477,11 @@ mod tests {
     fn test_sequential_time_partial_completion() {
         let mut state = ExecutionState::new();
 
-        state.update(&AgentUpdate::decomposition_complete(vec![
-            "Q1".to_string(),
-            "Q2".to_string(),
-            "Q3".to_string(),
-        ]));
+        state.update(&AgentUpdate::custom(
+            "decomposition_complete",
+            "Decomposed into 3 sub-queries",
+            json!({ "sub_queries": ["Q1", "Q2", "Q3"] }),
+        ));
 
         // Only two have durations
         state.sub_queries[0].duration = Some(Duration::from_secs(2));
@@ -458,10 +495,18 @@ mod tests {
     #[test]
     fn test_out_of_bounds_sub_query_returns_none() {
         let mut state = ExecutionState::new();
-        state.update(&AgentUpdate::decomposition_complete(vec!["Q1".to_string()]));
+        state.update(&AgentUpdate::custom(
+            "decomposition_complete",
+            "Decomposed into 1 sub-query",
+            json!({ "sub_queries": ["Q1"] }),
+        ));
 
         // Try to start a sub-query that doesn't exist (id=99)
-        let event = AgentUpdate::sub_query_started(99, "Invalid".to_string());
+        let event = AgentUpdate::custom(
+            "sub_query_started",
+            "Sub-query 99 started",
+            json!({ "id": 99, "query": "Invalid" }),
+        );
         let result = state.update(&event);
 
         // Should return None since id 99 doesn't exist

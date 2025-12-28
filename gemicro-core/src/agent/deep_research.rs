@@ -12,6 +12,7 @@ use crate::utils::extract_total_tokens;
 
 use async_stream::try_stream;
 use futures_util::Stream;
+use serde_json::json;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, Semaphore};
@@ -22,6 +23,97 @@ use tokio::sync::{mpsc, Semaphore};
 /// blocking completed tasks while others are still running. Using 16 provides
 /// headroom for configs with larger max_sub_queries values.
 const PARALLEL_EXECUTION_CHANNEL_BUFFER: usize = 16;
+
+// ============================================================================
+// Event Type Constants (internal to this module)
+// ============================================================================
+
+const EVENT_DECOMPOSITION_STARTED: &str = "decomposition_started";
+const EVENT_DECOMPOSITION_COMPLETE: &str = "decomposition_complete";
+const EVENT_SUB_QUERY_STARTED: &str = "sub_query_started";
+const EVENT_SUB_QUERY_COMPLETED: &str = "sub_query_completed";
+const EVENT_SUB_QUERY_FAILED: &str = "sub_query_failed";
+const EVENT_SYNTHESIS_STARTED: &str = "synthesis_started";
+
+// ============================================================================
+// Deep Research Event Accessors
+//
+// Extension trait for parsing DeepResearch-specific events. These accessors
+// belong here (not in update.rs) per the "No Agent/Dataset Leakage" principle.
+// ============================================================================
+
+use serde::{Deserialize, Serialize};
+
+/// Strongly-typed result struct for sub_query_completed events.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubQueryResult {
+    pub id: usize,
+    pub result: String,
+    pub tokens_used: u32,
+}
+
+/// Extension trait for parsing DeepResearch-specific events from AgentUpdate.
+///
+/// Import this trait to use the accessor methods on AgentUpdate:
+///
+/// ```
+/// use gemicro_core::agent::DeepResearchEventExt;
+/// use gemicro_core::AgentUpdate;
+/// use serde_json::json;
+///
+/// let update = AgentUpdate::custom(
+///     "decomposition_complete",
+///     "Decomposed into 2 sub-queries",
+///     json!({ "sub_queries": ["Q1", "Q2"] }),
+/// );
+///
+/// if let Some(queries) = update.as_decomposition_complete() {
+///     println!("Got {} sub-queries", queries.len());
+/// }
+/// ```
+pub trait DeepResearchEventExt {
+    /// Parse decomposition_complete event data.
+    ///
+    /// Returns `None` if this is not a decomposition_complete event
+    /// or if the data doesn't match the expected schema.
+    fn as_decomposition_complete(&self) -> Option<Vec<String>>;
+
+    /// Parse sub_query_completed event data.
+    ///
+    /// Returns `None` if this is not a sub_query_completed event
+    /// or if the data doesn't match the expected schema.
+    fn as_sub_query_completed(&self) -> Option<SubQueryResult>;
+}
+
+impl DeepResearchEventExt for AgentUpdate {
+    fn as_decomposition_complete(&self) -> Option<Vec<String>> {
+        if self.event_type == EVENT_DECOMPOSITION_COMPLETE {
+            self.data
+                .get("sub_queries")
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+                .or_else(|| {
+                    log::warn!(
+                        "Failed to parse decomposition_complete data: {:?}",
+                        self.data
+                    );
+                    None
+                })
+        } else {
+            None
+        }
+    }
+
+    fn as_sub_query_completed(&self) -> Option<SubQueryResult> {
+        if self.event_type == EVENT_SUB_QUERY_COMPLETED {
+            serde_json::from_value(self.data.clone()).ok().or_else(|| {
+                log::warn!("Failed to parse sub_query_completed data: {:?}", self.data);
+                None
+            })
+        } else {
+            None
+        }
+    }
+}
 
 /// Deep Research Agent.
 ///
@@ -122,7 +214,11 @@ impl DeepResearchAgent {
             let start_time = Instant::now();
 
             // Phase 1: Decomposition (with timeout and cancellation)
-            yield AgentUpdate::decomposition_started();
+            yield AgentUpdate::custom(
+                EVENT_DECOMPOSITION_STARTED,
+                "Decomposing query into sub-queries",
+                json!({}),
+            );
             let decomp_timeout = remaining_time(start_time, config.total_timeout, "decomposition")?;
             let (sub_queries, decomposition_tokens) = with_timeout_and_cancellation(
                 decompose(&query, &context, &config),
@@ -130,12 +226,20 @@ impl DeepResearchAgent {
                 &context.cancellation_token,
                 || timeout_error(start_time, config.total_timeout, "decomposition"),
             ).await?;
-            yield AgentUpdate::decomposition_complete(sub_queries.clone());
+            yield AgentUpdate::custom(
+                EVENT_DECOMPOSITION_COMPLETE,
+                format!("Decomposed into {} sub-queries", sub_queries.len()),
+                json!({ "sub_queries": sub_queries }),
+            );
 
             // Phase 2: Parallel Execution (with timeout and cancellation)
             // Yield sub_query_started events before execution
             for (id, q) in sub_queries.iter().enumerate() {
-                yield AgentUpdate::sub_query_started(id, q.clone());
+                yield AgentUpdate::custom(
+                    EVENT_SUB_QUERY_STARTED,
+                    format!("Sub-query {} started", id),
+                    json!({ "id": id, "query": q }),
+                );
             }
 
             let exec_timeout = remaining_time(start_time, config.total_timeout, "parallel execution")?;
@@ -163,7 +267,11 @@ impl DeepResearchAgent {
             }
 
             // Phase 3: Synthesis (with timeout and cancellation)
-            yield AgentUpdate::synthesis_started();
+            yield AgentUpdate::custom(
+                EVENT_SYNTHESIS_STARTED,
+                "Synthesizing results",
+                json!({}),
+            );
             let synth_timeout = remaining_time(start_time, config.total_timeout, "synthesis")?;
             let (answer, synthesis_tokens) = with_timeout_and_cancellation(
                 synthesize(&query, &execution_result.results, &context, &config),
@@ -442,16 +550,24 @@ async fn execute_parallel(
                                             tokens_unavailable_count += 1;
                                         }
                                     }
-                                    updates.push(AgentUpdate::sub_query_completed(
-                                        id,
-                                        text.clone(),
-                                        tokens.unwrap_or(0),
+                                    updates.push(AgentUpdate::custom(
+                                        EVENT_SUB_QUERY_COMPLETED,
+                                        format!("Sub-query {} completed", id),
+                                        json!({
+                                            "id": id,
+                                            "result": &text,
+                                            "tokens_used": tokens.unwrap_or(0),
+                                        }),
                                     ));
                                     results.push(text);
                                     succeeded += 1;
                                 }
                                 Err(error) => {
-                                    updates.push(AgentUpdate::sub_query_failed(id, error));
+                                    updates.push(AgentUpdate::custom(
+                                        EVENT_SUB_QUERY_FAILED,
+                                        format!("Sub-query {} failed", id),
+                                        json!({ "id": id, "error": error }),
+                                    ));
                                     failed += 1;
                                 }
                             }
@@ -484,16 +600,24 @@ async fn execute_parallel(
                                         tokens_unavailable_count += 1;
                                     }
                                 }
-                                updates.push(AgentUpdate::sub_query_completed(
-                                    id,
-                                    text.clone(),
-                                    tokens.unwrap_or(0),
+                                updates.push(AgentUpdate::custom(
+                                    EVENT_SUB_QUERY_COMPLETED,
+                                    format!("Sub-query {} completed", id),
+                                    json!({
+                                        "id": id,
+                                        "result": &text,
+                                        "tokens_used": tokens.unwrap_or(0),
+                                    }),
                                 ));
                                 results.push(text);
                                 succeeded += 1;
                             }
                             Err(error) => {
-                                updates.push(AgentUpdate::sub_query_failed(id, error));
+                                updates.push(AgentUpdate::custom(
+                                    EVENT_SUB_QUERY_FAILED,
+                                    format!("Sub-query {} failed", id),
+                                    json!({ "id": id, "error": error }),
+                                ));
                                 failed += 1;
 
                                 // Abort early if configured to fail fast
