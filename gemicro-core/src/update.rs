@@ -2,8 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::time::SystemTime;
 
-// Shared event constant - used by all agents
-pub(crate) const EVENT_FINAL_RESULT: &str = "final_result";
+use crate::agent::EVENT_FINAL_RESULT;
 
 /// Flexible event structure for agent updates.
 ///
