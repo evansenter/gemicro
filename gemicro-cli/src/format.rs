@@ -51,18 +51,18 @@ pub fn render_markdown(text: &str) -> String {
     }
 }
 
-/// Information for printing the final research result.
+/// Information for printing the final result.
 pub struct FinalResultInfo<'a> {
     /// The synthesized answer
     pub answer: &'a str,
-    /// Total duration of the research
+    /// Total duration of the execution
     pub duration: Duration,
     /// Estimated sequential execution time (for parallel speedup calculation)
     pub sequential_time: Option<Duration>,
-    /// Number of sub-queries that succeeded
-    pub sub_queries_succeeded: usize,
-    /// Number of sub-queries that failed
-    pub sub_queries_failed: usize,
+    /// Number of steps that succeeded
+    pub steps_succeeded: usize,
+    /// Number of steps that failed
+    pub steps_failed: usize,
     /// Total tokens used
     pub total_tokens: u32,
     /// Whether token data was unavailable for some requests
@@ -71,7 +71,7 @@ pub struct FinalResultInfo<'a> {
     pub plain: bool,
 }
 
-/// Print the final research result with formatting.
+/// Print the final result with formatting.
 ///
 /// If `plain` is false and stdout is a terminal, the answer will be rendered
 /// as markdown with syntax highlighting and formatting.
@@ -91,7 +91,7 @@ pub fn print_final_result(info: &FinalResultInfo<'_>) {
     println!();
     println!("══════════════════════════════════════════════════════════════");
 
-    let total = info.sub_queries_succeeded + info.sub_queries_failed;
+    let total = info.steps_succeeded + info.steps_failed;
 
     println!("📊 Performance:");
     println!("   Total time: {}", format_duration(info.duration));
@@ -109,10 +109,7 @@ pub fn print_final_result(info: &FinalResultInfo<'_>) {
         }
     }
 
-    println!(
-        "   Sub-queries: {}/{} succeeded",
-        info.sub_queries_succeeded, total
-    );
+    println!("   Steps: {}/{} succeeded", info.steps_succeeded, total);
 
     if !info.tokens_unavailable && info.total_tokens > 0 {
         println!("   Tokens used: {}", info.total_tokens);

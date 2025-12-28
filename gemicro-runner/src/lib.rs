@@ -56,8 +56,19 @@ pub mod state;
 pub mod utils;
 
 // Re-export public API
-pub use metrics::{ExecutionMetrics, SubQueryTiming};
+pub use metrics::{ExecutionMetrics, StepTiming};
 pub use registry::{AgentFactory, AgentRegistry};
 pub use runner::AgentRunner;
-pub use state::{ExecutionState, FinalResultData, Phase, SubQueryState, SubQueryStatus};
+pub use state::{
+    phases, DeepResearchStateHandler, DefaultStateHandler, ExecutionState, ExecutionStep,
+    FinalResultData, StateHandler, StepStatus,
+};
 pub use utils::{first_sentence, format_duration, truncate};
+
+// Backwards compatibility aliases (deprecated)
+#[deprecated(since = "0.2.0", note = "Use StepTiming instead")]
+pub type SubQueryTiming = StepTiming;
+#[deprecated(since = "0.2.0", note = "Use ExecutionStep instead")]
+pub type SubQueryState = ExecutionStep;
+#[deprecated(since = "0.2.0", note = "Use StepStatus instead")]
+pub type SubQueryStatus = StepStatus;

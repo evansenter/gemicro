@@ -4,7 +4,7 @@
 //! returning structured `ExecutionMetrics` for programmatic consumption.
 
 use crate::metrics::ExecutionMetrics;
-use crate::state::ExecutionState;
+use crate::state::{DeepResearchStateHandler, ExecutionState, StateHandler};
 use futures_util::StreamExt;
 use gemicro_core::{Agent, AgentContext, AgentError};
 
@@ -48,8 +48,8 @@ impl AgentRunner {
 
     /// Execute an agent and return final metrics.
     ///
-    /// Consumes the entire event stream, tracks state internally,
-    /// and returns `ExecutionMetrics` when complete.
+    /// Uses the default DeepResearchStateHandler for event parsing.
+    /// For custom event handling, use `execute_with_handler`.
     ///
     /// # Arguments
     ///
@@ -70,7 +70,7 @@ impl AgentRunner {
         query: &str,
         context: AgentContext,
     ) -> Result<ExecutionMetrics, AgentError> {
-        self.execute_with_callback(agent, query, context, |_, _| {})
+        self.execute_with_handler(agent, query, context, &DeepResearchStateHandler, |_, _| {})
             .await
     }
 
@@ -84,7 +84,7 @@ impl AgentRunner {
     /// * `agent` - The agent to execute
     /// * `query` - The user's query
     /// * `context` - Agent context with LLM client
-    /// * `on_update` - Callback receiving `(state, changed_sub_query_id)`
+    /// * `on_update` - Callback receiving `(state, changed_step_id)`
     ///
     /// # Example
     ///
@@ -101,9 +101,9 @@ impl AgentRunner {
     ///     "query",
     ///     context,
     ///     |state: &ExecutionState, changed_id| {
-    ///         println!("Phase: {:?}", state.phase());
+    ///         println!("Phase: {}", state.phase());
     ///         if let Some(id) = changed_id {
-    ///             println!("Sub-query {} updated", id);
+    ///             println!("Step {} updated", id);
     ///         }
     ///     },
     /// ).await?;
@@ -115,10 +115,38 @@ impl AgentRunner {
         agent: &dyn Agent,
         query: &str,
         context: AgentContext,
+        on_update: F,
+    ) -> Result<ExecutionMetrics, AgentError>
+    where
+        F: FnMut(&ExecutionState, Option<&str>),
+    {
+        self.execute_with_handler(agent, query, context, &DeepResearchStateHandler, on_update)
+            .await
+    }
+
+    /// Execute an agent with a custom state handler.
+    ///
+    /// This is the most flexible execution method, allowing you to provide
+    /// a custom `StateHandler` for agent-specific event parsing.
+    ///
+    /// # Arguments
+    ///
+    /// * `agent` - The agent to execute
+    /// * `query` - The user's query
+    /// * `context` - Agent context with LLM client
+    /// * `handler` - StateHandler for parsing agent-specific events
+    /// * `on_update` - Callback receiving `(state, changed_step_id)`
+    pub async fn execute_with_handler<H, F>(
+        &self,
+        agent: &dyn Agent,
+        query: &str,
+        context: AgentContext,
+        handler: &H,
         mut on_update: F,
     ) -> Result<ExecutionMetrics, AgentError>
     where
-        F: FnMut(&ExecutionState, Option<usize>),
+        H: StateHandler,
+        F: FnMut(&ExecutionState, Option<&str>),
     {
         let mut state = ExecutionState::new();
         let stream = agent.execute(query, context);
@@ -126,8 +154,8 @@ impl AgentRunner {
 
         while let Some(result) = stream.next().await {
             let update = result?;
-            let changed_id = state.update(&update);
-            on_update(&state, changed_id);
+            let changed_id = handler.handle(&mut state, &update);
+            on_update(&state, changed_id.as_deref());
         }
 
         Ok(ExecutionMetrics::from(&state))
@@ -228,8 +256,8 @@ mod tests {
 
         let metrics = runner.execute(&agent, "test query", context).await.unwrap();
 
-        assert_eq!(metrics.sub_queries_total, 1);
-        assert_eq!(metrics.sub_queries_succeeded, 1);
+        assert_eq!(metrics.steps_total, 1);
+        assert_eq!(metrics.steps_succeeded, 1);
         assert_eq!(metrics.total_tokens, 100);
         assert_eq!(metrics.final_answer, Some("Final answer".to_string()));
     }
@@ -284,8 +312,8 @@ mod tests {
 
         let metrics = runner.execute(&agent, "query", context).await.unwrap();
 
-        assert_eq!(metrics.sub_queries_failed, 1);
-        assert_eq!(metrics.sub_queries_succeeded, 0);
+        assert_eq!(metrics.steps_failed, 1);
+        assert_eq!(metrics.steps_succeeded, 0);
         assert!(metrics.final_answer.is_none());
     }
 

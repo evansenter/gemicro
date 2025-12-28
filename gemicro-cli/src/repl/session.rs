@@ -3,7 +3,7 @@
 //! Handles the interactive session loop, command processing, and agent execution.
 
 use super::commands::Command;
-use crate::display::{ExecutionState, IndicatifRenderer, Phase, Renderer};
+use crate::display::{phases, ExecutionState, IndicatifRenderer, Renderer};
 use crate::error::ErrorFormatter;
 use crate::format::truncate;
 use anyhow::{Context, Result};
@@ -11,7 +11,7 @@ use futures_util::StreamExt;
 use gemicro_core::{
     AgentContext, AgentError, AgentUpdate, ConversationHistory, HistoryEntry, LlmClient,
 };
-use gemicro_runner::AgentRegistry;
+use gemicro_runner::{AgentRegistry, DeepResearchStateHandler, StateHandler};
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 use std::path::PathBuf;
@@ -199,8 +199,9 @@ impl Session {
         // Helper to check if interrupted
         let is_interrupted = || interrupt_count.load(Ordering::SeqCst) > 0;
 
-        // Initialize state and renderer
+        // Initialize state, handler, and renderer
         let mut state = ExecutionState::new();
+        let handler = DeepResearchStateHandler;
         let mut renderer = IndicatifRenderer::new(self.plain);
         let mut events = Vec::new();
         let mut interrupted = false;
@@ -224,8 +225,8 @@ impl Session {
                         break;
                     }
 
-                    let prev_phase = state.phase();
-                    let updated_id = state.update(&update);
+                    let prev_phase = state.phase().to_string();
+                    let updated_id = handler.handle(&mut state, &update);
 
                     // Store event for history
                     events.push(update);
@@ -238,8 +239,8 @@ impl Session {
 
                     if let Some(id) = updated_id {
                         renderer
-                            .on_sub_query_update(&state, id)
-                            .context("Renderer sub-query update failed")?;
+                            .on_step_update(&state, &id)
+                            .context("Renderer step update failed")?;
                     }
                 }
                 Err(AgentError::Cancelled) => {
@@ -268,7 +269,7 @@ impl Session {
         }
 
         // Render final result
-        if state.phase() == Phase::Complete {
+        if state.phase() == phases::COMPLETE {
             renderer
                 .on_final_result(&state)
                 .context("Renderer final result failed")?;
