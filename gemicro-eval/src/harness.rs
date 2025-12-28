@@ -352,7 +352,10 @@ async fn evaluate_question(
     while retries <= max_retries {
         let context = AgentContext::from_arc(Arc::clone(llm));
 
-        match runner.execute(agent, &question.question, context).await {
+        match runner
+            .execute_with_tracking(agent, &question.question, context, |_, _| {})
+            .await
+        {
             Ok(metrics) => {
                 if let Some(answer) = &metrics.final_answer {
                     let scores = scorers.score_all(answer, &question.ground_truth);

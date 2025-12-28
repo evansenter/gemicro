@@ -3,16 +3,15 @@
 //! Handles the interactive session loop, command processing, and agent execution.
 
 use super::commands::Command;
-use crate::display::{phases, ExecutionState, IndicatifRenderer, Renderer};
+use crate::display::{IndicatifRenderer, Renderer};
 use crate::error::ErrorFormatter;
 use crate::format::truncate;
-use crate::state_handlers::DeepResearchStateHandler;
 use anyhow::{Context, Result};
 use futures_util::StreamExt;
 use gemicro_core::{
     AgentContext, AgentError, AgentUpdate, ConversationHistory, HistoryEntry, LlmClient,
 };
-use gemicro_runner::{AgentRegistry, StateHandler};
+use gemicro_runner::AgentRegistry;
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 use std::path::PathBuf;
@@ -200,9 +199,8 @@ impl Session {
         // Helper to check if interrupted
         let is_interrupted = || interrupt_count.load(Ordering::SeqCst) > 0;
 
-        // Initialize state, handler, and renderer
-        let mut state = ExecutionState::new();
-        let handler = DeepResearchStateHandler;
+        // Create tracker and renderer
+        let mut tracker = agent.create_tracker();
         let mut renderer = IndicatifRenderer::new(self.plain);
         let mut events = Vec::new();
         let mut interrupted = false;
@@ -226,22 +224,22 @@ impl Session {
                         break;
                     }
 
-                    let prev_phase = state.phase().to_string();
-                    let updated_id = handler.handle(&mut state, &update);
+                    // Update tracker with the event
+                    tracker.handle_event(&update);
 
                     // Store event for history
                     events.push(update);
 
-                    if state.phase() != prev_phase {
-                        renderer
-                            .on_phase_change(&state)
-                            .context("Renderer phase change failed")?;
-                    }
+                    // Update renderer with current status
+                    renderer
+                        .on_status(tracker.as_ref())
+                        .context("Renderer status update failed")?;
 
-                    if let Some(id) = updated_id {
+                    // Check if complete
+                    if tracker.is_complete() {
                         renderer
-                            .on_step_update(&state, &id)
-                            .context("Renderer step update failed")?;
+                            .on_complete(tracker.as_ref())
+                            .context("Renderer completion failed")?;
                     }
                 }
                 Err(AgentError::Cancelled) => {
@@ -264,16 +262,9 @@ impl Session {
         // Handle interruption
         if interrupted {
             renderer
-                .on_interrupted(&state)
+                .on_interrupted(tracker.as_ref())
                 .context("Renderer interrupted state failed")?;
             return Ok(()); // Cancellation is not an error
-        }
-
-        // Render final result
-        if state.phase() == phases::COMPLETE {
-            renderer
-                .on_final_result(&state)
-                .context("Renderer final result failed")?;
         }
 
         renderer.finish().context("Renderer cleanup failed")?;

@@ -4,37 +4,30 @@
 //! enabling easy switching between indicatif, ratatui, or other backends.
 
 use anyhow::Result;
-use gemicro_runner::ExecutionState;
+use gemicro_core::ExecutionTracking;
 
 /// Trait for rendering agent execution progress to the terminal.
 ///
-/// Implementors receive notifications when state changes and are
+/// Implementors receive status updates from the agent's tracker and are
 /// responsible for updating the terminal display accordingly.
 ///
-/// This trait is agent-agnostic - it uses string-based phases and
-/// generic "steps" instead of agent-specific concepts.
+/// This trait is agent-agnostic - each agent provides its own tracker
+/// implementation that supplies appropriate status messages.
 pub trait Renderer {
-    /// Called when the execution phase changes.
+    /// Called after each event to update the display.
     ///
-    /// Common phases include: "not_started", "decomposing", "executing",
-    /// "synthesizing", "complete". Agents may define additional phases.
-    fn on_phase_change(&mut self, state: &ExecutionState) -> Result<()>;
+    /// The tracker provides status messages via `status_message()`.
+    fn on_status(&mut self, tracker: &dyn ExecutionTracking) -> Result<()>;
 
-    /// Called when an execution step's status changes.
+    /// Called when execution completes successfully.
     ///
-    /// The `id` parameter indicates which step was updated.
-    /// Query `state.step(id)` to get the current status.
-    fn on_step_update(&mut self, state: &ExecutionState, id: &str) -> Result<()>;
-
-    /// Called when the final result is available.
-    ///
-    /// Query `state.final_result()` to get the answer and metadata.
-    fn on_final_result(&mut self, state: &ExecutionState) -> Result<()>;
+    /// The tracker provides the final result via `final_result()`.
+    fn on_complete(&mut self, tracker: &dyn ExecutionTracking) -> Result<()>;
 
     /// Called when execution is interrupted by the user (Ctrl+C).
     ///
     /// Displays any partial results that are available.
-    fn on_interrupted(&mut self, state: &ExecutionState) -> Result<()>;
+    fn on_interrupted(&mut self, tracker: &dyn ExecutionTracking) -> Result<()>;
 
     /// Called when the stream ends to clean up resources.
     fn finish(&mut self) -> Result<()>;
