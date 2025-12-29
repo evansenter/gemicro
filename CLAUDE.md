@@ -110,7 +110,7 @@ Each crate has a specific purpose. Before adding code, verify it belongs in that
 | **agents/gemicro-deep-research** | DeepResearchAgent, ResearchConfig, DeepResearchEventExt | Other agents, core infrastructure |
 | **agents/gemicro-react** | ReactAgent, ReactConfig | Other agents, core infrastructure |
 | **agents/gemicro-simple-qa** | SimpleQaAgent, SimpleQaConfig | Other agents, core infrastructure |
-| **agents/gemicro-tool-agent** | ToolAgent, ToolAgentConfig, re-exports tools from tools/* | Other agents, core infrastructure |
+| **agents/gemicro-tool-agent** | ToolAgent, ToolAgentConfig, Calculator, CurrentDatetime | Other agents, core infrastructure |
 | **agents/gemicro-judge** | LlmJudgeAgent, JudgeConfig | Other agents, core infrastructure |
 | **gemicro-runner** | AgentRunner, AgentRegistry, generic execution infrastructure | Agent implementations |
 | **gemicro-eval** | EvalHarness, Scorers, Datasets | Agent implementations |
@@ -142,6 +142,7 @@ Each agent crate:
 |------|------------------|
 | `Agent`, `AgentContext`, `AgentUpdate`, `AgentError` | `gemicro_core` |
 | `Tool`, `ToolRegistry`, `ToolSet`, `ToolResult`, `ToolError` | `gemicro_core::tool` |
+| `Calculator`, `CurrentDatetime` | `gemicro_tool_agent::tools` |
 | `FileRead` | `gemicro_file_read` |
 | `WebFetch` | `gemicro_web_fetch` |
 | `Task` | `gemicro_task` |
@@ -150,8 +151,6 @@ Each agent crate:
 | `ReactAgent`, `ReactConfig` | `gemicro_react` |
 | `LlmJudgeAgent`, `JudgeConfig` | `gemicro_judge` |
 | `EvalHarness`, `Scorers` | `gemicro_eval` |
-
-**Exception**: `gemicro-tool-agent` re-exports tools for convenience since it's the primary consumer.
 
 **Why?**
 - One source of truth per type (no sync maintenance)

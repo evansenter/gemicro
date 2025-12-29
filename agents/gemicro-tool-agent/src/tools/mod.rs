@@ -8,17 +8,19 @@
 //! **Built-in tools (no external dependencies):**
 //! - [`Calculator`]: Evaluates mathematical expressions
 //! - [`CurrentDatetime`]: Gets the current date and time (UTC)
-//! - [`FileRead`]: Read file contents (1MB size limit)
-//! - [`WebFetch`]: Fetch content from URLs
 //!
-//! **Tools requiring external resources:**
-//! - [`Task`]: Spawn subagents (requires AgentRegistry + LlmClient)
-//! - [`WebSearch`]: Web search via Gemini grounding (requires LlmClient)
+//! **External tool crates (import from canonical source):**
+//! - `gemicro_file_read::FileRead`: Read file contents (1MB size limit)
+//! - `gemicro_web_fetch::WebFetch`: Fetch content from URLs
+//! - `gemicro_task::Task`: Spawn subagents (requires AgentRegistry + LlmClient)
+//! - `gemicro_web_search::WebSearch`: Web search via Gemini grounding (requires LlmClient)
 //!
 //! # Example
 //!
 //! ```no_run
-//! use gemicro_tool_agent::tools::{Calculator, CurrentDatetime, FileRead, WebFetch};
+//! use gemicro_tool_agent::tools::{Calculator, CurrentDatetime};
+//! use gemicro_file_read::FileRead;
+//! use gemicro_web_fetch::WebFetch;
 //! use gemicro_core::tool::ToolRegistry;
 //!
 //! // Create registry with default tools
@@ -38,15 +40,14 @@ mod datetime;
 pub use calculator::Calculator;
 pub use datetime::CurrentDatetime;
 
-// Re-export tools from external crates
-pub use gemicro_file_read::FileRead;
-pub use gemicro_task::Task;
-pub use gemicro_web_fetch::WebFetch;
-pub use gemicro_web_search::WebSearch;
-
+// Import tools from external crates (not re-exported - use canonical imports)
 use gemicro_core::tool::ToolRegistry;
 use gemicro_core::LlmClient;
+use gemicro_file_read::FileRead;
 use gemicro_runner::AgentRegistry;
+use gemicro_task::Task;
+use gemicro_web_fetch::WebFetch;
+use gemicro_web_search::WebSearch;
 use std::sync::Arc;
 
 /// Create a default tool registry with stateless built-in tools.
