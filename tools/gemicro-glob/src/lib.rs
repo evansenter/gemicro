@@ -17,6 +17,14 @@ const MAX_RESULTS: usize = 100;
 /// Searches for files matching a glob pattern (e.g., `**/*.rs`, `src/*.txt`).
 /// Returns a list of matching file paths.
 ///
+/// # Result Metadata
+///
+/// On success, the result includes metadata with these fields:
+/// - `pattern`: The glob pattern used
+/// - `match_count`: Number of files found
+/// - `truncated`: Whether results were truncated (max 100 files)
+/// - `errors`: Array of paths that could not be read (permissions, etc.)
+///
 /// # Example
 ///
 /// ```no_run

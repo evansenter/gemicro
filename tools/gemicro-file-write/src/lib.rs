@@ -19,6 +19,13 @@ const MAX_WRITE_SIZE: usize = 5 * 1024 * 1024;
 ///
 /// **This tool requires confirmation before execution.**
 ///
+/// # Result Metadata
+///
+/// On success, the result includes metadata with these fields:
+/// - `path`: The file path written to
+/// - `bytes_written`: Number of bytes written
+/// - `existed`: Whether the file existed before writing (overwrite vs create)
+///
 /// # Example
 ///
 /// ```no_run
