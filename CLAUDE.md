@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Gemicro is a CLI agent exploration platform for experimenting with AI agent implementation patterns, powered by the Gemini API via the rust-genai library.
 
-**Key Architecture**: Nine-crate workspace with layered dependencies (5 agent crates in `agents/` subdirectory)
+**Key Architecture**: 13-crate workspace with layered dependencies (5 agent crates in `agents/`, 4 tool crates in `tools/`)
 
 **Current Status**: Core implementation complete. Remaining work tracked in [GitHub Issues](https://github.com/evansenter/gemicro/issues).
 
@@ -78,8 +78,9 @@ REPL commands: `/help`, `/agent [name]`, `/history`, `/clear`, `/reload`, `/quit
 ## Crate Layers
 
 ```text
-gemicro-core (Agent trait, events, LLM - GENERIC ONLY)
+gemicro-core (Agent trait, Tool trait, events, LLM - GENERIC ONLY)
     ↓
+tools/* (one crate per tool - file_read, web_fetch, task, web_search)
 agents/* (one crate per agent - hermetic isolation)
     ↓
 gemicro-runner (execution state, metrics, runner)
@@ -90,11 +91,15 @@ gemicro-cli (terminal rendering)
 
 | Crate | Purpose |
 |-------|---------|
-| **gemicro-core** | Platform-agnostic library: Agent trait, AgentContext, AgentUpdate events, LlmClient, conversation history. **No agent implementations.** |
+| **gemicro-core** | Platform-agnostic library: Agent trait, Tool trait, AgentContext, AgentUpdate events, LlmClient, conversation history. **No agent/tool implementations.** |
+| **tools/gemicro-file-read** | FileRead tool: read file contents (1MB limit) |
+| **tools/gemicro-web-fetch** | WebFetch tool: HTTP GET with timeout (5MB limit) |
+| **tools/gemicro-task** | Task tool: spawn subagents for delegation |
+| **tools/gemicro-web-search** | WebSearch tool: real-time web search via Gemini grounding |
 | **agents/gemicro-deep-research** | DeepResearchAgent: query decomposition, parallel sub-query execution, synthesis |
 | **agents/gemicro-react** | ReactAgent: Thought → Action → Observation reasoning loops |
 | **agents/gemicro-simple-qa** | SimpleQaAgent: minimal reference implementation |
-| **agents/gemicro-tool-agent** | ToolAgent: native function calling with calculator/datetime tools |
+| **agents/gemicro-tool-agent** | ToolAgent: native function calling with built-in tools |
 | **agents/gemicro-judge** | LlmJudgeAgent: LLM-based evaluation scoring |
 | **gemicro-runner** | Headless execution runtime: ExecutionState, AgentRunner, AgentRegistry, metrics collection |
 | **gemicro-eval** | Evaluation framework: HotpotQA/custom datasets, scorers (Contains, LLM Judge) |
@@ -106,11 +111,15 @@ Each crate has a specific purpose. Before adding code, verify it belongs in that
 
 | Crate | Contains | Does NOT Contain |
 |-------|----------|------------------|
-| **gemicro-core** | Agent trait, AgentContext, AgentUpdate, LlmClient, LlmConfig, errors, utilities | Agent implementations, agent-specific configs |
+| **gemicro-core** | Agent trait, Tool trait, AgentContext, AgentUpdate, ToolRegistry, ToolSet, LlmClient, LlmConfig, errors | Agent/tool implementations, agent-specific configs |
+| **tools/gemicro-file-read** | FileRead tool implementation | Other tools |
+| **tools/gemicro-web-fetch** | WebFetch tool implementation | Other tools |
+| **tools/gemicro-task** | Task tool implementation | Other tools |
+| **tools/gemicro-web-search** | WebSearch tool implementation | Other tools |
 | **agents/gemicro-deep-research** | DeepResearchAgent, ResearchConfig, DeepResearchEventExt | Other agents, core infrastructure |
 | **agents/gemicro-react** | ReactAgent, ReactConfig | Other agents, core infrastructure |
 | **agents/gemicro-simple-qa** | SimpleQaAgent, SimpleQaConfig | Other agents, core infrastructure |
-| **agents/gemicro-tool-agent** | ToolAgent, ToolAgentConfig, ToolType | Other agents, core infrastructure |
+| **agents/gemicro-tool-agent** | ToolAgent, ToolAgentConfig, Calculator, CurrentDatetime | Other agents, core infrastructure |
 | **agents/gemicro-judge** | LlmJudgeAgent, JudgeConfig | Other agents, core infrastructure |
 | **gemicro-runner** | AgentRunner, AgentRegistry, generic execution infrastructure | Agent implementations |
 | **gemicro-eval** | EvalHarness, Scorers, Datasets | Agent implementations |
@@ -119,6 +128,7 @@ Each crate has a specific purpose. Before adding code, verify it belongs in that
 ### Checklist: Before Adding Code
 
 - [ ] Is this a new agent? → Create new `agents/gemicro-{agent-name}` crate
+- [ ] Is this a new tool? → Create new `tools/gemicro-{tool-name}` crate
 - [ ] Is this agent-specific config/events? → Put in the agent's crate
 - [ ] Is this cross-agent infrastructure? → gemicro-core
 - [ ] Is this evaluation-specific? → gemicro-eval
@@ -140,6 +150,12 @@ Each agent crate:
 | Type | Canonical Import |
 |------|------------------|
 | `Agent`, `AgentContext`, `AgentUpdate`, `AgentError` | `gemicro_core` |
+| `Tool`, `ToolRegistry`, `ToolSet`, `ToolResult`, `ToolError` | `gemicro_core::tool` |
+| `Calculator`, `CurrentDatetime` | `gemicro_tool_agent::tools` |
+| `FileRead` | `gemicro_file_read` |
+| `WebFetch` | `gemicro_web_fetch` |
+| `Task` | `gemicro_task` |
+| `WebSearch` | `gemicro_web_search` |
 | `DeepResearchAgent`, `ResearchConfig` | `gemicro_deep_research` |
 | `ReactAgent`, `ReactConfig` | `gemicro_react` |
 | `LlmJudgeAgent`, `JudgeConfig` | `gemicro_judge` |
@@ -325,6 +341,16 @@ gemicro/
 ├── CLAUDE.md                     # This file
 ├── README.md                     # Public documentation
 ├── docs/AGENT_AUTHORING.md       # Guide for implementing new agents
+│
+├── tools/                        # Tool crates (one per tool, hermetic)
+│   ├── gemicro-file-read/        # FileRead tool
+│   │   └── src/lib.rs
+│   ├── gemicro-web-fetch/        # WebFetch tool
+│   │   └── src/lib.rs
+│   ├── gemicro-task/             # Task tool (spawns subagents)
+│   │   └── src/lib.rs
+│   └── gemicro-web-search/       # WebSearch tool (Gemini grounding)
+│       └── src/lib.rs
 │
 ├── agents/                       # Agent crates (one per agent, hermetic)
 │   ├── gemicro-deep-research/    # DeepResearchAgent

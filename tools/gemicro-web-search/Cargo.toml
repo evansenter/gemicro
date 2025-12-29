@@ -1,0 +1,15 @@
+[package]
+name = "gemicro-web-search"
+version = "0.1.0"
+edition = "2021"
+description = "WebSearch tool for gemicro agents using Gemini Google Search grounding"
+
+[dependencies]
+gemicro-core = { path = "../../gemicro-core" }
+async-trait.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "macros"] }
+rust-genai.workspace = true

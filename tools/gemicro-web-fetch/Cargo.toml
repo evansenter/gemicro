@@ -1,0 +1,17 @@
+[package]
+name = "gemicro-web-fetch"
+version = "0.1.0"
+edition = "2021"
+description = "WebFetch tool for gemicro agents"
+
+[dependencies]
+gemicro-core = { path = "../../gemicro-core" }
+async-trait.workspace = true
+serde_json.workspace = true
+reqwest.workspace = true
+thiserror.workspace = true
+log.workspace = true
+futures-util.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "macros"] }

@@ -1,0 +1,16 @@
+[package]
+name = "gemicro-file-read"
+version = "0.1.0"
+edition = "2021"
+description = "FileRead tool for gemicro agents"
+
+[dependencies]
+gemicro-core = { path = "../../gemicro-core" }
+async-trait.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["fs"] }
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util", "macros", "fs"] }

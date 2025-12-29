@@ -6,6 +6,11 @@ description = "Tool agent: native function calling with calculator/datetime tool
 
 [dependencies]
 gemicro-core = { path = "../../gemicro-core" }
+gemicro-runner = { path = "../../gemicro-runner" }
+gemicro-file-read = { path = "../../tools/gemicro-file-read" }
+gemicro-web-fetch = { path = "../../tools/gemicro-web-fetch" }
+gemicro-task = { path = "../../tools/gemicro-task" }
+gemicro-web-search = { path = "../../tools/gemicro-web-search" }
 rust-genai = { workspace = true }
 rust-genai-macros = { workspace = true }
 async-trait = { workspace = true }

@@ -9,6 +9,10 @@ members = [
     "agents/gemicro-simple-qa",
     "agents/gemicro-tool-agent",
     "agents/gemicro-judge",
+    "tools/gemicro-file-read",
+    "tools/gemicro-web-fetch",
+    "tools/gemicro-task",
+    "tools/gemicro-web-search",
 ]
 resolver = "2"
 
@@ -31,5 +35,6 @@ rustyline = "17.0"
 rstest = "0.26"
 tempfile = "3.24"
 uuid = { version = "1.11", features = ["v4"] }
+reqwest = { version = "0.12", features = ["json"] }
 
 # Workspace-level metadata
