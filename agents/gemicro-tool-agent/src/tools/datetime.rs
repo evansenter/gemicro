@@ -85,7 +85,7 @@ impl Tool for CurrentDatetime {
             year, month, day, hours, minutes, seconds
         );
 
-        Ok(ToolResult::new(result))
+        Ok(ToolResult::text(result))
     }
 }
 
@@ -139,9 +139,10 @@ mod tests {
         let tool = CurrentDatetime;
         let result = tool.execute(json!({"timezone": "UTC"})).await.unwrap();
 
-        // Verify it's valid JSON
+        // Verify it's valid JSON - content is now Value::String containing JSON
+        let content_str = result.content.as_str().expect("Should be a string");
         let json: serde_json::Value =
-            serde_json::from_str(&result.content).expect("Should be valid JSON");
+            serde_json::from_str(content_str).expect("Should be valid JSON");
         assert_eq!(json["timezone"], "UTC");
         assert!(json["date"].is_string());
         assert!(json["time"].is_string());

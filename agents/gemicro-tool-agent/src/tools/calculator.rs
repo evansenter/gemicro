@@ -22,7 +22,7 @@ const MAX_EXPRESSION_LENGTH: usize = 1000;
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// let calc = Calculator;
 /// let result = calc.execute(json!({"expression": "2 + 2"})).await?;
-/// assert_eq!(result.content, "4");
+/// // result.content is now Value::String("4")
 /// # Ok(())
 /// # }
 /// ```
@@ -79,7 +79,7 @@ impl Tool for Calculator {
                 } else {
                     format!("{}", result)
                 };
-                Ok(ToolResult::new(formatted))
+                Ok(ToolResult::text(formatted))
             }
             Err(e) => Err(ToolError::ExecutionFailed(format!(
                 "Failed to evaluate expression: {}",
@@ -97,14 +97,14 @@ mod tests {
     async fn test_calculator_basic_arithmetic() {
         let calc = Calculator;
         let result = calc.execute(json!({"expression": "2 + 2"})).await.unwrap();
-        assert_eq!(result.content, "4");
+        assert_eq!(result.content.as_str().unwrap(), "4");
     }
 
     #[tokio::test]
     async fn test_calculator_division() {
         let calc = Calculator;
         let result = calc.execute(json!({"expression": "10 / 4"})).await.unwrap();
-        assert_eq!(result.content, "2.5");
+        assert_eq!(result.content.as_str().unwrap(), "2.5");
     }
 
     #[tokio::test]
@@ -114,7 +114,7 @@ mod tests {
             .execute(json!({"expression": "sqrt(16)"}))
             .await
             .unwrap();
-        assert_eq!(result.content, "4");
+        assert_eq!(result.content.as_str().unwrap(), "4");
     }
 
     #[tokio::test]

@@ -183,7 +183,7 @@ impl Tool for WebFetch {
             }
         };
 
-        Ok(ToolResult::new(content))
+        Ok(ToolResult::text(content))
     }
 }
 
@@ -259,7 +259,7 @@ mod tests {
             .execute(json!({"url": "https://httpbin.org/get"}))
             .await;
         assert!(result.is_ok());
-        let content = result.unwrap().content;
+        let content = result.unwrap().content.as_str().unwrap().to_string();
         assert!(content.contains("httpbin.org"));
     }
 }

@@ -115,7 +115,7 @@ impl Tool for WebSearch {
             .text()
             .ok_or_else(|| ToolError::ExecutionFailed("Search returned no content".into()))?;
 
-        Ok(ToolResult::new(text))
+        Ok(ToolResult::text(text))
     }
 }
 

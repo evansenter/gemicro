@@ -135,7 +135,7 @@ impl Tool for FileWrite {
         let action = if existed { "Overwrote" } else { "Created" };
         let result = format!("{} file: {} ({} bytes)", action, path_str, content.len());
 
-        Ok(ToolResult::new(result).with_metadata(json!({
+        Ok(ToolResult::text(result).with_metadata(json!({
             "path": path_str,
             "bytes_written": content.len(),
             "existed": existed,
@@ -248,7 +248,7 @@ mod tests {
 
         assert!(result.is_ok());
         let tool_result = result.unwrap();
-        assert!(tool_result.content.contains("Created"));
+        assert!(tool_result.content.as_str().unwrap().contains("Created"));
 
         // Verify file contents
         let contents = std::fs::read_to_string(&file_path).unwrap();
@@ -278,7 +278,7 @@ mod tests {
 
         assert!(result.is_ok());
         let tool_result = result.unwrap();
-        assert!(tool_result.content.contains("Overwrote"));
+        assert!(tool_result.content.as_str().unwrap().contains("Overwrote"));
 
         // Verify file contents changed
         let contents = std::fs::read_to_string(&file_path).unwrap();

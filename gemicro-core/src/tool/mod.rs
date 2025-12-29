@@ -37,7 +37,7 @@
 //!     }
 //!     async fn execute(&self, input: Value) -> Result<ToolResult, ToolError> {
 //!         let input_str = input["input"].as_str().unwrap_or("");
-//!         Ok(ToolResult::new(format!("Processed: {}", input_str)))
+//!         Ok(ToolResult::text(format!("Processed: {}", input_str)))
 //!     }
 //! }
 //!
@@ -60,25 +60,72 @@ use std::fmt;
 use thiserror::Error;
 
 /// Result returned by a tool execution.
+///
+/// The `content` field is sent to the LLM as the tool's response.
+/// The `metadata` field is for observability/logging and is NOT sent to the LLM.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct ToolResult {
-    /// The main content/output from the tool.
-    pub content: String,
-    /// Optional structured metadata for observability/logging.
+    /// The main content/output from the tool (sent to LLM).
+    pub content: Value,
+    /// Optional structured metadata for observability/logging (NOT sent to LLM).
     pub metadata: Value,
 }
 
 impl ToolResult {
-    /// Create a result with just content.
-    pub fn new(content: impl Into<String>) -> Self {
+    /// Create a result with string content.
+    ///
+    /// Use this for simple text responses. The string is wrapped as `Value::String`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use gemicro_core::tool::ToolResult;
+    ///
+    /// let result = ToolResult::text("Hello, world!");
+    /// ```
+    pub fn text(content: impl Into<String>) -> Self {
         Self {
-            content: content.into(),
+            content: Value::String(content.into()),
+            metadata: Value::Null,
+        }
+    }
+
+    /// Create a result with structured JSON content.
+    ///
+    /// Use this when the tool output is structured data that the LLM should interpret.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use gemicro_core::tool::ToolResult;
+    /// use serde_json::json;
+    ///
+    /// let result = ToolResult::json(json!({
+    ///     "result": 42,
+    ///     "expression": "6 * 7"
+    /// }));
+    /// ```
+    pub fn json(content: Value) -> Self {
+        Self {
+            content,
             metadata: Value::Null,
         }
     }
 
     /// Builder method to add metadata to an existing result.
+    ///
+    /// Metadata is for observability and logging, NOT sent to the LLM.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use gemicro_core::tool::ToolResult;
+    /// use serde_json::json;
+    ///
+    /// let result = ToolResult::text("42")
+    ///     .with_metadata(json!({"execution_time_ms": 5}));
+    /// ```
     pub fn with_metadata(mut self, metadata: Value) -> Self {
         self.metadata = metadata;
         self
@@ -283,16 +330,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_tool_result_new() {
-        let result = ToolResult::new("hello");
-        assert_eq!(result.content, "hello");
+    fn test_tool_result_text() {
+        let result = ToolResult::text("hello");
+        assert_eq!(result.content, Value::String("hello".into()));
+        assert_eq!(result.metadata, Value::Null);
+    }
+
+    #[test]
+    fn test_tool_result_json() {
+        let result = ToolResult::json(serde_json::json!({"answer": 42}));
+        assert_eq!(result.content["answer"], 42);
         assert_eq!(result.metadata, Value::Null);
     }
 
     #[test]
     fn test_tool_result_with_metadata() {
-        let result = ToolResult::new("hello").with_metadata(serde_json::json!({"key": "value"}));
-        assert_eq!(result.content, "hello");
+        let result = ToolResult::text("hello").with_metadata(serde_json::json!({"key": "value"}));
+        assert_eq!(result.content, Value::String("hello".into()));
         assert_eq!(result.metadata["key"], "value");
     }
 

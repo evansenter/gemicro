@@ -151,7 +151,7 @@ impl Tool for Glob {
             output
         };
 
-        let mut tool_result = ToolResult::new(result);
+        let mut tool_result = ToolResult::text(result);
 
         // Add metadata
         tool_result = tool_result.with_metadata(json!({
@@ -247,7 +247,11 @@ mod tests {
 
         assert!(result.is_ok());
         let tool_result = result.unwrap();
-        assert!(tool_result.content.contains("No files found"));
+        assert!(tool_result
+            .content
+            .as_str()
+            .unwrap()
+            .contains("No files found"));
     }
 
     #[tokio::test]
@@ -269,7 +273,7 @@ mod tests {
 
         assert!(result.is_ok());
         let tool_result = result.unwrap();
-        assert!(tool_result.content.contains("test.txt"));
+        assert!(tool_result.content.as_str().unwrap().contains("test.txt"));
 
         // Check metadata
         let metadata = tool_result.metadata;
@@ -299,8 +303,9 @@ mod tests {
 
         assert!(result.is_ok());
         let tool_result = result.unwrap();
-        assert!(tool_result.content.contains("root.rs"));
-        assert!(tool_result.content.contains("nested.rs"));
+        let content = tool_result.content.as_str().unwrap();
+        assert!(content.contains("root.rs"));
+        assert!(content.contains("nested.rs"));
 
         let metadata = tool_result.metadata;
         assert_eq!(metadata["match_count"], 2);

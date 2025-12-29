@@ -70,12 +70,12 @@ impl CallableFunction for ToolCallableAdapter {
     async fn call(&self, args: Value) -> Result<Value, FunctionError> {
         match self.tool.execute(args).await {
             Ok(result) => {
-                // Return content as a JSON string value for rust-genai compatibility.
+                // Return content directly - it's already a Value.
                 // Note: ToolResult::metadata is intentionally not returned here because
                 // rust-genai's CallableFunction expects a simple Value result that gets
                 // passed back to the LLM. Metadata is for observability/logging within
                 // gemicro, not for LLM consumption.
-                Ok(Value::String(result.content))
+                Ok(result.content)
             }
             Err(e) => Err(FunctionError::ExecutionError(Box::new(e))),
         }
@@ -124,7 +124,7 @@ mod tests {
 
         async fn execute(&self, input: Value) -> Result<ToolResult, ToolError> {
             let input_str = input["input"].as_str().unwrap_or("default");
-            Ok(ToolResult::new(format!("Received: {}", input_str)))
+            Ok(ToolResult::text(format!("Received: {}", input_str)))
         }
     }
 
@@ -143,7 +143,7 @@ mod tests {
         let adapter = ToolCallableAdapter::new(tool);
 
         let result = adapter.execute(json!({"input": "hello"})).await.unwrap();
-        assert_eq!(result.content, "Received: hello");
+        assert_eq!(result.content, Value::String("Received: hello".into()));
     }
 
     #[test]
