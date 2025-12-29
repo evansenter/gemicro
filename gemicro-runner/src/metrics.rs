@@ -15,6 +15,7 @@ use std::time::Duration;
 /// - A/B testing of prompts
 /// - Cost analysis
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct ExecutionMetrics {
     /// Total wall-clock duration of execution
     pub total_duration: Duration,
@@ -210,6 +211,36 @@ impl ExecutionMetrics {
     /// Check if execution completed successfully.
     pub fn is_complete(&self) -> bool {
         self.completion_phase == phases::COMPLETE
+    }
+
+    /// Create metrics for testing purposes.
+    ///
+    /// This constructor is provided for test code that needs to create
+    /// `ExecutionMetrics` instances without going through the normal
+    /// execution flow. It's marked `#[doc(hidden)]` since it's not
+    /// part of the public API.
+    #[doc(hidden)]
+    pub fn for_testing(
+        total_duration: Duration,
+        total_tokens: u32,
+        tokens_unavailable_count: usize,
+        final_answer: Option<String>,
+        steps_succeeded: usize,
+        steps_failed: usize,
+    ) -> Self {
+        ExecutionMetrics {
+            total_duration,
+            sequential_time: None,
+            parallel_speedup: None,
+            steps_total: steps_succeeded + steps_failed,
+            steps_succeeded,
+            steps_failed,
+            step_timings: Vec::new(),
+            total_tokens,
+            tokens_unavailable_count,
+            final_answer,
+            completion_phase: phases::COMPLETE.to_string(),
+        }
     }
 }
 

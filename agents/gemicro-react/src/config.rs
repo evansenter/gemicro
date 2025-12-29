@@ -76,6 +76,7 @@ Based on the above, what should you do next? Think step by step, then choose a t
 
 /// Configuration for ReAct agent
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ReactConfig {
     /// Maximum number of thought-action-observation iterations
     ///
@@ -102,6 +103,41 @@ pub struct ReactConfig {
 }
 
 impl ReactConfig {
+    /// Set the maximum number of iterations.
+    #[must_use]
+    pub fn with_max_iterations(mut self, max_iterations: usize) -> Self {
+        self.max_iterations = max_iterations;
+        self
+    }
+
+    /// Set the available tools.
+    #[must_use]
+    pub fn with_available_tools(mut self, tools: Vec<String>) -> Self {
+        self.available_tools = tools;
+        self
+    }
+
+    /// Set whether to use Google Search grounding.
+    #[must_use]
+    pub fn with_use_google_search(mut self, use_google_search: bool) -> Self {
+        self.use_google_search = use_google_search;
+        self
+    }
+
+    /// Set the total timeout.
+    #[must_use]
+    pub fn with_total_timeout(mut self, timeout: Duration) -> Self {
+        self.total_timeout = timeout;
+        self
+    }
+
+    /// Set the prompts configuration.
+    #[must_use]
+    pub fn with_prompts(mut self, prompts: ReactPrompts) -> Self {
+        self.prompts = prompts;
+        self
+    }
+
     /// Validate the configuration
     pub fn validate(&self) -> Result<(), AgentError> {
         let mut errors = Vec::new();
@@ -170,19 +206,13 @@ mod tests {
 
     #[test]
     fn test_config_validation_zero_iterations() {
-        let config = ReactConfig {
-            max_iterations: 0,
-            ..Default::default()
-        };
+        let config = ReactConfig::default().with_max_iterations(0);
         assert!(config.validate().is_err());
     }
 
     #[test]
     fn test_config_validation_empty_tools() {
-        let config = ReactConfig {
-            available_tools: vec![],
-            ..Default::default()
-        };
+        let config = ReactConfig::default().with_available_tools(vec![]);
         assert!(config.validate().is_err());
     }
 }

@@ -35,6 +35,7 @@ use crate::agent::EVENT_FINAL_RESULT;
 /// assert_eq!(update.data["result"], "success");
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct AgentUpdate {
     /// Event type identifier (e.g., "decomposition_started", "sub_query_completed")
     ///
@@ -133,6 +134,7 @@ pub struct FinalResult {
 ///
 /// Contains generic fields plus an extensible `extra` for agent-specific data.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct ResultMetadata {
     /// Total tokens used across all LLM calls
     ///

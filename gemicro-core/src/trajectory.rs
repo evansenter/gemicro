@@ -56,6 +56,7 @@ pub const SCHEMA_VERSION: &str = "2.0.0";
 /// states (both modes or neither) unrepresentable at compile time.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "mode", content = "data")]
+#[non_exhaustive]
 pub enum LlmResponseData {
     /// Complete response from buffered mode
     ///
@@ -130,6 +131,7 @@ impl LlmResponseData {
 /// - The response data (buffered or streaming mode)
 /// - Timing information
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct TrajectoryStep {
     /// Semantic phase identifier (e.g., "decomposition", "sub_query_2", "synthesis")
     ///
@@ -206,6 +208,7 @@ pub struct SerializableStreamChunk {
 /// - High-level events for compatibility with existing consumers
 /// - Summary metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct Trajectory {
     /// Unique trajectory identifier (UUID)
     pub id: String,

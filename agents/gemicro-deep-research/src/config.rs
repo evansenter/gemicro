@@ -169,6 +169,7 @@ Provide a clear, well-organized answer that integrates all findings. Do not ment
 
 /// Configuration for Deep Research agent
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ResearchConfig {
     /// Maximum number of sub-queries to generate
     ///
@@ -218,6 +219,55 @@ pub struct ResearchConfig {
 }
 
 impl ResearchConfig {
+    /// Set the minimum number of sub-queries.
+    #[must_use]
+    pub fn with_min_sub_queries(mut self, min: usize) -> Self {
+        self.min_sub_queries = min;
+        self
+    }
+
+    /// Set the maximum number of sub-queries.
+    #[must_use]
+    pub fn with_max_sub_queries(mut self, max: usize) -> Self {
+        self.max_sub_queries = max;
+        self
+    }
+
+    /// Set the maximum number of concurrent sub-queries.
+    #[must_use]
+    pub fn with_max_concurrent_sub_queries(mut self, max: usize) -> Self {
+        self.max_concurrent_sub_queries = max;
+        self
+    }
+
+    /// Set whether to continue on partial failure.
+    #[must_use]
+    pub fn with_continue_on_partial_failure(mut self, continue_on_failure: bool) -> Self {
+        self.continue_on_partial_failure = continue_on_failure;
+        self
+    }
+
+    /// Set the total timeout.
+    #[must_use]
+    pub fn with_total_timeout(mut self, timeout: Duration) -> Self {
+        self.total_timeout = timeout;
+        self
+    }
+
+    /// Set whether to use Google Search grounding.
+    #[must_use]
+    pub fn with_google_search(mut self, use_google_search: bool) -> Self {
+        self.use_google_search = use_google_search;
+        self
+    }
+
+    /// Set the prompts configuration.
+    #[must_use]
+    pub fn with_prompts(mut self, prompts: ResearchPrompts) -> Self {
+        self.prompts = prompts;
+        self
+    }
+
     /// Validate the configuration
     pub fn validate(&self) -> Result<(), AgentError> {
         let mut errors = Vec::new();

@@ -4,6 +4,7 @@
 
 /// Parsed REPL command
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Command {
     /// Switch to a different agent by name
     Agent(String),
