@@ -1,6 +1,7 @@
 //! gemicro CLI - Deep research agent powered by Gemini.
 
 mod cli;
+pub mod confirmation;
 mod display;
 mod error;
 mod format;
