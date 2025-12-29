@@ -27,7 +27,7 @@ Following Evergreen principles:
 
 - [ ] Create new agent crate: `agents/gemicro-{agent-name}/`
 - [ ] Add crate to workspace `Cargo.toml` members
-- [ ] Create agent-specific config struct with `validate()` method
+- [ ] Create config struct with `#[non_exhaustive]`, `validate()`, and `with_*()` builder methods
 - [ ] Define event types as strings (constants are internal, NOT exported)
 - [ ] Implement `Agent` trait (`name`, `description`, `execute`)
 - [ ] Use `async_stream::try_stream!` for streaming
@@ -114,13 +114,32 @@ yield AgentUpdate::custom(
 
 ### 2. Configuration
 
+Mark config structs with `#[non_exhaustive]` and provide builder methods:
+
 ```rust
 // Location: agents/gemicro-simple-qa/src/lib.rs
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]  // Allows adding fields without breaking changes
 pub struct SimpleQaConfig {
     pub timeout: Duration,
     pub system_prompt: String,
+}
+
+impl SimpleQaConfig {
+    /// Set the timeout duration.
+    #[must_use]
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
+    }
+
+    /// Set the system prompt.
+    #[must_use]
+    pub fn with_system_prompt(mut self, system_prompt: impl Into<String>) -> Self {
+        self.system_prompt = system_prompt.into();
+        self
+    }
 }
 
 impl SimpleQaConfig {
