@@ -62,7 +62,7 @@ impl ToolRegistry {
 
     /// Register a tool that's already wrapped in Arc.
     ///
-    /// Useful when you have an Arc<dyn Tool> from elsewhere.
+    /// Useful when you have an `Arc<dyn Tool>` from elsewhere.
     pub fn register_arc(&mut self, tool: Arc<dyn Tool>) -> &mut Self {
         self.tools.insert(tool.name().to_string(), tool);
         self
