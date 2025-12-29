@@ -127,11 +127,26 @@ impl Tool for Glob {
 
         let truncated = matches.len() >= MAX_RESULTS;
         let result = if matches.is_empty() {
-            format!("No files found matching pattern '{}'", pattern)
+            let mut output = format!("No files found matching pattern '{}'", pattern);
+            // Surface any errors that occurred during traversal
+            if !errors.is_empty() {
+                output.push_str(&format!("\n\n{} path(s) could not be read:", errors.len()));
+                for err in &errors {
+                    output.push_str(&format!("\n  - {}", err));
+                }
+            }
+            output
         } else {
             let mut output = matches.join("\n");
             if truncated {
                 output.push_str(&format!("\n\n(Results truncated to {} files)", MAX_RESULTS));
+            }
+            // Surface any errors that occurred during traversal
+            if !errors.is_empty() {
+                output.push_str(&format!(
+                    "\n\nNote: {} path(s) could not be read (see metadata for details)",
+                    errors.len()
+                ));
             }
             output
         };

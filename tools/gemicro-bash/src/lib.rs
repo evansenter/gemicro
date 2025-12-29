@@ -11,6 +11,9 @@ use std::time::Duration;
 use tokio::process::Command;
 use tokio::time::timeout;
 
+#[cfg(unix)]
+use std::os::unix::process::ExitStatusExt;
+
 /// Default timeout for command execution (30 seconds).
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
 
@@ -182,7 +185,16 @@ impl Tool for Bash {
             stderr.push_str("\n... (stderr truncated)");
         }
 
+        // Extract exit code. For killed processes, code() returns None and we use -1.
+        // On Unix, we also capture the signal that killed the process.
         let exit_code = output.status.code().unwrap_or(-1);
+
+        #[cfg(unix)]
+        let signal = if output.status.code().is_none() {
+            output.status.signal()
+        } else {
+            None
+        };
 
         // Build result content
         let mut content = String::new();
@@ -205,7 +217,26 @@ impl Tool for Bash {
 
         let success = output.status.success();
 
-        Ok(ToolResult::new(content).with_metadata(json!({
+        // Design note: We intentionally return Ok even for non-zero exit codes.
+        // Agents need to see command output regardless of exit status to understand
+        // what happened. The `success` and `exit_code` fields in metadata allow
+        // callers to check status when needed, but the output itself is valuable
+        // for agent reasoning even when commands "fail".
+
+        #[cfg(unix)]
+        let metadata = json!({
+            "exit_code": exit_code,
+            "success": success,
+            "signal": signal,
+            "stdout_len": output.stdout.len(),
+            "stderr_len": output.stderr.len(),
+            "stdout_truncated": stdout_truncated,
+            "stderr_truncated": stderr_truncated,
+            "timeout_secs": timeout_secs,
+        });
+
+        #[cfg(not(unix))]
+        let metadata = json!({
             "exit_code": exit_code,
             "success": success,
             "stdout_len": output.stdout.len(),
@@ -213,7 +244,9 @@ impl Tool for Bash {
             "stdout_truncated": stdout_truncated,
             "stderr_truncated": stderr_truncated,
             "timeout_secs": timeout_secs,
-        })))
+        });
+
+        Ok(ToolResult::new(content).with_metadata(metadata))
     }
 }
 
@@ -412,5 +445,23 @@ mod tests {
         assert!(result.is_ok());
         let metadata = result.unwrap().metadata;
         assert_eq!(metadata["timeout_secs"], MAX_TIMEOUT_SECS);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_bash_signal_info_for_killed_process() {
+        let bash = Bash;
+        // Kill process with SIGTERM (signal 15)
+        let result = bash
+            .execute(json!({
+                "command": "sh -c 'kill -TERM $$'"
+            }))
+            .await;
+
+        assert!(result.is_ok());
+        let metadata = result.unwrap().metadata;
+        // Process killed by signal should have exit_code -1 and signal info
+        assert_eq!(metadata["exit_code"], -1);
+        assert_eq!(metadata["signal"], 15); // SIGTERM
     }
 }

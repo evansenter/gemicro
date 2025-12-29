@@ -178,9 +178,10 @@ impl Tool for Grep {
             return Err(ToolError::InvalidInput("Path must be absolute".into()));
         }
 
-        // Compile regex (with case insensitivity if requested)
+        // Compile regex - for case-insensitive, use lowercase pattern and match against
+        // lowercased lines in search_file. Only compile once to avoid redundant work.
         let regex_pattern = if case_insensitive {
-            format!("(?i){}", pattern)
+            pattern.to_lowercase()
         } else {
             pattern.to_string()
         };
@@ -189,18 +190,7 @@ impl Tool for Grep {
             ToolError::InvalidInput(format!("Invalid regex pattern '{}': {}", pattern, e))
         })?;
 
-        // For case-insensitive search, we need a lowercase version of the pattern
-        let search_regex = if case_insensitive {
-            Regex::new(&pattern.to_lowercase()).map_err(|e| {
-                ToolError::InvalidInput(format!("Invalid regex pattern '{}': {}", pattern, e))
-            })?
-        } else {
-            regex.clone()
-        };
-
-        let matches = self
-            .search_file(path, &search_regex, case_insensitive)
-            .await?;
+        let matches = self.search_file(path, &regex, case_insensitive).await?;
 
         let match_count = matches.len();
         let truncated = match_count >= MAX_MATCHES_PER_FILE;
