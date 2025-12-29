@@ -50,6 +50,7 @@ gemicro-cli (terminal rendering)
 - **Interactions API**: Uses Gemini's unified Interactions API exclusively
 - **Single model**: Hardcoded to `gemini-3-flash-preview` for consistency
 - **Single source of truth**: Each type has one canonical crate—no convenience re-exports
+- **Breaking changes welcome**: Simplicity over backwards compatibility
 
 ### Imports
 
