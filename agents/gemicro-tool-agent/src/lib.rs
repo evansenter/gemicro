@@ -100,8 +100,9 @@ impl ToolAgentConfig {
         if self.system_prompt.trim().is_empty() {
             errors.push("system_prompt must not be empty");
         }
-        // Note: We don't validate tool_filter here since ToolSet::None is valid
-        // (user might want to test with no tools)
+        // Note: We don't validate tool_filter here because validation requires
+        // knowing the available registry, which isn't available until execute().
+        // Runtime will error if filtering results in zero tools.
 
         if errors.is_empty() {
             Ok(())

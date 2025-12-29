@@ -558,6 +558,35 @@ Errors bubble up with context added at each layer. Don't swallow errors.
 - **Gemini API wrappers** - that's rust-genai's job
 - **Complex workarounds** - fix rust-genai instead
 
+## Migration Notes
+
+### ToolAgent: ToolType → ToolSet (PR #133)
+
+The `ToolType` enum has been replaced with string-based `ToolSet` filtering:
+
+**Before:**
+```rust
+use gemicro_tool_agent::{ToolAgentConfig, ToolType};
+
+let config = ToolAgentConfig::default()
+    .with_tools(vec![ToolType::Calculator]);
+```
+
+**After:**
+```rust
+use gemicro_core::ToolSet;
+use gemicro_tool_agent::ToolAgentConfig;
+
+let config = ToolAgentConfig::default()
+    .with_tool_filter(ToolSet::Specific(vec!["calculator".into()]));
+```
+
+**ToolSet options:**
+- `ToolSet::All` - Use all registered tools (default)
+- `ToolSet::None` - Use no tools
+- `ToolSet::Specific(vec!["name".into()])` - Use only named tools
+- `ToolSet::Except(vec!["name".into()])` - Use all except named tools
+
 ## Known Limitations & Tracked Issues
 
 See [GitHub Issues](https://github.com/evansenter/gemicro/issues) for the full list.

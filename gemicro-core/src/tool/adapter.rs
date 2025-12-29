@@ -70,7 +70,11 @@ impl CallableFunction for ToolCallableAdapter {
     async fn call(&self, args: Value) -> Result<Value, FunctionError> {
         match self.tool.execute(args).await {
             Ok(result) => {
-                // Return content as a JSON string value for compatibility
+                // Return content as a JSON string value for rust-genai compatibility.
+                // Note: ToolResult::metadata is intentionally not returned here because
+                // rust-genai's CallableFunction expects a simple Value result that gets
+                // passed back to the LLM. Metadata is for observability/logging within
+                // gemicro, not for LLM consumption.
                 Ok(Value::String(result.content))
             }
             Err(e) => Err(FunctionError::ExecutionError(Box::new(e))),
