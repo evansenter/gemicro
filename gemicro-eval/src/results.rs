@@ -422,21 +422,14 @@ mod tests {
     }
 
     fn create_mock_metrics() -> ExecutionMetrics {
-        use gemicro_runner::phases;
-
-        ExecutionMetrics {
-            total_duration: std::time::Duration::from_secs(1),
-            sequential_time: None,
-            parallel_speedup: None,
-            steps_total: 0,
-            steps_succeeded: 0,
-            steps_failed: 0,
-            step_timings: vec![],
-            total_tokens: 100,
-            tokens_unavailable_count: 0,
-            final_answer: Some("4".to_string()),
-            completion_phase: phases::COMPLETE.to_string(),
-        }
+        ExecutionMetrics::for_testing(
+            std::time::Duration::from_secs(1),
+            100, // total_tokens
+            0,   // tokens_unavailable_count
+            Some("4".to_string()),
+            0, // steps_succeeded
+            0, // steps_failed
+        )
     }
 
     #[test]

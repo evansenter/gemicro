@@ -49,6 +49,7 @@ pub enum EvalProgress {
 
 /// Configuration for the evaluation harness.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct EvalConfig {
     /// Maximum number of concurrent evaluations (default: 5)
     pub concurrency: usize,

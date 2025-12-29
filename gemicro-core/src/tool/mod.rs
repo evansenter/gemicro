@@ -61,6 +61,7 @@ use thiserror::Error;
 
 /// Result returned by a tool execution.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ToolResult {
     /// The main content/output from the tool.
     pub content: String,

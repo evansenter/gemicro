@@ -50,12 +50,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Conservative: fewer sub-queries, faster but potentially less thorough
     registry.register("conservative", || {
         Box::new(
-            DeepResearchAgent::new(ResearchConfig {
-                min_sub_queries: 2,
-                max_sub_queries: 2,
-                total_timeout: Duration::from_secs(120),
-                ..Default::default()
-            })
+            DeepResearchAgent::new(
+                ResearchConfig::default()
+                    .with_min_sub_queries(2)
+                    .with_max_sub_queries(2)
+                    .with_total_timeout(Duration::from_secs(120)),
+            )
             .expect("Invalid config"),
         )
     });
@@ -63,12 +63,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Aggressive: more sub-queries, slower but potentially more thorough
     registry.register("aggressive", || {
         Box::new(
-            DeepResearchAgent::new(ResearchConfig {
-                min_sub_queries: 4,
-                max_sub_queries: 5,
-                total_timeout: Duration::from_secs(180),
-                ..Default::default()
-            })
+            DeepResearchAgent::new(
+                ResearchConfig::default()
+                    .with_min_sub_queries(4)
+                    .with_max_sub_queries(5)
+                    .with_total_timeout(Duration::from_secs(180)),
+            )
             .expect("Invalid config"),
         )
     });
@@ -86,13 +86,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create LLM client configuration
     let genai_client = rust_genai::Client::builder(api_key).build();
-    let llm_config = LlmConfig {
-        timeout: Duration::from_secs(60),
-        max_tokens: 1024,
-        temperature: 0.7,
-        max_retries: 2,
-        retry_base_delay_ms: 1000,
-    };
+    let llm_config = LlmConfig::default()
+        .with_timeout(Duration::from_secs(60))
+        .with_max_tokens(1024)
+        .with_temperature(0.7)
+        .with_max_retries(2)
+        .with_retry_base_delay_ms(1000);
 
     // Evaluation config: small concurrency, no retries for cleaner comparison
     let eval_config = EvalConfig::new().with_concurrency(1).with_max_retries(0);

@@ -22,13 +22,11 @@ async fn test_react_calculator_query() {
 
     let context = create_test_context(&api_key);
 
-    let config = ReactConfig {
-        max_iterations: 5,
-        available_tools: vec!["calculator".to_string()],
-        use_google_search: false,
-        total_timeout: Duration::from_secs(60),
-        ..Default::default()
-    };
+    let config = ReactConfig::default()
+        .with_max_iterations(5)
+        .with_available_tools(vec!["calculator".to_string()])
+        .with_use_google_search(false)
+        .with_total_timeout(Duration::from_secs(60));
 
     let agent = ReactAgent::new(config).expect("Should create agent");
     let stream = agent.execute("What is 25 * 4?", context);
@@ -115,13 +113,11 @@ async fn test_react_multi_step_calculation() {
 
     let context = create_test_context(&api_key);
 
-    let config = ReactConfig {
-        max_iterations: 10,
-        available_tools: vec!["calculator".to_string()],
-        use_google_search: false,
-        total_timeout: Duration::from_secs(90),
-        ..Default::default()
-    };
+    let config = ReactConfig::default()
+        .with_max_iterations(10)
+        .with_available_tools(vec!["calculator".to_string()])
+        .with_use_google_search(false)
+        .with_total_timeout(Duration::from_secs(90));
 
     let agent = ReactAgent::new(config).expect("Should create agent");
     let stream = agent.execute(
@@ -181,13 +177,11 @@ async fn test_react_event_ordering() {
 
     let context = create_test_context(&api_key);
 
-    let config = ReactConfig {
-        max_iterations: 5,
-        available_tools: vec!["calculator".to_string()],
-        use_google_search: false,
-        total_timeout: Duration::from_secs(60),
-        ..Default::default()
-    };
+    let config = ReactConfig::default()
+        .with_max_iterations(5)
+        .with_available_tools(vec!["calculator".to_string()])
+        .with_use_google_search(false)
+        .with_total_timeout(Duration::from_secs(60));
 
     let agent = ReactAgent::new(config).expect("Should create agent");
     let stream = agent.execute("What is 10 + 5?", context);
@@ -255,13 +249,11 @@ async fn test_react_max_iterations_emits_final_result() {
 
     let context = create_test_context(&api_key);
 
-    let config = ReactConfig {
-        max_iterations: 1,
-        available_tools: vec!["calculator".to_string()],
-        use_google_search: false,
-        total_timeout: Duration::from_secs(60),
-        ..Default::default()
-    };
+    let config = ReactConfig::default()
+        .with_max_iterations(1)
+        .with_available_tools(vec!["calculator".to_string()])
+        .with_use_google_search(false)
+        .with_total_timeout(Duration::from_secs(60));
 
     let agent = ReactAgent::new(config).expect("Should create agent");
     let stream = agent.execute(
@@ -305,10 +297,7 @@ async fn test_react_max_iterations_emits_final_result() {
 /// Test invalid config
 #[tokio::test]
 async fn test_react_invalid_config() {
-    let config = ReactConfig {
-        max_iterations: 0,
-        ..Default::default()
-    };
+    let config = ReactConfig::default().with_max_iterations(0);
 
     let result = ReactAgent::new(config);
     assert!(result.is_err());
@@ -318,10 +307,7 @@ async fn test_react_invalid_config() {
 /// Test empty tools config
 #[tokio::test]
 async fn test_react_empty_tools_config() {
-    let config = ReactConfig {
-        available_tools: vec![],
-        ..Default::default()
-    };
+    let config = ReactConfig::default().with_available_tools(vec![]);
 
     let result = ReactAgent::new(config);
     assert!(result.is_err());

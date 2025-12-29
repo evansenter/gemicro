@@ -23,13 +23,11 @@ async fn test_deep_research_agent_full_flow() {
     let context = create_test_context(&api_key);
 
     // Use minimal config for faster testing
-    let config = ResearchConfig {
-        min_sub_queries: 2,
-        max_sub_queries: 3,
-        continue_on_partial_failure: true,
-        total_timeout: Duration::from_secs(120),
-        ..Default::default()
-    };
+    let config = ResearchConfig::default()
+        .with_min_sub_queries(2)
+        .with_max_sub_queries(3)
+        .with_continue_on_partial_failure(true)
+        .with_total_timeout(Duration::from_secs(120));
 
     let agent = DeepResearchAgent::new(config).expect("Should create agent");
 
@@ -145,13 +143,11 @@ async fn test_agent_event_ordering() {
 
     let context = create_test_context(&api_key);
 
-    let config = ResearchConfig {
-        min_sub_queries: 2,
-        max_sub_queries: 2,
-        continue_on_partial_failure: true,
-        total_timeout: Duration::from_secs(120),
-        ..Default::default()
-    };
+    let config = ResearchConfig::default()
+        .with_min_sub_queries(2)
+        .with_max_sub_queries(2)
+        .with_continue_on_partial_failure(true)
+        .with_total_timeout(Duration::from_secs(120));
 
     let agent = DeepResearchAgent::new(config).unwrap();
     let stream = agent.execute("What is 2+2 and what is 3+3?", context);
@@ -210,11 +206,9 @@ async fn test_agent_event_ordering() {
 
 #[tokio::test]
 async fn test_agent_invalid_config() {
-    let config = ResearchConfig {
-        min_sub_queries: 10,
-        max_sub_queries: 5,
-        ..Default::default()
-    };
+    let config = ResearchConfig::default()
+        .with_min_sub_queries(10)
+        .with_max_sub_queries(5);
 
     let result = DeepResearchAgent::new(config);
     assert!(result.is_err());
@@ -233,12 +227,10 @@ async fn test_cancellation_during_execution() {
     let cancellation_token = CancellationToken::new();
     let context = create_test_context_with_cancellation(&api_key, cancellation_token.clone());
 
-    let config = ResearchConfig {
-        min_sub_queries: 3,
-        max_sub_queries: 5,
-        total_timeout: Duration::from_secs(120),
-        ..Default::default()
-    };
+    let config = ResearchConfig::default()
+        .with_min_sub_queries(3)
+        .with_max_sub_queries(5)
+        .with_total_timeout(Duration::from_secs(120));
 
     let agent = DeepResearchAgent::new(config).unwrap();
     let stream = agent.execute(
@@ -309,11 +301,9 @@ async fn test_immediate_cancellation() {
 
     let context = create_test_context_with_cancellation(&api_key, cancellation_token);
 
-    let config = ResearchConfig {
-        min_sub_queries: 2,
-        max_sub_queries: 3,
-        ..Default::default()
-    };
+    let config = ResearchConfig::default()
+        .with_min_sub_queries(2)
+        .with_max_sub_queries(3);
 
     let agent = DeepResearchAgent::new(config).unwrap();
     let stream = agent.execute("What is 2+2?", context);

@@ -22,13 +22,12 @@ pub fn get_api_key() -> Option<String> {
 /// Uses shorter timeouts and sufficient token limits for reliable responses.
 pub fn create_test_client(api_key: &str) -> LlmClient {
     let genai_client = rust_genai::Client::builder(api_key.to_string()).build();
-    let config = LlmConfig {
-        timeout: Duration::from_secs(60),
-        max_tokens: 4096,
-        temperature: 0.0, // Deterministic for testing
-        max_retries: 1,
-        retry_base_delay_ms: 500,
-    };
+    let config = LlmConfig::default()
+        .with_timeout(Duration::from_secs(60))
+        .with_max_tokens(4096)
+        .with_temperature(0.0) // Deterministic for testing
+        .with_max_retries(1)
+        .with_retry_base_delay_ms(500);
     LlmClient::new(genai_client, config)
 }
 
@@ -37,13 +36,12 @@ pub fn create_test_client(api_key: &str) -> LlmClient {
 /// Uses sufficient token limits to avoid truncated responses during agent execution.
 pub fn create_test_context(api_key: &str) -> AgentContext {
     let genai_client = rust_genai::Client::builder(api_key.to_string()).build();
-    let config = LlmConfig {
-        timeout: Duration::from_secs(60),
-        max_tokens: 4096,
-        temperature: 0.7,
-        max_retries: 1,
-        retry_base_delay_ms: 500,
-    };
+    let config = LlmConfig::default()
+        .with_timeout(Duration::from_secs(60))
+        .with_max_tokens(4096)
+        .with_temperature(0.7)
+        .with_max_retries(1)
+        .with_retry_base_delay_ms(500);
     let llm = LlmClient::new(genai_client, config);
     AgentContext::new(llm)
 }
@@ -56,13 +54,12 @@ pub fn create_test_context_with_cancellation(
     cancellation_token: CancellationToken,
 ) -> AgentContext {
     let genai_client = rust_genai::Client::builder(api_key.to_string()).build();
-    let config = LlmConfig {
-        timeout: Duration::from_secs(60),
-        max_tokens: 4096,
-        temperature: 0.7,
-        max_retries: 1,
-        retry_base_delay_ms: 500,
-    };
+    let config = LlmConfig::default()
+        .with_timeout(Duration::from_secs(60))
+        .with_max_tokens(4096)
+        .with_temperature(0.7)
+        .with_max_retries(1)
+        .with_retry_base_delay_ms(500);
     let llm = LlmClient::new(genai_client, config);
     AgentContext::new_with_cancellation(llm, cancellation_token)
 }

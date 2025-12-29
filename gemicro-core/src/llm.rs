@@ -76,6 +76,7 @@ impl std::fmt::Debug for LlmClient {
 
 /// Request to the LLM
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct LlmRequest {
     /// User prompt
     pub prompt: String,
