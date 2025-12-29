@@ -80,12 +80,12 @@ impl Tool for CurrentDatetime {
         // Calculate date from days since epoch
         let (year, month, day) = days_to_ymd(days_since_epoch);
 
-        let result = format!(
-            r#"{{"timezone": "UTC", "date": "{:04}-{:02}-{:02}", "time": "{:02}:{:02}:{:02}"}}"#,
-            year, month, day, hours, minutes, seconds
-        );
-
-        Ok(ToolResult::text(result))
+        // Return structured JSON directly - the LLM receives this as-is
+        Ok(ToolResult::json(json!({
+            "timezone": "UTC",
+            "date": format!("{:04}-{:02}-{:02}", year, month, day),
+            "time": format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
+        })))
     }
 }
 
@@ -139,13 +139,10 @@ mod tests {
         let tool = CurrentDatetime;
         let result = tool.execute(json!({"timezone": "UTC"})).await.unwrap();
 
-        // Verify it's valid JSON - content is now Value::String containing JSON
-        let content_str = result.content.as_str().expect("Should be a string");
-        let json: serde_json::Value =
-            serde_json::from_str(content_str).expect("Should be valid JSON");
-        assert_eq!(json["timezone"], "UTC");
-        assert!(json["date"].is_string());
-        assert!(json["time"].is_string());
+        // content is now structured JSON directly (not a string containing JSON)
+        assert_eq!(result.content["timezone"], "UTC");
+        assert!(result.content["date"].is_string());
+        assert!(result.content["time"].is_string());
     }
 
     #[tokio::test]
