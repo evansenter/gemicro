@@ -221,7 +221,8 @@ impl ToolAgent {
             let filtered_tools = registry.filter(&config.tool_filter);
 
             // Get adapters for the filtered tools
-            let adapters = tools_to_callables(&filtered_tools);
+            // TODO: Phase 3 - Pass confirmation handler from AgentContext
+            let adapters = tools_to_callables(&filtered_tools, None);
             let functions: Vec<FunctionDeclaration> = adapters.iter().map(|a| a.declaration()).collect();
 
             if functions.is_empty() {
@@ -434,7 +435,7 @@ mod tests {
     fn test_default_registry_function_declarations() {
         let registry = default_registry();
         let tools = registry.filter(&ToolSet::All);
-        let adapters = tools_to_callables(&tools);
+        let adapters = tools_to_callables(&tools, None);
         let declarations: Vec<_> = adapters.iter().map(|a| a.declaration()).collect();
 
         assert_eq!(declarations.len(), 6);
@@ -451,7 +452,7 @@ mod tests {
     fn test_filtered_function_declarations() {
         let registry = default_registry();
         let tools = registry.filter(&ToolSet::Specific(vec!["calculator".into()]));
-        let adapters = tools_to_callables(&tools);
+        let adapters = tools_to_callables(&tools, None);
         let declarations: Vec<_> = adapters.iter().map(|a| a.declaration()).collect();
 
         assert_eq!(declarations.len(), 1);

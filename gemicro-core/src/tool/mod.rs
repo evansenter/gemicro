@@ -59,6 +59,110 @@ use serde_json::Value;
 use std::fmt;
 use thiserror::Error;
 
+// ============================================================================
+// Confirmation Handler
+// ============================================================================
+
+/// Handler for tool confirmation prompts.
+///
+/// Tools that perform potentially dangerous operations (file writes, shell commands,
+/// etc.) can require confirmation before execution. This trait defines how that
+/// confirmation is obtained.
+///
+/// # Implementations
+///
+/// - [`AutoApprove`]: Always approves - for testing and trusted contexts
+/// - [`AutoDeny`]: Always denies - safe default when no handler configured
+///
+/// # Example
+///
+/// ```
+/// use gemicro_core::tool::{ConfirmationHandler, AutoApprove, AutoDeny};
+/// use async_trait::async_trait;
+/// use serde_json::Value;
+///
+/// // For testing or trusted automation
+/// let _handler = AutoApprove;
+///
+/// // Or create a custom handler
+/// #[derive(Debug)]
+/// struct LoggingHandler;
+///
+/// #[async_trait]
+/// impl ConfirmationHandler for LoggingHandler {
+///     async fn confirm(&self, tool_name: &str, message: &str, _args: &Value) -> bool {
+///         println!("[{}] {}", tool_name, message);
+///         true // or implement actual confirmation logic
+///     }
+/// }
+/// ```
+#[async_trait]
+pub trait ConfirmationHandler: Send + Sync + fmt::Debug {
+    /// Called when a tool requires confirmation before execution.
+    ///
+    /// # Arguments
+    ///
+    /// * `tool_name` - The name of the tool requesting confirmation
+    /// * `message` - A human-readable description of what the tool will do
+    /// * `args` - The arguments that will be passed to the tool
+    ///
+    /// # Returns
+    ///
+    /// * `true` to approve execution
+    /// * `false` to deny (tool will return [`ToolError::ConfirmationDenied`])
+    async fn confirm(&self, tool_name: &str, message: &str, args: &Value) -> bool;
+}
+
+/// Auto-approve all confirmations.
+///
+/// Use in testing or trusted automation contexts where manual confirmation
+/// is not needed or desired.
+///
+/// # Example
+///
+/// ```
+/// use gemicro_core::tool::AutoApprove;
+///
+/// let handler = AutoApprove;
+/// // All tool confirmations will be approved automatically
+/// ```
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AutoApprove;
+
+#[async_trait]
+impl ConfirmationHandler for AutoApprove {
+    async fn confirm(&self, _tool_name: &str, _message: &str, _args: &Value) -> bool {
+        true
+    }
+}
+
+/// Auto-deny all confirmations.
+///
+/// Safe default for when no confirmation handler is configured.
+/// Prevents any tool requiring confirmation from executing.
+///
+/// # Example
+///
+/// ```
+/// use gemicro_core::tool::AutoDeny;
+///
+/// let handler = AutoDeny;
+/// // All tool confirmations will be denied automatically
+/// ```
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AutoDeny;
+
+#[async_trait]
+impl ConfirmationHandler for AutoDeny {
+    async fn confirm(&self, _tool_name: &str, _message: &str, _args: &Value) -> bool {
+        false
+    }
+}
+
+// ============================================================================
+// Tool Result
+// ============================================================================
+
 /// Result returned by a tool execution.
 ///
 /// The `content` field is sent to the LLM as the tool's response.
@@ -401,5 +505,43 @@ mod tests {
     fn test_toolset_default() {
         let set = ToolSet::default();
         assert_eq!(set, ToolSet::All);
+    }
+
+    #[tokio::test]
+    async fn test_auto_approve_confirms() {
+        let handler = AutoApprove;
+        let result = handler
+            .confirm(
+                "bash",
+                "Execute: ls -la",
+                &serde_json::json!({"command": "ls"}),
+            )
+            .await;
+        assert!(result);
+    }
+
+    #[tokio::test]
+    async fn test_auto_deny_denies() {
+        let handler = AutoDeny;
+        let result = handler
+            .confirm(
+                "bash",
+                "Execute: rm -rf /",
+                &serde_json::json!({"command": "rm"}),
+            )
+            .await;
+        assert!(!result);
+    }
+
+    #[test]
+    fn test_auto_approve_debug() {
+        let handler = AutoApprove;
+        assert!(format!("{:?}", handler).contains("AutoApprove"));
+    }
+
+    #[test]
+    fn test_auto_deny_debug() {
+        let handler = AutoDeny;
+        assert!(format!("{:?}", handler).contains("AutoDeny"));
     }
 }
