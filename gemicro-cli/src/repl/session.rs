@@ -141,6 +141,7 @@ impl Session {
         AgentContext {
             llm: self.llm.clone(),
             cancellation_token,
+            tools: None,
         }
     }
 

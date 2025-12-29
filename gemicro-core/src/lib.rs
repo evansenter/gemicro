@@ -49,6 +49,7 @@ pub mod error;
 pub mod history;
 pub mod llm;
 pub mod mock_llm;
+pub mod tool;
 pub mod tracking;
 pub mod trajectory;
 pub mod update;
@@ -66,6 +67,9 @@ pub use llm::{LlmClient, LlmRequest, LlmStreamChunk};
 pub use mock_llm::MockLlmClient;
 // Re-export rust-genai types for convenience
 pub use rust_genai::{InteractionResponse, UsageMetadata};
+pub use tool::{
+    tools_to_callables, Tool, ToolCallableAdapter, ToolError, ToolRegistry, ToolResult, ToolSet,
+};
 pub use tracking::{DefaultTracker, ExecutionTracking, FinalResultData};
 pub use trajectory::{
     LlmResponseData, SerializableLlmRequest, SerializableStreamChunk, Trajectory,

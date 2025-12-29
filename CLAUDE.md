@@ -478,6 +478,115 @@ match update.event_type.as_str() {
 - **async-stream**: For streaming agent implementations
 - **serde/serde_json**: Soft-typed data serialization
 
+## rust-genai Integration
+
+**Context:** rust-genai is our library (`evansenter/rust-genai`). We control both sides.
+
+### Separation of Concerns
+
+| Layer | Responsibility |
+|-------|----------------|
+| **rust-genai** | Gemini API client, function calling, streaming, request/response types |
+| **gemicro** | Agent patterns, observability, trajectory recording, tool orchestration |
+
+### When to Wrap rust-genai Types
+
+**Wrap when gemicro adds observability concerns:**
+- Trajectory recording (type must serialize for replay)
+- Metadata fields (e.g., `ToolResult.metadata`)
+- Richer error categorization for agent-level handling
+
+**Use rust-genai types directly when just passing through.**
+
+| gemicro Type | Wraps | Why |
+|--------------|-------|-----|
+| `LlmRequest` | `InteractionBuilder` params | Serialized in trajectories |
+| `LlmClient` | `Client` | Adds recording capability |
+| `Tool` trait | `CallableFunction` | Adds metadata, richer errors |
+| `InteractionResponse` | (re-exported) | No additions needed |
+| `FunctionDeclaration` | (used directly) | No additions needed |
+
+### When to Request Features (Not Work Around)
+
+Since we control rust-genai, **fix gaps at the source**:
+
+1. **Don't** build complex gemicro abstractions to work around rust-genai limitations
+2. **Do** file an issue or implement it in rust-genai
+3. Keep gemicro's wrapper layer thin
+
+**Examples:**
+- Need structured output? → Added to rust-genai, gemicro just calls it
+- Need Google Search grounding? → rust-genai exposes `with_google_search()`, gemicro forwards it
+- Need async tool execution? → rust-genai's `CallableFunction::call` is async
+
+### Where Concerns Live
+
+| Concern | Layer | Rationale |
+|---------|-------|-----------|
+| Gemini API types | rust-genai | Single source of truth for API contract |
+| Streaming primitives | rust-genai | `StreamChunk::Delta/Complete` pattern |
+| Function calling | rust-genai | `CallableFunction`, `AutoFunctionResult` |
+| Agent patterns | gemicro | DeepResearch, ReAct, etc. |
+| Trajectory recording | gemicro | Agent-level observability |
+| Tool orchestration | gemicro | Registry, filtering, metadata |
+| Evaluation harness | gemicro | Datasets, scorers, harness |
+
+### Error Propagation
+
+```
+rust_genai::GenaiError
+    ↓ wrapped by
+gemicro_core::LlmError
+    ↓ wrapped by
+gemicro_core::AgentError
+```
+
+Errors bubble up with context added at each layer. Don't swallow errors.
+
+### Testing Strategy
+
+| Test Type | Location | Runs When |
+|-----------|----------|-----------|
+| Unit tests | Both libraries | Always (`cargo test`) |
+| Doc tests | Both libraries | Always |
+| LLM integration | gemicro | `#[ignore]`, needs `GEMINI_API_KEY` |
+| API canary tests | rust-genai | CI with secrets |
+
+### What NOT to Add to gemicro
+
+- **Alternative LLM backends** - gemicro is Gemini-focused via rust-genai
+- **Gemini API wrappers** - that's rust-genai's job
+- **Complex workarounds** - fix rust-genai instead
+
+## Migration Notes
+
+### ToolAgent: ToolType → ToolSet (PR #133)
+
+The `ToolType` enum has been replaced with string-based `ToolSet` filtering:
+
+**Before:**
+```rust
+use gemicro_tool_agent::{ToolAgentConfig, ToolType};
+
+let config = ToolAgentConfig::default()
+    .with_tools(vec![ToolType::Calculator]);
+```
+
+**After:**
+```rust
+use gemicro_core::ToolSet;
+use gemicro_tool_agent::ToolAgentConfig;
+
+let config = ToolAgentConfig::default()
+    .with_tool_filter(ToolSet::Specific(vec!["calculator".into()]));
+```
+
+**ToolSet options:**
+- `ToolSet::All` - Use all registered tools (default)
+- `ToolSet::None` - Use no tools
+- `ToolSet::Specific(vec!["name".into()])` - Use only named tools
+- `ToolSet::Except(vec!["name".into()])` - Use all except named tools
+
 ## Known Limitations & Tracked Issues
 
 See [GitHub Issues](https://github.com/evansenter/gemicro/issues) for the full list.

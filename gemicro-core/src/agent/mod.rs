@@ -46,6 +46,7 @@
 
 use crate::error::AgentError;
 use crate::llm::LlmClient;
+use crate::tool::{Tool, ToolRegistry};
 use crate::tracking::ExecutionTracking;
 use crate::update::AgentUpdate;
 
@@ -148,6 +149,13 @@ pub struct AgentContext {
     /// Agents should check this token periodically and abort gracefully
     /// when cancelled, returning partial results if possible.
     pub cancellation_token: CancellationToken,
+
+    /// Optional tool registry for agents that use tools.
+    ///
+    /// Not all agents use tools, so this is optional. Agents that need
+    /// tools should check for this and either use a default registry
+    /// or fail gracefully if tools are required but not provided.
+    pub tools: Option<Arc<ToolRegistry>>,
 }
 
 impl AgentContext {
@@ -155,10 +163,12 @@ impl AgentContext {
     ///
     /// The client will be wrapped in an Arc for sharing across tasks.
     /// Uses a new cancellation token (never cancelled unless explicitly triggered).
+    /// No tools are registered by default.
     pub fn new(llm: LlmClient) -> Self {
         Self {
             llm: Arc::new(llm),
             cancellation_token: CancellationToken::new(),
+            tools: None,
         }
     }
 
@@ -169,6 +179,7 @@ impl AgentContext {
         Self {
             llm: Arc::new(llm),
             cancellation_token,
+            tools: None,
         }
     }
 
@@ -179,7 +190,31 @@ impl AgentContext {
         Self {
             llm,
             cancellation_token: CancellationToken::new(),
+            tools: None,
         }
+    }
+
+    /// Add a tool registry to this context.
+    ///
+    /// Returns a new context with the tools field set.
+    pub fn with_tools(mut self, tools: ToolRegistry) -> Self {
+        self.tools = Some(Arc::new(tools));
+        self
+    }
+
+    /// Add a shared tool registry to this context.
+    ///
+    /// Useful when sharing a registry across multiple contexts.
+    pub fn with_tools_arc(mut self, tools: Arc<ToolRegistry>) -> Self {
+        self.tools = Some(tools);
+        self
+    }
+
+    /// Get a tool by name from the registry.
+    ///
+    /// Returns `None` if no registry is set or the tool doesn't exist.
+    pub fn get_tool(&self, name: &str) -> Option<Arc<dyn Tool>> {
+        self.tools.as_ref().and_then(|reg| reg.get(name))
     }
 }
 

@@ -10,6 +10,7 @@ use futures_util::StreamExt;
 use gemicro_core::LlmRequest;
 
 #[tokio::test]
+#[ignore] // Requires GEMINI_API_KEY
 async fn test_generate_simple_prompt() {
     let Some(api_key) = get_api_key() else {
         eprintln!("Skipping test: GEMINI_API_KEY not set");
@@ -45,6 +46,7 @@ async fn test_generate_simple_prompt() {
 }
 
 #[tokio::test]
+#[ignore] // Requires GEMINI_API_KEY
 async fn test_generate_with_system_instruction() {
     let Some(api_key) = get_api_key() else {
         eprintln!("Skipping test: GEMINI_API_KEY not set");
@@ -79,6 +81,7 @@ async fn test_generate_with_system_instruction() {
 }
 
 #[tokio::test]
+#[ignore] // Requires GEMINI_API_KEY
 async fn test_generate_stream_simple_prompt() {
     let Some(api_key) = get_api_key() else {
         eprintln!("Skipping test: GEMINI_API_KEY not set");
@@ -127,6 +130,7 @@ async fn test_generate_stream_simple_prompt() {
 }
 
 #[tokio::test]
+#[ignore] // Requires GEMINI_API_KEY
 async fn test_generate_stream_with_system_instruction() {
     let Some(api_key) = get_api_key() else {
         eprintln!("Skipping test: GEMINI_API_KEY not set");
@@ -173,6 +177,7 @@ async fn test_generate_stream_with_system_instruction() {
 }
 
 #[tokio::test]
+#[ignore] // Requires GEMINI_API_KEY
 async fn test_generate_empty_prompt_error() {
     let Some(api_key) = get_api_key() else {
         eprintln!("Skipping test: GEMINI_API_KEY not set");
@@ -197,6 +202,7 @@ async fn test_generate_empty_prompt_error() {
 }
 
 #[tokio::test]
+#[ignore] // Requires GEMINI_API_KEY
 async fn test_generate_stream_empty_prompt_error() {
     let Some(api_key) = get_api_key() else {
         eprintln!("Skipping test: GEMINI_API_KEY not set");
@@ -227,6 +233,7 @@ async fn test_generate_stream_empty_prompt_error() {
 }
 
 #[tokio::test]
+#[ignore] // Requires GEMINI_API_KEY
 async fn test_google_search_grounding() {
     let Some(api_key) = get_api_key() else {
         eprintln!("Skipping test: GEMINI_API_KEY not set");
@@ -269,6 +276,7 @@ async fn test_google_search_grounding() {
 }
 
 #[tokio::test]
+#[ignore] // Requires GEMINI_API_KEY
 async fn test_structured_output_response_format() {
     let Some(api_key) = get_api_key() else {
         eprintln!("Skipping test: GEMINI_API_KEY not set");
