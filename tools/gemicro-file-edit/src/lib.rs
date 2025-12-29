@@ -6,6 +6,7 @@
 
 use async_trait::async_trait;
 use gemicro_core::tool::{Tool, ToolError, ToolResult};
+use gemicro_core::truncate;
 use serde_json::{json, Value};
 use std::path::Path;
 use tokio::fs;
@@ -20,6 +21,14 @@ const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024;
 /// predictable edits.
 ///
 /// **This tool requires confirmation before execution.**
+///
+/// # Result Metadata
+///
+/// On success, the result includes metadata with these fields:
+/// - `path`: The file path edited
+/// - `occurrences_replaced`: Number of replacements made
+/// - `old_string_len`: Length of the replaced string
+/// - `new_string_len`: Length of the replacement string
 ///
 /// # Example
 ///
@@ -102,8 +111,8 @@ impl Tool for FileEdit {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
-        let old_preview = truncate_for_display(old_string, 40);
-        let new_preview = truncate_for_display(new_string, 40);
+        let old_preview = truncate(old_string, 40);
+        let new_preview = truncate(new_string, 40);
 
         if replace_all {
             format!(
@@ -193,14 +202,14 @@ impl Tool for FileEdit {
         if occurrences == 0 {
             return Err(ToolError::InvalidInput(format!(
                 "old_string '{}' not found in file",
-                truncate_for_display(old_string, 50)
+                truncate(old_string, 50)
             )));
         }
 
         if !replace_all && occurrences > 1 {
             return Err(ToolError::InvalidInput(format!(
                 "old_string '{}' found {} times - must be unique (or use replace_all: true)",
-                truncate_for_display(old_string, 50),
+                truncate(old_string, 50),
                 occurrences
             )));
         }
@@ -225,16 +234,6 @@ impl Tool for FileEdit {
             "old_string_len": old_string.len(),
             "new_string_len": new_string.len(),
         })))
-    }
-}
-
-/// Truncate a string for display, adding ellipsis if needed.
-fn truncate_for_display(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_string()
-    } else {
-        let truncated: String = s.chars().take(max_len - 3).collect();
-        format!("{}...", truncated)
     }
 }
 
@@ -286,12 +285,6 @@ mod tests {
         assert!(msg.contains("old text"));
         assert!(msg.contains("new text"));
         assert!(msg.contains("/tmp/test.txt"));
-    }
-
-    #[test]
-    fn test_truncate_for_display() {
-        assert_eq!(truncate_for_display("short", 10), "short");
-        assert_eq!(truncate_for_display("this is long", 10), "this is...");
     }
 
     #[tokio::test]

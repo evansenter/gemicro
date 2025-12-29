@@ -5,8 +5,8 @@
 
 use crate::config::ReactConfig;
 use gemicro_core::{
-    remaining_time, timeout_error, with_timeout_and_cancellation, Agent, AgentContext, AgentError,
-    AgentStream, AgentUpdate, LlmRequest, ResultMetadata,
+    remaining_time, timeout_error, truncate, with_timeout_and_cancellation, Agent, AgentContext,
+    AgentError, AgentStream, AgentUpdate, LlmRequest, ResultMetadata,
 };
 
 use async_stream::try_stream;
@@ -155,7 +155,7 @@ impl ReactAgent {
                     .map_err(|e| AgentError::ParseFailed(format!(
                         "Failed to parse ReAct step: {}. Response: {}",
                         e,
-                        truncate_for_error(response_text, 200)
+                        truncate(response_text, 200)
                     )))?;
 
                 // Emit thought event
@@ -400,16 +400,6 @@ impl Agent for ReactAgent {
     }
 }
 
-/// Truncate a string for error messages, preserving UTF-8 boundaries
-fn truncate_for_error(s: &str, max_chars: usize) -> String {
-    let truncated: String = s.chars().take(max_chars).collect();
-    if s.chars().count() > max_chars {
-        format!("{}...", truncated)
-    } else {
-        truncated
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -555,31 +545,6 @@ mod tests {
         let result = config.validate();
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("available_tools"));
-    }
-
-    // Truncation helper tests
-    #[test]
-    fn test_truncate_for_error_short() {
-        let s = "hello";
-        assert_eq!(truncate_for_error(s, 10), "hello");
-    }
-
-    #[test]
-    fn test_truncate_for_error_exact() {
-        let s = "hello";
-        assert_eq!(truncate_for_error(s, 5), "hello");
-    }
-
-    #[test]
-    fn test_truncate_for_error_long() {
-        let s = "hello world";
-        assert_eq!(truncate_for_error(s, 5), "hello...");
-    }
-
-    #[test]
-    fn test_truncate_for_error_unicode() {
-        let s = "你好世界";
-        assert_eq!(truncate_for_error(s, 2), "你好...");
     }
 
     // Compile-time assertion that MAX_SCRATCHPAD_CHARS is within reasonable bounds
