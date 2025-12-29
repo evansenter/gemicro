@@ -68,7 +68,8 @@ pub use mock_llm::MockLlmClient;
 // Re-export rust-genai types for convenience
 pub use rust_genai::{InteractionResponse, UsageMetadata};
 pub use tool::{
-    tools_to_callables, Tool, ToolCallableAdapter, ToolError, ToolRegistry, ToolResult, ToolSet,
+    tools_to_callables, AutoApprove, AutoDeny, ConfirmationHandler, GemicroToolService, Tool,
+    ToolCallableAdapter, ToolError, ToolRegistry, ToolResult, ToolSet,
 };
 pub use tracking::{DefaultTracker, ExecutionTracking, FinalResultData};
 pub use trajectory::{

@@ -219,7 +219,7 @@ impl Tool for FileEdit {
 
         let result = format!("Replaced {} occurrence(s) in: {}", occurrences, path_str);
 
-        Ok(ToolResult::new(result).with_metadata(json!({
+        Ok(ToolResult::text(result).with_metadata(json!({
             "path": path_str,
             "occurrences_replaced": occurrences,
             "old_string_len": old_string.len(),
@@ -448,7 +448,11 @@ mod tests {
 
         assert!(result.is_ok());
         let tool_result = result.unwrap();
-        assert!(tool_result.content.contains("1 occurrence"));
+        assert!(tool_result
+            .content
+            .as_str()
+            .unwrap()
+            .contains("1 occurrence"));
 
         // Verify content
         let content = std::fs::read_to_string(file.path()).unwrap();
@@ -476,7 +480,11 @@ mod tests {
 
         assert!(result.is_ok());
         let tool_result = result.unwrap();
-        assert!(tool_result.content.contains("2 occurrence"));
+        assert!(tool_result
+            .content
+            .as_str()
+            .unwrap()
+            .contains("2 occurrence"));
 
         // Verify content
         let content = std::fs::read_to_string(file.path()).unwrap();

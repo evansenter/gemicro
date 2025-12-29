@@ -148,7 +148,7 @@ impl Tool for Task {
             }
         }
 
-        final_answer.map(ToolResult::new).ok_or_else(|| {
+        final_answer.map(ToolResult::text).ok_or_else(|| {
             ToolError::ExecutionFailed(format!(
                 "Subagent '{}' completed without producing a final_result",
                 agent_name

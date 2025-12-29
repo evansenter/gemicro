@@ -212,7 +212,7 @@ impl Tool for Grep {
             output
         };
 
-        let mut tool_result = ToolResult::new(result);
+        let mut tool_result = ToolResult::text(result);
         tool_result = tool_result.with_metadata(json!({
             "pattern": pattern,
             "path": path_str,
@@ -339,7 +339,11 @@ mod tests {
 
         assert!(result.is_ok());
         let tool_result = result.unwrap();
-        assert!(tool_result.content.contains("No matches found"));
+        assert!(tool_result
+            .content
+            .as_str()
+            .unwrap()
+            .contains("No matches found"));
     }
 
     #[tokio::test]
@@ -359,9 +363,10 @@ mod tests {
 
         assert!(result.is_ok());
         let tool_result = result.unwrap();
-        assert!(tool_result.content.contains("line 1: hello"));
-        assert!(tool_result.content.contains("line 3: hello again"));
-        assert!(!tool_result.content.contains("line 2: world"));
+        let content = tool_result.content.as_str().unwrap();
+        assert!(content.contains("line 1: hello"));
+        assert!(content.contains("line 3: hello again"));
+        assert!(!content.contains("line 2: world"));
 
         let metadata = tool_result.metadata;
         assert_eq!(metadata["match_count"], 2);

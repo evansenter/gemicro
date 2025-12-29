@@ -37,7 +37,7 @@
 //!     }
 //!     async fn execute(&self, input: Value) -> Result<ToolResult, ToolError> {
 //!         let input_str = input["input"].as_str().unwrap_or("");
-//!         Ok(ToolResult::new(format!("Processed: {}", input_str)))
+//!         Ok(ToolResult::text(format!("Processed: {}", input_str)))
 //!     }
 //! }
 //!
@@ -49,9 +49,11 @@
 
 mod adapter;
 mod registry;
+mod service;
 
 pub use adapter::{tools_to_callables, ToolCallableAdapter};
 pub use registry::ToolRegistry;
+pub use service::GemicroToolService;
 
 use async_trait::async_trait;
 use rust_genai::{FunctionDeclaration, FunctionParameters};
@@ -59,26 +61,177 @@ use serde_json::Value;
 use std::fmt;
 use thiserror::Error;
 
+// ============================================================================
+// Confirmation Handler
+// ============================================================================
+
+/// Handler for tool confirmation prompts.
+///
+/// Tools that perform potentially dangerous operations (file writes, shell commands,
+/// etc.) can require confirmation before execution. This trait defines how that
+/// confirmation is obtained.
+///
+/// # Implementations
+///
+/// - [`AutoApprove`]: Always approves - for testing and trusted contexts
+/// - [`AutoDeny`]: Always denies - safe default when no handler configured
+///
+/// # Example
+///
+/// ```
+/// use gemicro_core::tool::{ConfirmationHandler, AutoApprove, AutoDeny};
+/// use async_trait::async_trait;
+/// use serde_json::Value;
+///
+/// // For testing or trusted automation
+/// let _handler = AutoApprove;
+///
+/// // Or create a custom handler
+/// #[derive(Debug)]
+/// struct LoggingHandler;
+///
+/// #[async_trait]
+/// impl ConfirmationHandler for LoggingHandler {
+///     async fn confirm(&self, tool_name: &str, message: &str, _args: &Value) -> bool {
+///         println!("[{}] {}", tool_name, message);
+///         true // or implement actual confirmation logic
+///     }
+/// }
+/// ```
+#[async_trait]
+pub trait ConfirmationHandler: Send + Sync + fmt::Debug {
+    /// Called when a tool requires confirmation before execution.
+    ///
+    /// # Arguments
+    ///
+    /// * `tool_name` - The name of the tool requesting confirmation
+    /// * `message` - A human-readable description of what the tool will do
+    /// * `args` - The arguments that will be passed to the tool
+    ///
+    /// # Returns
+    ///
+    /// * `true` to approve execution
+    /// * `false` to deny (tool will return [`ToolError::ConfirmationDenied`])
+    async fn confirm(&self, tool_name: &str, message: &str, args: &Value) -> bool;
+}
+
+/// Auto-approve all confirmations.
+///
+/// Use in testing or trusted automation contexts where manual confirmation
+/// is not needed or desired.
+///
+/// # Example
+///
+/// ```
+/// use gemicro_core::tool::AutoApprove;
+///
+/// let handler = AutoApprove;
+/// // All tool confirmations will be approved automatically
+/// ```
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AutoApprove;
+
+#[async_trait]
+impl ConfirmationHandler for AutoApprove {
+    async fn confirm(&self, _tool_name: &str, _message: &str, _args: &Value) -> bool {
+        true
+    }
+}
+
+/// Auto-deny all confirmations.
+///
+/// Safe default for when no confirmation handler is configured.
+/// Prevents any tool requiring confirmation from executing.
+///
+/// # Example
+///
+/// ```
+/// use gemicro_core::tool::AutoDeny;
+///
+/// let handler = AutoDeny;
+/// // All tool confirmations will be denied automatically
+/// ```
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AutoDeny;
+
+#[async_trait]
+impl ConfirmationHandler for AutoDeny {
+    async fn confirm(&self, _tool_name: &str, _message: &str, _args: &Value) -> bool {
+        false
+    }
+}
+
+// ============================================================================
+// Tool Result
+// ============================================================================
+
 /// Result returned by a tool execution.
+///
+/// The `content` field is sent to the LLM as the tool's response.
+/// The `metadata` field is for observability/logging and is NOT sent to the LLM.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct ToolResult {
-    /// The main content/output from the tool.
-    pub content: String,
-    /// Optional structured metadata for observability/logging.
+    /// The main content/output from the tool (sent to LLM).
+    pub content: Value,
+    /// Optional structured metadata for observability/logging (NOT sent to LLM).
     pub metadata: Value,
 }
 
 impl ToolResult {
-    /// Create a result with just content.
-    pub fn new(content: impl Into<String>) -> Self {
+    /// Create a result with string content.
+    ///
+    /// Use this for simple text responses. The string is wrapped as `Value::String`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use gemicro_core::tool::ToolResult;
+    ///
+    /// let result = ToolResult::text("Hello, world!");
+    /// ```
+    pub fn text(content: impl Into<String>) -> Self {
         Self {
-            content: content.into(),
+            content: Value::String(content.into()),
+            metadata: Value::Null,
+        }
+    }
+
+    /// Create a result with structured JSON content.
+    ///
+    /// Use this when the tool output is structured data that the LLM should interpret.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use gemicro_core::tool::ToolResult;
+    /// use serde_json::json;
+    ///
+    /// let result = ToolResult::json(json!({
+    ///     "result": 42,
+    ///     "expression": "6 * 7"
+    /// }));
+    /// ```
+    pub fn json(content: Value) -> Self {
+        Self {
+            content,
             metadata: Value::Null,
         }
     }
 
     /// Builder method to add metadata to an existing result.
+    ///
+    /// Metadata is for observability and logging, NOT sent to the LLM.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use gemicro_core::tool::ToolResult;
+    /// use serde_json::json;
+    ///
+    /// let result = ToolResult::text("42")
+    ///     .with_metadata(json!({"execution_time_ms": 5}));
+    /// ```
     pub fn with_metadata(mut self, metadata: Value) -> Self {
         self.metadata = metadata;
         self
@@ -283,16 +436,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_tool_result_new() {
-        let result = ToolResult::new("hello");
-        assert_eq!(result.content, "hello");
+    fn test_tool_result_text() {
+        let result = ToolResult::text("hello");
+        assert_eq!(result.content, Value::String("hello".into()));
+        assert_eq!(result.metadata, Value::Null);
+    }
+
+    #[test]
+    fn test_tool_result_json() {
+        let result = ToolResult::json(serde_json::json!({"answer": 42}));
+        assert_eq!(result.content["answer"], 42);
         assert_eq!(result.metadata, Value::Null);
     }
 
     #[test]
     fn test_tool_result_with_metadata() {
-        let result = ToolResult::new("hello").with_metadata(serde_json::json!({"key": "value"}));
-        assert_eq!(result.content, "hello");
+        let result = ToolResult::text("hello").with_metadata(serde_json::json!({"key": "value"}));
+        assert_eq!(result.content, Value::String("hello".into()));
         assert_eq!(result.metadata["key"], "value");
     }
 
@@ -347,5 +507,43 @@ mod tests {
     fn test_toolset_default() {
         let set = ToolSet::default();
         assert_eq!(set, ToolSet::All);
+    }
+
+    #[tokio::test]
+    async fn test_auto_approve_confirms() {
+        let handler = AutoApprove;
+        let result = handler
+            .confirm(
+                "bash",
+                "Execute: ls -la",
+                &serde_json::json!({"command": "ls"}),
+            )
+            .await;
+        assert!(result);
+    }
+
+    #[tokio::test]
+    async fn test_auto_deny_denies() {
+        let handler = AutoDeny;
+        let result = handler
+            .confirm(
+                "bash",
+                "Execute: rm -rf /",
+                &serde_json::json!({"command": "rm"}),
+            )
+            .await;
+        assert!(!result);
+    }
+
+    #[test]
+    fn test_auto_approve_debug() {
+        let handler = AutoApprove;
+        assert!(format!("{:?}", handler).contains("AutoApprove"));
+    }
+
+    #[test]
+    fn test_auto_deny_debug() {
+        let handler = AutoDeny;
+        assert!(format!("{:?}", handler).contains("AutoDeny"));
     }
 }

@@ -64,9 +64,12 @@ impl Tool for CurrentDatetime {
             )));
         }
 
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default();
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e| {
+            ToolError::ExecutionFailed(format!(
+                "System clock is set before Unix epoch (1970-01-01): {}",
+                e
+            ))
+        })?;
 
         // Calculate time components
         let total_secs = now.as_secs();
@@ -80,12 +83,12 @@ impl Tool for CurrentDatetime {
         // Calculate date from days since epoch
         let (year, month, day) = days_to_ymd(days_since_epoch);
 
-        let result = format!(
-            r#"{{"timezone": "UTC", "date": "{:04}-{:02}-{:02}", "time": "{:02}:{:02}:{:02}"}}"#,
-            year, month, day, hours, minutes, seconds
-        );
-
-        Ok(ToolResult::new(result))
+        // Return structured JSON directly - the LLM receives this as-is
+        Ok(ToolResult::json(json!({
+            "timezone": "UTC",
+            "date": format!("{:04}-{:02}-{:02}", year, month, day),
+            "time": format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
+        })))
     }
 }
 
@@ -139,12 +142,10 @@ mod tests {
         let tool = CurrentDatetime;
         let result = tool.execute(json!({"timezone": "UTC"})).await.unwrap();
 
-        // Verify it's valid JSON
-        let json: serde_json::Value =
-            serde_json::from_str(&result.content).expect("Should be valid JSON");
-        assert_eq!(json["timezone"], "UTC");
-        assert!(json["date"].is_string());
-        assert!(json["time"].is_string());
+        // content is now structured JSON directly (not a string containing JSON)
+        assert_eq!(result.content["timezone"], "UTC");
+        assert!(result.content["date"].is_string());
+        assert!(result.content["time"].is_string());
     }
 
     #[tokio::test]

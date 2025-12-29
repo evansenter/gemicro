@@ -22,7 +22,7 @@ const MAX_EXPRESSION_LENGTH: usize = 1000;
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// let calc = Calculator;
 /// let result = calc.execute(json!({"expression": "2 + 2"})).await?;
-/// assert_eq!(result.content, "4");
+/// // result.content is now Value::String("4")
 /// # Ok(())
 /// # }
 /// ```
@@ -70,16 +70,23 @@ impl Tool for Calculator {
 
         match meval::eval_str(expression) {
             Ok(result) => {
-                let formatted = if result.is_nan() {
-                    "Error: Result is not a number (NaN)".to_string()
-                } else if result.is_infinite() {
-                    "Error: Result is infinite (division by zero or overflow)".to_string()
-                } else if result.fract() == 0.0 && result.abs() < 1e15 {
+                if result.is_nan() {
+                    return Err(ToolError::ExecutionFailed(
+                        "Result is not a number (NaN)".into(),
+                    ));
+                }
+                if result.is_infinite() {
+                    return Err(ToolError::ExecutionFailed(
+                        "Result is infinite (division by zero or overflow)".into(),
+                    ));
+                }
+
+                let formatted = if result.fract() == 0.0 && result.abs() < 1e15 {
                     format!("{:.0}", result)
                 } else {
                     format!("{}", result)
                 };
-                Ok(ToolResult::new(formatted))
+                Ok(ToolResult::text(formatted))
             }
             Err(e) => Err(ToolError::ExecutionFailed(format!(
                 "Failed to evaluate expression: {}",
@@ -97,14 +104,14 @@ mod tests {
     async fn test_calculator_basic_arithmetic() {
         let calc = Calculator;
         let result = calc.execute(json!({"expression": "2 + 2"})).await.unwrap();
-        assert_eq!(result.content, "4");
+        assert_eq!(result.content.as_str().unwrap(), "4");
     }
 
     #[tokio::test]
     async fn test_calculator_division() {
         let calc = Calculator;
         let result = calc.execute(json!({"expression": "10 / 4"})).await.unwrap();
-        assert_eq!(result.content, "2.5");
+        assert_eq!(result.content.as_str().unwrap(), "2.5");
     }
 
     #[tokio::test]
@@ -114,7 +121,7 @@ mod tests {
             .execute(json!({"expression": "sqrt(16)"}))
             .await
             .unwrap();
-        assert_eq!(result.content, "4");
+        assert_eq!(result.content.as_str().unwrap(), "4");
     }
 
     #[tokio::test]
@@ -140,6 +147,26 @@ mod tests {
         let result = calc.execute(json!({"expression": long_expr})).await;
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), ToolError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_calculator_division_by_zero_returns_error() {
+        let calc = Calculator;
+        let result = calc.execute(json!({"expression": "1/0"})).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, ToolError::ExecutionFailed(_)));
+        assert!(err.to_string().contains("infinite"));
+    }
+
+    #[tokio::test]
+    async fn test_calculator_sqrt_negative_returns_error() {
+        let calc = Calculator;
+        let result = calc.execute(json!({"expression": "sqrt(-1)"})).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, ToolError::ExecutionFailed(_)));
+        assert!(err.to_string().contains("NaN"));
     }
 
     #[test]

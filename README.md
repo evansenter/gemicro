@@ -8,12 +8,14 @@ Gemicro allows you to explore and interact with different AI agent patterns thro
 
 - 🔬 **Deep Research Agent**: Query decomposition with parallel sub-query execution and synthesis
 - 🔄 **ReAct Agent**: Reasoning and Acting loops with Thought → Action → Observation cycles
+- 🛠️ **Tool Agent**: Native function calling with built-in tools (calculator, datetime, file operations)
 - 🎯 **Simple QA Agent**: Minimal reference implementation for agent authoring
 - 📊 **Real-time Observability**: Streaming updates show agent execution as it happens
 - 🏗️ **Extensible Architecture**: Soft-typed events allow adding new agent types without protocol changes
 - 📱 **Platform-Agnostic Core**: Library designed for future mobile and web support
 - ⚡ **Parallel Execution**: Sub-queries fan out for faster results
 - 🌐 **Google Search Grounding**: Enable real-time web search for current events and live data
+- 🔐 **Tool Confirmation**: Interactive approval for dangerous operations (bash, file writes)
 - 📈 **Evaluation Framework**: HotpotQA datasets, scorers (Contains, LLM Judge), and evaluation harness
 
 ## Architecture

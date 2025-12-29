@@ -171,7 +171,7 @@ mod tests {
         }
 
         async fn execute(&self, _input: Value) -> Result<ToolResult, ToolError> {
-            Ok(ToolResult::new("mock result"))
+            Ok(ToolResult::text("mock result"))
         }
     }
 

@@ -46,7 +46,7 @@
 
 use crate::error::AgentError;
 use crate::llm::LlmClient;
-use crate::tool::{Tool, ToolRegistry};
+use crate::tool::{ConfirmationHandler, Tool, ToolRegistry};
 use crate::tracking::ExecutionTracking;
 use crate::update::AgentUpdate;
 
@@ -156,6 +156,15 @@ pub struct AgentContext {
     /// tools should check for this and either use a default registry
     /// or fail gracefully if tools are required but not provided.
     pub tools: Option<Arc<ToolRegistry>>,
+
+    /// Optional confirmation handler for tools that require user approval.
+    ///
+    /// When set, tools that return `true` from [`Tool::requires_confirmation`]
+    /// will call this handler before execution. If the handler returns `false`,
+    /// the tool invocation is denied.
+    ///
+    /// If not set, tools requiring confirmation will be denied by default.
+    pub confirmation_handler: Option<Arc<dyn ConfirmationHandler>>,
 }
 
 impl AgentContext {
@@ -169,6 +178,7 @@ impl AgentContext {
             llm: Arc::new(llm),
             cancellation_token: CancellationToken::new(),
             tools: None,
+            confirmation_handler: None,
         }
     }
 
@@ -180,6 +190,7 @@ impl AgentContext {
             llm: Arc::new(llm),
             cancellation_token,
             tools: None,
+            confirmation_handler: None,
         }
     }
 
@@ -191,6 +202,7 @@ impl AgentContext {
             llm,
             cancellation_token: CancellationToken::new(),
             tools: None,
+            confirmation_handler: None,
         }
     }
 
@@ -207,6 +219,15 @@ impl AgentContext {
     /// Useful when sharing a registry across multiple contexts.
     pub fn with_tools_arc(mut self, tools: Arc<ToolRegistry>) -> Self {
         self.tools = Some(tools);
+        self
+    }
+
+    /// Add a confirmation handler for tools that require user approval.
+    ///
+    /// Tools that return `true` from [`Tool::requires_confirmation`] will
+    /// call this handler before execution.
+    pub fn with_confirmation_handler(mut self, handler: Arc<dyn ConfirmationHandler>) -> Self {
+        self.confirmation_handler = Some(handler);
         self
     }
 

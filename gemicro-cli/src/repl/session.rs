@@ -3,14 +3,15 @@
 //! Handles the interactive session loop, command processing, and agent execution.
 
 use super::commands::Command;
+use crate::confirmation::InteractiveConfirmation;
 use crate::display::{IndicatifRenderer, Renderer};
 use crate::error::ErrorFormatter;
 use crate::format::truncate;
 use anyhow::{Context, Result};
 use futures_util::StreamExt;
 use gemicro_core::{
-    enforce_final_result_contract, AgentContext, AgentError, AgentUpdate, ConversationHistory,
-    HistoryEntry, LlmClient,
+    enforce_final_result_contract, AgentContext, AgentError, AgentUpdate, ConfirmationHandler,
+    ConversationHistory, HistoryEntry, LlmClient,
 };
 use gemicro_runner::AgentRegistry;
 use rustyline::error::ReadlineError;
@@ -60,6 +61,9 @@ pub struct Session {
 
     /// Cumulative tokens used in this session
     session_tokens: u64,
+
+    /// Confirmation handler for tools that require user approval
+    confirmation_handler: Arc<dyn ConfirmationHandler>,
 }
 
 impl Session {
@@ -82,6 +86,7 @@ impl Session {
             binary_mtime,
             plain,
             session_tokens: 0,
+            confirmation_handler: Arc::new(InteractiveConfirmation::default()),
         }
     }
 
@@ -142,6 +147,7 @@ impl Session {
             llm: self.llm.clone(),
             cancellation_token,
             tools: None,
+            confirmation_handler: Some(Arc::clone(&self.confirmation_handler)),
         }
     }
 

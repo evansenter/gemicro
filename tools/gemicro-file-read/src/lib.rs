@@ -107,7 +107,7 @@ impl Tool for FileRead {
             }
         })?;
 
-        Ok(ToolResult::new(content))
+        Ok(ToolResult::text(content))
     }
 }
 
@@ -125,7 +125,7 @@ mod tests {
 
         let tool = FileRead;
         let result = tool.execute(json!({"path": path})).await.unwrap();
-        assert!(result.content.contains("Hello, World!"));
+        assert!(result.content.as_str().unwrap().contains("Hello, World!"));
     }
 
     #[tokio::test]

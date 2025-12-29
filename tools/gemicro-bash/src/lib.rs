@@ -246,7 +246,7 @@ impl Tool for Bash {
             "timeout_secs": timeout_secs,
         });
 
-        Ok(ToolResult::new(content).with_metadata(metadata))
+        Ok(ToolResult::text(content).with_metadata(metadata))
     }
 }
 
@@ -340,7 +340,7 @@ mod tests {
 
         assert!(result.is_ok());
         let tool_result = result.unwrap();
-        assert!(tool_result.content.contains("hello"));
+        assert!(tool_result.content.as_str().unwrap().contains("hello"));
 
         let metadata = tool_result.metadata;
         assert_eq!(metadata["exit_code"], 0);
@@ -354,8 +354,9 @@ mod tests {
 
         assert!(result.is_ok());
         let tool_result = result.unwrap();
-        assert!(tool_result.content.contains("[stderr]"));
-        assert!(tool_result.content.contains("error"));
+        let content = tool_result.content.as_str().unwrap();
+        assert!(content.contains("[stderr]"));
+        assert!(content.contains("error"));
     }
 
     #[tokio::test]
@@ -411,10 +412,9 @@ mod tests {
 
         assert!(result.is_ok());
         let tool_result = result.unwrap();
+        let content = tool_result.content.as_str().unwrap();
         // The output should contain /tmp (or a symlink to it on macOS)
-        assert!(
-            tool_result.content.contains("tmp") || tool_result.content.contains("/private/tmp")
-        );
+        assert!(content.contains("tmp") || content.contains("/private/tmp"));
     }
 
     #[tokio::test]
