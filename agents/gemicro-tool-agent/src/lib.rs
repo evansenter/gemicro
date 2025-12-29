@@ -27,6 +27,8 @@
 //! # }
 //! ```
 
+pub mod tools;
+
 use gemicro_core::{
     remaining_time, timeout_error, with_timeout_and_cancellation, Agent, AgentContext, AgentError,
     AgentStream, AgentUpdate, ResultMetadata, MODEL,
