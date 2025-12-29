@@ -1,0 +1,16 @@
+[package]
+name = "gemicro-glob"
+version = "0.1.0"
+edition = "2021"
+description = "Glob tool for finding files by pattern"
+
+[dependencies]
+gemicro-core = { path = "../../gemicro-core" }
+async-trait.workspace = true
+serde_json.workspace = true
+glob.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util", "macros"] }

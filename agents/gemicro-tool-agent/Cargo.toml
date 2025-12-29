@@ -11,6 +11,11 @@ gemicro-file-read = { path = "../../tools/gemicro-file-read" }
 gemicro-web-fetch = { path = "../../tools/gemicro-web-fetch" }
 gemicro-task = { path = "../../tools/gemicro-task" }
 gemicro-web-search = { path = "../../tools/gemicro-web-search" }
+gemicro-glob = { path = "../../tools/gemicro-glob" }
+gemicro-grep = { path = "../../tools/gemicro-grep" }
+gemicro-file-write = { path = "../../tools/gemicro-file-write" }
+gemicro-file-edit = { path = "../../tools/gemicro-file-edit" }
+gemicro-bash = { path = "../../tools/gemicro-bash" }
 rust-genai = { workspace = true }
 rust-genai-macros = { workspace = true }
 async-trait = { workspace = true }

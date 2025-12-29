@@ -13,6 +13,11 @@ members = [
     "tools/gemicro-web-fetch",
     "tools/gemicro-task",
     "tools/gemicro-web-search",
+    "tools/gemicro-glob",
+    "tools/gemicro-grep",
+    "tools/gemicro-file-write",
+    "tools/gemicro-file-edit",
+    "tools/gemicro-bash",
 ]
 resolver = "2"
 
@@ -36,5 +41,7 @@ rstest = "0.26"
 tempfile = "3.24"
 uuid = { version = "1.11", features = ["v4"] }
 reqwest = { version = "0.12", features = ["json"] }
+glob = "0.3"
+regex = "1.11"
 
 # Workspace-level metadata

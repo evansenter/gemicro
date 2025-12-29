@@ -437,12 +437,14 @@ mod tests {
         let adapters = tools_to_callables(&tools);
         let declarations: Vec<_> = adapters.iter().map(|a| a.declaration()).collect();
 
-        assert_eq!(declarations.len(), 4);
+        assert_eq!(declarations.len(), 6);
         let names: Vec<&str> = declarations.iter().map(|d| d.name()).collect();
         assert!(names.contains(&"calculator"));
         assert!(names.contains(&"current_datetime"));
         assert!(names.contains(&"file_read"));
         assert!(names.contains(&"web_fetch"));
+        assert!(names.contains(&"glob"));
+        assert!(names.contains(&"grep"));
     }
 
     #[test]
@@ -486,6 +488,8 @@ mod tests {
         assert!(registry.contains("current_datetime"));
         assert!(registry.contains("file_read"));
         assert!(registry.contains("web_fetch"));
-        assert_eq!(registry.len(), 4);
+        assert!(registry.contains("glob"));
+        assert!(registry.contains("grep"));
+        assert_eq!(registry.len(), 6);
     }
 }
