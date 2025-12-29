@@ -1,6 +1,7 @@
 //! WebFetch tool for fetching URL content.
 
 use async_trait::async_trait;
+use futures_util::StreamExt;
 use gemicro_core::tool::{Tool, ToolError, ToolResult};
 use reqwest::Client;
 use serde_json::{json, Value};
@@ -137,7 +138,7 @@ impl Tool for WebFetch {
             )));
         }
 
-        // Check content length if available
+        // Check content length if available (early rejection for known-large responses)
         if let Some(content_length) = response.content_length() {
             if content_length > MAX_RESPONSE_SIZE as u64 {
                 return Err(ToolError::InvalidInput(format!(
@@ -147,21 +148,30 @@ impl Tool for WebFetch {
             }
         }
 
-        // Read the response body with size limit
-        let bytes = response.bytes().await.map_err(|e| {
-            ToolError::ExecutionFailed(format!("Failed to read response body: {}", e))
-        })?;
+        // Stream the response body with incremental size checking to avoid
+        // loading potentially huge responses into memory before checking size
+        let mut bytes = Vec::new();
+        let mut stream = response.bytes_stream();
 
-        if bytes.len() > MAX_RESPONSE_SIZE {
-            return Err(ToolError::InvalidInput(format!(
-                "Response too large ({} bytes, max {} bytes)",
-                bytes.len(),
-                MAX_RESPONSE_SIZE
-            )));
+        while let Some(chunk_result) = stream.next().await {
+            let chunk = chunk_result.map_err(|e| {
+                ToolError::ExecutionFailed(format!("Failed to read response chunk: {}", e))
+            })?;
+
+            // Check size before extending to fail fast
+            if bytes.len() + chunk.len() > MAX_RESPONSE_SIZE {
+                return Err(ToolError::InvalidInput(format!(
+                    "Response too large (>{} bytes, max {} bytes)",
+                    bytes.len() + chunk.len(),
+                    MAX_RESPONSE_SIZE
+                )));
+            }
+
+            bytes.extend_from_slice(&chunk);
         }
 
         // Convert to string, logging a warning if lossy conversion occurs
-        let content = match String::from_utf8(bytes.to_vec()) {
+        let content = match String::from_utf8(bytes) {
             Ok(s) => s,
             Err(e) => {
                 log::warn!(

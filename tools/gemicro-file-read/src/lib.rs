@@ -70,23 +70,22 @@ impl Tool for FileRead {
             )));
         }
 
-        // Check if file exists
-        if !path.exists() {
-            return Err(ToolError::NotFound(format!("File not found: {}", path_str)));
-        }
+        // Use async metadata to atomically check existence, type, and size (avoids TOCTOU)
+        let metadata = tokio::fs::metadata(path).await.map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                ToolError::NotFound(format!("File not found: {}", path_str))
+            } else {
+                ToolError::ExecutionFailed(format!("Failed to get file metadata: {}", e))
+            }
+        })?;
 
         // Check if it's a file (not a directory)
-        if !path.is_file() {
+        if !metadata.is_file() {
             return Err(ToolError::InvalidInput(format!(
                 "Path is not a file: {}",
                 path_str
             )));
         }
-
-        // Check file size before reading
-        let metadata = tokio::fs::metadata(path).await.map_err(|e| {
-            ToolError::ExecutionFailed(format!("Failed to get file metadata: {}", e))
-        })?;
 
         if metadata.len() > MAX_FILE_SIZE {
             return Err(ToolError::InvalidInput(format!(
