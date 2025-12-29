@@ -1,0 +1,17 @@
+[package]
+name = "gemicro-grep"
+version = "0.1.0"
+edition = "2021"
+description = "Grep tool for searching file contents"
+
+[dependencies]
+gemicro-core = { path = "../../gemicro-core" }
+async-trait.workspace = true
+serde_json.workspace = true
+regex.workspace = true
+tokio = { workspace = true, features = ["fs"] }
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util", "macros", "fs"] }

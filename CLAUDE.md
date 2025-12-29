@@ -116,6 +116,11 @@ Each crate has a specific purpose. Before adding code, verify it belongs in that
 | **tools/gemicro-web-fetch** | WebFetch tool implementation | Other tools |
 | **tools/gemicro-task** | Task tool implementation | Other tools |
 | **tools/gemicro-web-search** | WebSearch tool implementation | Other tools |
+| **tools/gemicro-glob** | Glob tool (find files by pattern) | Other tools |
+| **tools/gemicro-grep** | Grep tool (search file contents) | Other tools |
+| **tools/gemicro-file-write** | FileWrite tool (requires confirmation) | Other tools |
+| **tools/gemicro-file-edit** | FileEdit tool (requires confirmation) | Other tools |
+| **tools/gemicro-bash** | Bash tool (requires confirmation) | Other tools |
 | **agents/gemicro-deep-research** | DeepResearchAgent, ResearchConfig, DeepResearchEventExt | Other agents, core infrastructure |
 | **agents/gemicro-react** | ReactAgent, ReactConfig | Other agents, core infrastructure |
 | **agents/gemicro-simple-qa** | SimpleQaAgent, SimpleQaConfig | Other agents, core infrastructure |
@@ -156,6 +161,11 @@ Each agent crate:
 | `WebFetch` | `gemicro_web_fetch` |
 | `Task` | `gemicro_task` |
 | `WebSearch` | `gemicro_web_search` |
+| `Glob` | `gemicro_glob` |
+| `Grep` | `gemicro_grep` |
+| `FileWrite` | `gemicro_file_write` |
+| `FileEdit` | `gemicro_file_edit` |
+| `Bash` | `gemicro_bash` |
 | `DeepResearchAgent`, `ResearchConfig` | `gemicro_deep_research` |
 | `ReactAgent`, `ReactConfig` | `gemicro_react` |
 | `LlmJudgeAgent`, `JudgeConfig` | `gemicro_judge` |
@@ -349,7 +359,17 @@ gemicro/
 │   │   └── src/lib.rs
 │   ├── gemicro-task/             # Task tool (spawns subagents)
 │   │   └── src/lib.rs
-│   └── gemicro-web-search/       # WebSearch tool (Gemini grounding)
+│   ├── gemicro-web-search/       # WebSearch tool (Gemini grounding)
+│   │   └── src/lib.rs
+│   ├── gemicro-glob/             # Glob tool (find files by pattern)
+│   │   └── src/lib.rs
+│   ├── gemicro-grep/             # Grep tool (search file contents)
+│   │   └── src/lib.rs
+│   ├── gemicro-file-write/       # FileWrite tool (requires confirmation)
+│   │   └── src/lib.rs
+│   ├── gemicro-file-edit/        # FileEdit tool (requires confirmation)
+│   │   └── src/lib.rs
+│   └── gemicro-bash/             # Bash tool (requires confirmation)
 │       └── src/lib.rs
 │
 ├── agents/                       # Agent crates (one per agent, hermetic)

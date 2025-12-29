@@ -9,11 +9,18 @@
 //! - [`Calculator`]: Evaluates mathematical expressions
 //! - [`CurrentDatetime`]: Gets the current date and time (UTC)
 //!
-//! **External tool crates (import from canonical source):**
+//! **Read-only external tools (import from canonical source):**
 //! - `gemicro_file_read::FileRead`: Read file contents (1MB size limit)
 //! - `gemicro_web_fetch::WebFetch`: Fetch content from URLs
+//! - `gemicro_glob::Glob`: Find files by glob pattern
+//! - `gemicro_grep::Grep`: Search file contents with regex
 //! - `gemicro_task::Task`: Spawn subagents (requires AgentRegistry + LlmClient)
 //! - `gemicro_web_search::WebSearch`: Web search via Gemini grounding (requires LlmClient)
+//!
+//! **Write tools (require confirmation):**
+//! - `gemicro_file_write::FileWrite`: Write content to files
+//! - `gemicro_file_edit::FileEdit`: Edit existing files
+//! - `gemicro_bash::Bash`: Execute shell commands
 //!
 //! # Example
 //!
@@ -21,9 +28,11 @@
 //! use gemicro_tool_agent::tools::{Calculator, CurrentDatetime};
 //! use gemicro_file_read::FileRead;
 //! use gemicro_web_fetch::WebFetch;
+//! use gemicro_glob::Glob;
+//! use gemicro_grep::Grep;
 //! use gemicro_core::tool::ToolRegistry;
 //!
-//! // Create registry with default tools
+//! // Create registry with default tools (read-only, no confirmation needed)
 //! let registry = gemicro_tool_agent::tools::default_registry();
 //!
 //! // Or manually register specific tools
@@ -32,6 +41,8 @@
 //! registry.register(CurrentDatetime);
 //! registry.register(FileRead);
 //! registry.register(WebFetch::new());
+//! registry.register(Glob);
+//! registry.register(Grep);
 //! ```
 
 mod calculator;
@@ -41,31 +52,44 @@ pub use calculator::Calculator;
 pub use datetime::CurrentDatetime;
 
 // Import tools from external crates (not re-exported - use canonical imports)
+use gemicro_bash::Bash;
 use gemicro_core::tool::ToolRegistry;
 use gemicro_core::LlmClient;
+use gemicro_file_edit::FileEdit;
 use gemicro_file_read::FileRead;
+use gemicro_file_write::FileWrite;
+use gemicro_glob::Glob;
+use gemicro_grep::Grep;
 use gemicro_runner::AgentRegistry;
 use gemicro_task::Task;
 use gemicro_web_fetch::WebFetch;
 use gemicro_web_search::WebSearch;
 use std::sync::Arc;
 
-/// Create a default tool registry with stateless built-in tools.
+/// Create a default tool registry with read-only tools.
 ///
-/// This includes tools that don't require external resources:
+/// This includes tools that don't require external resources and
+/// don't need user confirmation:
 /// - Calculator
 /// - CurrentDatetime
 /// - FileRead
 /// - WebFetch
+/// - Glob
+/// - Grep
 ///
 /// For tools that require external resources (Task, WebSearch),
 /// use [`register_task_tool`] and [`register_web_search_tool`].
+///
+/// For write tools that require confirmation (FileWrite, FileEdit, Bash),
+/// use [`register_write_tools`].
 pub fn default_registry() -> ToolRegistry {
     let mut registry = ToolRegistry::new();
     registry.register(Calculator);
     registry.register(CurrentDatetime);
     registry.register(FileRead);
     registry.register(WebFetch::new());
+    registry.register(Glob);
+    registry.register(Grep);
     registry
 }
 
@@ -119,10 +143,41 @@ pub fn register_web_search_tool(registry: &mut ToolRegistry, llm: Arc<LlmClient>
     registry.register(WebSearch::new(llm));
 }
 
+/// Register write tools in a registry.
+///
+/// These tools require user confirmation before execution:
+/// - FileWrite: Write content to files
+/// - FileEdit: Edit existing files
+/// - Bash: Execute shell commands
+///
+/// **Important:** Tools registered with this function will have
+/// `requires_confirmation()` return `true`. The agent or CLI must
+/// implement confirmation handling before executing these tools.
+///
+/// # Example
+///
+/// ```no_run
+/// use gemicro_tool_agent::tools::{default_registry, register_write_tools};
+///
+/// let mut registry = default_registry();
+/// register_write_tools(&mut registry);
+/// // Now registry contains FileWrite, FileEdit, and Bash tools
+/// ```
+pub fn register_write_tools(registry: &mut ToolRegistry) {
+    registry.register(FileWrite);
+    registry.register(FileEdit);
+    registry.register(Bash);
+}
+
 /// Create a fully-featured tool registry with all tools.
 ///
 /// This is a convenience function that creates a registry with all
-/// available tools, including those that require external resources.
+/// available tools, including those that require external resources
+/// and write tools that require confirmation.
+///
+/// **Note:** This includes write tools (FileWrite, FileEdit, Bash) which
+/// have `requires_confirmation()` return `true`. The agent must implement
+/// confirmation handling before executing these tools.
 ///
 /// # Example
 ///
@@ -137,12 +192,13 @@ pub fn register_web_search_tool(registry: &mut ToolRegistry, llm: Arc<LlmClient>
 /// let llm = Arc::new(LlmClient::new(genai_client, LlmConfig::default()));
 ///
 /// let registry = full_registry(agent_registry, llm);
-/// assert_eq!(registry.len(), 6); // All 6 tools
+/// assert_eq!(registry.len(), 11); // All 11 tools
 /// ```
 pub fn full_registry(agent_registry: Arc<AgentRegistry>, llm: Arc<LlmClient>) -> ToolRegistry {
     let mut registry = default_registry();
     register_task_tool(&mut registry, agent_registry, Arc::clone(&llm));
     register_web_search_tool(&mut registry, llm);
+    register_write_tools(&mut registry);
     registry
 }
 
@@ -155,11 +211,13 @@ mod tests {
     #[test]
     fn test_default_registry() {
         let registry = default_registry();
-        assert_eq!(registry.len(), 4);
+        assert_eq!(registry.len(), 6);
         assert!(registry.contains("calculator"));
         assert!(registry.contains("current_datetime"));
         assert!(registry.contains("file_read"));
         assert!(registry.contains("web_fetch"));
+        assert!(registry.contains("glob"));
+        assert!(registry.contains("grep"));
     }
 
     #[test]
@@ -168,7 +226,7 @@ mod tests {
 
         // All tools
         let all = registry.filter(&ToolSet::All);
-        assert_eq!(all.len(), 4);
+        assert_eq!(all.len(), 6);
 
         // Specific tool
         let specific = registry.filter(&ToolSet::Specific(vec!["calculator".into()]));
@@ -177,7 +235,7 @@ mod tests {
 
         // Except tool
         let except = registry.filter(&ToolSet::Except(vec!["calculator".into()]));
-        assert_eq!(except.len(), 3);
+        assert_eq!(except.len(), 5);
     }
 
     #[test]
@@ -206,6 +264,17 @@ mod tests {
     }
 
     #[test]
+    fn test_register_write_tools() {
+        let mut registry = ToolRegistry::new();
+        register_write_tools(&mut registry);
+
+        assert_eq!(registry.len(), 3);
+        assert!(registry.contains("file_write"));
+        assert!(registry.contains("file_edit"));
+        assert!(registry.contains("bash"));
+    }
+
+    #[test]
     fn test_full_registry() {
         let agent_registry = Arc::new(AgentRegistry::new());
         let genai_client = rust_genai::Client::builder("test-key".to_string()).build();
@@ -213,12 +282,20 @@ mod tests {
 
         let registry = full_registry(agent_registry, llm);
 
-        assert_eq!(registry.len(), 6);
+        assert_eq!(registry.len(), 11);
+        // Default tools
         assert!(registry.contains("calculator"));
         assert!(registry.contains("current_datetime"));
         assert!(registry.contains("file_read"));
         assert!(registry.contains("web_fetch"));
+        assert!(registry.contains("glob"));
+        assert!(registry.contains("grep"));
+        // External resource tools
         assert!(registry.contains("task"));
         assert!(registry.contains("web_search"));
+        // Write tools
+        assert!(registry.contains("file_write"));
+        assert!(registry.contains("file_edit"));
+        assert!(registry.contains("bash"));
     }
 }

@@ -78,12 +78,10 @@ impl ToolResult {
         }
     }
 
-    /// Create a result with content and metadata.
-    pub fn with_metadata(content: impl Into<String>, metadata: Value) -> Self {
-        Self {
-            content: content.into(),
-            metadata,
-        }
+    /// Builder method to add metadata to an existing result.
+    pub fn with_metadata(mut self, metadata: Value) -> Self {
+        self.metadata = metadata;
+        self
     }
 }
 
@@ -106,6 +104,10 @@ pub enum ToolError {
     /// Tool execution timed out.
     #[error("Timeout after {0}ms")]
     Timeout(u64),
+
+    /// User denied confirmation for the operation.
+    #[error("Confirmation denied: {0}")]
+    ConfirmationDenied(String),
 
     /// Other error.
     #[error("{0}")]
@@ -160,6 +162,36 @@ pub trait Tool: Send + Sync + fmt::Debug {
     /// The input is a JSON value matching the schema from [`parameters_schema`](Tool::parameters_schema).
     /// Returns a [`ToolResult`] on success or a [`ToolError`] on failure.
     async fn execute(&self, input: Value) -> Result<ToolResult, ToolError>;
+
+    /// Whether this tool requires user confirmation before execution.
+    ///
+    /// Override to return `true` for tools that perform potentially dangerous
+    /// operations like writing files, executing shell commands, or making
+    /// external API calls with side effects.
+    ///
+    /// The input is provided to allow conditional confirmation based on
+    /// the specific operation (e.g., bash tool might require confirmation
+    /// for some commands but not others).
+    ///
+    /// Default implementation returns `false` (no confirmation required).
+    fn requires_confirmation(&self, _input: &Value) -> bool {
+        false
+    }
+
+    /// Description of the operation for confirmation prompts.
+    ///
+    /// When [`requires_confirmation`](Tool::requires_confirmation) returns `true`,
+    /// this method should return a human-readable description of what the tool
+    /// is about to do, suitable for showing to users in a confirmation dialog.
+    ///
+    /// Default implementation returns a generic message using the tool name.
+    fn confirmation_message(&self, input: &Value) -> String {
+        format!(
+            "Tool '{}' wants to execute with input: {}",
+            self.name(),
+            serde_json::to_string_pretty(input).unwrap_or_else(|_| input.to_string())
+        )
+    }
 
     /// Generate a rust-genai FunctionDeclaration for this tool.
     ///
@@ -259,7 +291,7 @@ mod tests {
 
     #[test]
     fn test_tool_result_with_metadata() {
-        let result = ToolResult::with_metadata("hello", serde_json::json!({"key": "value"}));
+        let result = ToolResult::new("hello").with_metadata(serde_json::json!({"key": "value"}));
         assert_eq!(result.content, "hello");
         assert_eq!(result.metadata["key"], "value");
     }
