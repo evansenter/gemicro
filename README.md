@@ -20,11 +20,12 @@ Gemicro allows you to explore and interact with different AI agent patterns thro
 
 ## Architecture
 
-### Nine-Crate Workspace
+### 18-Crate Workspace
 
 ```
-gemicro-core (Agent trait, events, LLM - GENERIC ONLY)
+gemicro-core (Agent trait, Tool trait, events, LLM - GENERIC ONLY)
     ↓
+tools/* (one crate per tool - file_read, web_fetch, bash, etc.)
 agents/* (one crate per agent - hermetic isolation)
     ↓
 gemicro-runner (execution state, metrics, runner)
