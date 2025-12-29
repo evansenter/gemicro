@@ -55,6 +55,7 @@ pub const EVENT_JUDGE_RESULT: &str = "judge_result";
 
 /// Configuration for the LLM Judge agent
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct JudgeConfig {
     /// System instruction for the judge
     pub system_instruction: String,

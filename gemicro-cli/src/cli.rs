@@ -130,26 +130,23 @@ impl Args {
 
     /// Build LlmConfig from CLI arguments.
     pub fn llm_config(&self) -> LlmConfig {
-        LlmConfig {
-            timeout: Duration::from_secs(self.llm_timeout),
-            max_tokens: self.max_tokens,
-            temperature: self.temperature,
-            max_retries: 2,
-            retry_base_delay_ms: 1000,
-        }
+        LlmConfig::default()
+            .with_timeout(Duration::from_secs(self.llm_timeout))
+            .with_max_tokens(self.max_tokens)
+            .with_temperature(self.temperature)
+            .with_max_retries(2)
+            .with_retry_base_delay_ms(1000)
     }
 
     /// Build ResearchConfig from CLI arguments.
     pub fn research_config(&self) -> ResearchConfig {
-        ResearchConfig {
-            min_sub_queries: self.min_sub_queries,
-            max_sub_queries: self.max_sub_queries,
-            max_concurrent_sub_queries: self.max_concurrent,
-            continue_on_partial_failure: self.continue_on_failure,
-            total_timeout: Duration::from_secs(self.timeout),
-            use_google_search: self.google_search,
-            ..Default::default()
-        }
+        ResearchConfig::default()
+            .with_min_sub_queries(self.min_sub_queries)
+            .with_max_sub_queries(self.max_sub_queries)
+            .with_max_concurrent_sub_queries(self.max_concurrent)
+            .with_continue_on_partial_failure(self.continue_on_failure)
+            .with_total_timeout(Duration::from_secs(self.timeout))
+            .with_google_search(self.google_search)
     }
 }
 

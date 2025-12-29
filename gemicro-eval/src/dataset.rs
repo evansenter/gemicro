@@ -860,29 +860,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_trajectory_dataset_load_trajectories() {
-        use gemicro_core::trajectory::{TrajectoryMetadata, SCHEMA_VERSION};
-
         // Create a temporary directory with trajectory files
         let temp_dir = tempfile::tempdir().unwrap();
 
-        // Create a sample trajectory
-        let trajectory = Trajectory {
-            id: "test-123".to_string(),
-            query: "What is 2+2?".to_string(),
-            agent_name: "test_agent".to_string(),
-            agent_config: serde_json::json!({}),
-            steps: vec![],
-            events: vec![],
-            metadata: TrajectoryMetadata {
-                created_at: std::time::SystemTime::now(),
-                total_duration_ms: 100,
-                total_tokens: 50,
-                tokens_unavailable_count: 0,
-                final_answer: Some("4".to_string()),
-                model: "test-model".to_string(),
-                schema_version: SCHEMA_VERSION.to_string(),
-            },
-        };
+        // Create a sample trajectory using builder
+        let trajectory = Trajectory::builder()
+            .query("What is 2+2?")
+            .agent_name("test_agent")
+            .agent_config(serde_json::json!({}))
+            .model("test-model")
+            .build(vec![], vec![], 100, Some("4".to_string()));
 
         // Save trajectory
         trajectory.save(temp_dir.path().join("test.json")).unwrap();
@@ -892,35 +879,22 @@ mod tests {
         let questions = dataset.load(None).await.unwrap();
 
         assert_eq!(questions.len(), 1);
-        assert_eq!(questions[0].id, "test-123");
+        // Note: ID is now UUID-based from builder, so we check query/answer instead
         assert_eq!(questions[0].question, "What is 2+2?");
         assert_eq!(questions[0].ground_truth, "4");
     }
 
     #[tokio::test]
     async fn test_trajectory_dataset_ignores_non_json() {
-        use gemicro_core::trajectory::{TrajectoryMetadata, SCHEMA_VERSION};
-
         let temp_dir = tempfile::tempdir().unwrap();
 
-        // Create a valid trajectory file
-        let trajectory = Trajectory {
-            id: "valid-123".to_string(),
-            query: "Valid query".to_string(),
-            agent_name: "test".to_string(),
-            agent_config: serde_json::json!({}),
-            steps: vec![],
-            events: vec![],
-            metadata: TrajectoryMetadata {
-                created_at: std::time::SystemTime::now(),
-                total_duration_ms: 100,
-                total_tokens: 50,
-                tokens_unavailable_count: 0,
-                final_answer: Some("Valid answer".to_string()),
-                model: "test".to_string(),
-                schema_version: SCHEMA_VERSION.to_string(),
-            },
-        };
+        // Create a valid trajectory file using builder
+        let trajectory = Trajectory::builder()
+            .query("Valid query")
+            .agent_name("test")
+            .agent_config(serde_json::json!({}))
+            .model("test")
+            .build(vec![], vec![], 100, Some("Valid answer".to_string()));
         trajectory.save(temp_dir.path().join("valid.json")).unwrap();
 
         // Create a non-JSON file (should be ignored)
@@ -931,55 +905,31 @@ mod tests {
 
         // Only the valid JSON should be loaded
         assert_eq!(questions.len(), 1);
-        assert_eq!(questions[0].id, "valid-123");
+        assert_eq!(questions[0].question, "Valid query");
     }
 
     #[tokio::test]
     async fn test_trajectory_dataset_filters_no_answer() {
-        use gemicro_core::trajectory::{TrajectoryMetadata, SCHEMA_VERSION};
-
         let temp_dir = tempfile::tempdir().unwrap();
 
-        // Create trajectory WITH answer
-        let with_answer = Trajectory {
-            id: "with-answer".to_string(),
-            query: "Q1".to_string(),
-            agent_name: "test".to_string(),
-            agent_config: serde_json::json!({}),
-            steps: vec![],
-            events: vec![],
-            metadata: TrajectoryMetadata {
-                created_at: std::time::SystemTime::now(),
-                total_duration_ms: 100,
-                total_tokens: 50,
-                tokens_unavailable_count: 0,
-                final_answer: Some("A1".to_string()),
-                model: "test".to_string(),
-                schema_version: SCHEMA_VERSION.to_string(),
-            },
-        };
+        // Create trajectory WITH answer using builder
+        let with_answer = Trajectory::builder()
+            .query("Q1")
+            .agent_name("test")
+            .agent_config(serde_json::json!({}))
+            .model("test")
+            .build(vec![], vec![], 100, Some("A1".to_string()));
         with_answer
             .save(temp_dir.path().join("with_answer.json"))
             .unwrap();
 
-        // Create trajectory WITHOUT answer (failed run)
-        let without_answer = Trajectory {
-            id: "without-answer".to_string(),
-            query: "Q2".to_string(),
-            agent_name: "test".to_string(),
-            agent_config: serde_json::json!({}),
-            steps: vec![],
-            events: vec![],
-            metadata: TrajectoryMetadata {
-                created_at: std::time::SystemTime::now(),
-                total_duration_ms: 100,
-                total_tokens: 50,
-                tokens_unavailable_count: 0,
-                final_answer: None, // No answer
-                model: "test".to_string(),
-                schema_version: SCHEMA_VERSION.to_string(),
-            },
-        };
+        // Create trajectory WITHOUT answer (failed run) using builder
+        let without_answer = Trajectory::builder()
+            .query("Q2")
+            .agent_name("test")
+            .agent_config(serde_json::json!({}))
+            .model("test")
+            .build(vec![], vec![], 100, None); // No answer
         without_answer
             .save(temp_dir.path().join("without_answer.json"))
             .unwrap();
@@ -989,6 +939,6 @@ mod tests {
 
         // Only trajectories with answers should be included
         assert_eq!(questions.len(), 1);
-        assert_eq!(questions[0].id, "with-answer");
+        assert_eq!(questions[0].question, "Q1");
     }
 }

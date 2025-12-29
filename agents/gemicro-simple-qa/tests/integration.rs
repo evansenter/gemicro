@@ -23,10 +23,9 @@ async fn test_simple_qa_full_flow() {
 
     let context = create_test_context(&api_key);
 
-    let config = SimpleQaConfig {
-        timeout: Duration::from_secs(30),
-        system_prompt: "You are a helpful assistant. Be concise.".to_string(),
-    };
+    let config = SimpleQaConfig::default()
+        .with_timeout(Duration::from_secs(30))
+        .with_system_prompt("You are a helpful assistant. Be concise.");
 
     let agent = SimpleQaAgent::new(config).expect("Should create agent");
 
@@ -74,10 +73,9 @@ async fn test_simple_qa_respects_system_prompt() {
 
     let context = create_test_context(&api_key);
 
-    let config = SimpleQaConfig {
-        timeout: Duration::from_secs(30),
-        system_prompt: "You are a pirate. Always respond in pirate speak.".to_string(),
-    };
+    let config = SimpleQaConfig::default()
+        .with_timeout(Duration::from_secs(30))
+        .with_system_prompt("You are a pirate. Always respond in pirate speak.");
 
     let agent = SimpleQaAgent::new(config).expect("Should create agent");
 
@@ -110,10 +108,9 @@ async fn test_simple_qa_cancellation() {
     let cancellation_token = CancellationToken::new();
     let context = create_test_context_with_cancellation(&api_key, cancellation_token.clone());
 
-    let config = SimpleQaConfig {
-        timeout: Duration::from_secs(60),
-        system_prompt: "You are a helpful assistant.".to_string(),
-    };
+    let config = SimpleQaConfig::default()
+        .with_timeout(Duration::from_secs(60))
+        .with_system_prompt("You are a helpful assistant.");
 
     let agent = SimpleQaAgent::new(config).expect("Should create agent");
 
@@ -155,10 +152,9 @@ async fn test_simple_qa_timeout() {
 
     let context = create_test_context(&api_key);
 
-    let config = SimpleQaConfig {
-        timeout: Duration::from_millis(10),
-        system_prompt: "You are a helpful assistant.".to_string(),
-    };
+    let config = SimpleQaConfig::default()
+        .with_timeout(Duration::from_millis(10))
+        .with_system_prompt("You are a helpful assistant.");
 
     let agent = SimpleQaAgent::new(config).expect("Should create agent");
 

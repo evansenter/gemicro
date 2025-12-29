@@ -125,13 +125,12 @@ impl Args {
 
     /// Build LlmConfig from CLI arguments.
     fn llm_config(&self) -> LlmConfig {
-        LlmConfig {
-            timeout: Duration::from_secs(self.llm_timeout),
-            max_tokens: self.max_tokens,
-            temperature: self.temperature,
-            max_retries: 2,
-            retry_base_delay_ms: 1000,
-        }
+        LlmConfig::default()
+            .with_timeout(Duration::from_secs(self.llm_timeout))
+            .with_max_tokens(self.max_tokens)
+            .with_temperature(self.temperature)
+            .with_max_retries(2)
+            .with_retry_base_delay_ms(1000)
     }
 
     /// Build EvalConfig from CLI arguments.

@@ -21,6 +21,7 @@ pub const MODEL: &str = "gemini-3-flash-preview";
 /// - `gemicro-tool-agent`: ToolAgentConfig
 /// - `gemicro-judge`: JudgeConfig
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct GemicroConfig {
     /// Configuration for LLM client (shared across all agents)
     pub llm: LlmConfig,
@@ -28,6 +29,7 @@ pub struct GemicroConfig {
 
 /// Configuration for LLM client
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct LlmConfig {
     /// Maximum tokens per request
     ///
@@ -69,6 +71,41 @@ impl Default for LlmConfig {
 }
 
 impl LlmConfig {
+    /// Set the maximum tokens per request.
+    #[must_use]
+    pub fn with_max_tokens(mut self, max_tokens: u32) -> Self {
+        self.max_tokens = max_tokens;
+        self
+    }
+
+    /// Set the timeout for individual LLM requests.
+    #[must_use]
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
+    }
+
+    /// Set the temperature for generation (0.0 - 1.0).
+    #[must_use]
+    pub fn with_temperature(mut self, temperature: f32) -> Self {
+        self.temperature = temperature;
+        self
+    }
+
+    /// Set the maximum number of retries on transient failures.
+    #[must_use]
+    pub fn with_max_retries(mut self, max_retries: u32) -> Self {
+        self.max_retries = max_retries;
+        self
+    }
+
+    /// Set the base delay for exponential backoff (milliseconds).
+    #[must_use]
+    pub fn with_retry_base_delay_ms(mut self, delay_ms: u64) -> Self {
+        self.retry_base_delay_ms = delay_ms;
+        self
+    }
+
     /// Get the retry delay for a given attempt number (0-indexed)
     ///
     /// Uses exponential backoff: delay = base_delay * 2^attempt

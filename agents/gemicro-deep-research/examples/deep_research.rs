@@ -89,24 +89,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create LLM client with cancellation support
     let genai_client = rust_genai::Client::builder(api_key).build();
-    let llm_config = LlmConfig {
-        timeout: Duration::from_secs(60),
-        max_tokens: 1024,
-        temperature: 0.7,
-        max_retries: 2,
-        retry_base_delay_ms: 1000,
-    };
+    let llm_config = LlmConfig::default()
+        .with_timeout(Duration::from_secs(60))
+        .with_max_tokens(1024)
+        .with_temperature(0.7)
+        .with_max_retries(2)
+        .with_retry_base_delay_ms(1000);
     let llm = LlmClient::new(genai_client, llm_config);
     let context = AgentContext::new_with_cancellation(llm, cancellation_token);
 
     // Create agent with config
-    let research_config = ResearchConfig {
-        min_sub_queries: 3,
-        max_sub_queries: 5,
-        continue_on_partial_failure: true,
-        total_timeout: Duration::from_secs(180),
-        ..Default::default()
-    };
+    let research_config = ResearchConfig::default()
+        .with_min_sub_queries(3)
+        .with_max_sub_queries(5)
+        .with_continue_on_partial_failure(true)
+        .with_total_timeout(Duration::from_secs(180));
     let agent = DeepResearchAgent::new(research_config)?;
 
     // Execute and stream results

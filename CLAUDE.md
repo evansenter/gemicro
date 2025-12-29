@@ -10,6 +10,15 @@ Gemicro is a CLI agent exploration platform for experimenting with AI agent impl
 
 **Current Status**: Core implementation complete. Remaining work tracked in [GitHub Issues](https://github.com/evansenter/gemicro/issues).
 
+## Versioning Philosophy
+
+Breaking changes are always permitted, and preferred when they:
+- Simplify the API surface
+- Remove unnecessary abstractions
+- Align with Evergreen principles
+
+Prefer clean breaks over backwards-compatibility shims. Don't add deprecation warnings or migration layers—just make the change.
+
 ## Build Commands
 
 ```bash

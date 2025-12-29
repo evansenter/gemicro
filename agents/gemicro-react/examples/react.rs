@@ -81,24 +81,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create LLM client with cancellation support
     let genai_client = rust_genai::Client::builder(api_key).build();
-    let llm_config = LlmConfig {
-        timeout: Duration::from_secs(60),
-        max_tokens: 1024,
-        temperature: 0.0, // Lower temperature for more consistent tool use
-        max_retries: 2,
-        retry_base_delay_ms: 1000,
-    };
+    let llm_config = LlmConfig::default()
+        .with_timeout(Duration::from_secs(60))
+        .with_max_tokens(1024)
+        .with_temperature(0.0) // Lower temperature for more consistent tool use
+        .with_max_retries(2)
+        .with_retry_base_delay_ms(1000);
     let llm = LlmClient::new(genai_client, llm_config);
     let context = AgentContext::new_with_cancellation(llm, cancellation_token);
 
     // Create agent with config
-    let react_config = ReactConfig {
-        max_iterations: 10,
-        available_tools: vec!["calculator".to_string(), "web_search".to_string()],
-        use_google_search: true, // Enable for web_search tool
-        total_timeout: Duration::from_secs(120),
-        ..Default::default()
-    };
+    let react_config = ReactConfig::default()
+        .with_max_iterations(10)
+        .with_available_tools(vec!["calculator".to_string(), "web_search".to_string()])
+        .with_use_google_search(true) // Enable for web_search tool
+        .with_total_timeout(Duration::from_secs(120));
     let agent = ReactAgent::new(react_config)?;
 
     // Execute and stream results

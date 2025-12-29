@@ -31,20 +31,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("======================================\n");
 
     // Create agent
-    let config = SimpleQaConfig {
-        timeout: Duration::from_secs(30),
-        ..Default::default()
-    };
+    let config = SimpleQaConfig::default().with_timeout(Duration::from_secs(30));
     let agent = SimpleQaAgent::new(config)?;
 
     // Create LLM client with recording enabled
     let genai_client = rust_genai::Client::builder(api_key).build();
-    let llm_config = LlmConfig {
-        timeout: Duration::from_secs(60),
-        max_tokens: 1024,
-        temperature: 0.7,
-        ..Default::default()
-    };
+    let llm_config = LlmConfig::default()
+        .with_timeout(Duration::from_secs(60))
+        .with_max_tokens(1024)
+        .with_temperature(0.7);
 
     // Execute agent and capture trajectory
     println!("Step 1: Recording agent execution...\n");

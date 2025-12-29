@@ -67,14 +67,14 @@ const EVENT_SIMPLE_QA_RESULT: &str = "simple_qa_result";
 /// use gemicro_simple_qa::SimpleQaConfig;
 /// use std::time::Duration;
 ///
-/// let config = SimpleQaConfig {
-///     timeout: Duration::from_secs(30),
-///     system_prompt: "You are a helpful assistant.".to_string(),
-/// };
+/// let config = SimpleQaConfig::default()
+///     .with_timeout(Duration::from_secs(30))
+///     .with_system_prompt("You are a helpful assistant.");
 ///
 /// assert!(config.validate().is_ok());
 /// ```
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct SimpleQaConfig {
     /// Total timeout for the query execution.
     pub timeout: Duration,
@@ -95,6 +95,20 @@ impl Default for SimpleQaConfig {
 }
 
 impl SimpleQaConfig {
+    /// Set the timeout for query execution.
+    #[must_use]
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
+    }
+
+    /// Set the system prompt for the LLM request.
+    #[must_use]
+    pub fn with_system_prompt(mut self, system_prompt: impl Into<String>) -> Self {
+        self.system_prompt = system_prompt.into();
+        self
+    }
+
     /// Validate the configuration.
     ///
     /// Returns an error if:
@@ -107,10 +121,7 @@ impl SimpleQaConfig {
     /// use gemicro_simple_qa::SimpleQaConfig;
     /// use std::time::Duration;
     ///
-    /// let invalid = SimpleQaConfig {
-    ///     timeout: Duration::ZERO,
-    ///     system_prompt: "Valid prompt".to_string(),
-    /// };
+    /// let invalid = SimpleQaConfig::default().with_timeout(Duration::ZERO);
     /// assert!(invalid.validate().is_err());
     /// ```
     pub fn validate(&self) -> Result<(), AgentError> {
@@ -276,10 +287,7 @@ mod tests {
 
     #[test]
     fn test_config_rejects_zero_timeout() {
-        let config = SimpleQaConfig {
-            timeout: Duration::ZERO,
-            system_prompt: "Valid prompt".to_string(),
-        };
+        let config = SimpleQaConfig::default().with_timeout(Duration::ZERO);
         let err = config.validate().unwrap_err();
         match err {
             AgentError::InvalidConfig(msg) => {
@@ -291,10 +299,7 @@ mod tests {
 
     #[test]
     fn test_config_rejects_empty_system_prompt() {
-        let config = SimpleQaConfig {
-            timeout: Duration::from_secs(30),
-            system_prompt: "   ".to_string(),
-        };
+        let config = SimpleQaConfig::default().with_system_prompt("   ");
         let err = config.validate().unwrap_err();
         match err {
             AgentError::InvalidConfig(msg) => {
@@ -306,10 +311,9 @@ mod tests {
 
     #[test]
     fn test_config_collects_multiple_errors() {
-        let config = SimpleQaConfig {
-            timeout: Duration::ZERO,
-            system_prompt: "".to_string(),
-        };
+        let config = SimpleQaConfig::default()
+            .with_timeout(Duration::ZERO)
+            .with_system_prompt("");
         let err = config.validate().unwrap_err();
         match err {
             AgentError::InvalidConfig(msg) => {
@@ -322,10 +326,7 @@ mod tests {
 
     #[test]
     fn test_agent_creation_validates_config() {
-        let invalid_config = SimpleQaConfig {
-            timeout: Duration::ZERO,
-            system_prompt: "Valid".to_string(),
-        };
+        let invalid_config = SimpleQaConfig::default().with_timeout(Duration::ZERO);
         assert!(SimpleQaAgent::new(invalid_config).is_err());
     }
 
