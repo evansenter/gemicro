@@ -128,7 +128,7 @@ Each crate has a specific purpose. Before adding code, verify it belongs in that
 | **agents/gemicro-judge** | LlmJudgeAgent, JudgeConfig | Other agents, core infrastructure |
 | **gemicro-runner** | AgentRunner, AgentRegistry, generic execution infrastructure | Agent implementations |
 | **gemicro-eval** | EvalHarness, Scorers, Datasets | Agent implementations |
-| **gemicro-cli** | Terminal UI, REPL, argument parsing | Agent implementations |
+| **gemicro-cli** | Terminal UI, REPL, argument parsing, InteractiveConfirmation | Agent implementations |
 
 ### Checklist: Before Adding Code
 
@@ -156,6 +156,7 @@ Each agent crate:
 |------|------------------|
 | `Agent`, `AgentContext`, `AgentUpdate`, `AgentError` | `gemicro_core` |
 | `Tool`, `ToolRegistry`, `ToolSet`, `ToolResult`, `ToolError` | `gemicro_core::tool` |
+| `ConfirmationHandler`, `AutoApprove`, `AutoDeny`, `GemicroToolService` | `gemicro_core::tool` |
 | `Calculator`, `CurrentDatetime` | `gemicro_tool_agent::tools` |
 | `FileRead` | `gemicro_file_read` |
 | `WebFetch` | `gemicro_web_fetch` |
@@ -287,7 +288,10 @@ pub struct GemicroConfig {
 ```rust
 // CORRECT: AgentContext has only cross-agent shared resources
 pub struct AgentContext {
-    pub llm: Arc<LlmClient>,  // All agents need LLM access
+    pub llm: Arc<LlmClient>,              // All agents need LLM access
+    pub cancellation_token: CancellationToken,  // Cooperative shutdown
+    pub tools: Option<Arc<ToolRegistry>>,       // Shared tool registry
+    pub confirmation_handler: Option<Arc<dyn ConfirmationHandler>>,  // Tool confirmation
     // NO agent-specific config here!
 }
 
@@ -436,6 +440,7 @@ gemicro/
         ├── cli.rs                # Clap argument parsing, OutputConfig
         ├── format.rs             # Text utilities, markdown rendering
         ├── error.rs              # CLI-specific error handling
+        ├── confirmation.rs       # InteractiveConfirmation handler
         ├── display/              # State-renderer pattern
         │   ├── mod.rs
         │   ├── renderer.rs       # Renderer trait for swappable backends
@@ -584,7 +589,8 @@ match update.event_type.as_str() {
 |--------------|-------|-----|
 | `LlmRequest` | `InteractionBuilder` params | Serialized in trajectories |
 | `LlmClient` | `Client` | Adds recording capability |
-| `Tool` trait | `CallableFunction` | Adds metadata, richer errors |
+| `Tool` trait | `CallableFunction` | Adds metadata, confirmation, richer errors |
+| `GemicroToolService` | `ToolService` | Adds registry, filtering, confirmation |
 | `InteractionResponse` | (re-exported) | No additions needed |
 | `FunctionDeclaration` | (used directly) | No additions needed |
 
@@ -639,6 +645,80 @@ Errors bubble up with context added at each layer. Don't swallow errors.
 - **Alternative LLM backends** - gemicro is Gemini-focused via rust-genai
 - **Gemini API wrappers** - that's rust-genai's job
 - **Complex workarounds** - fix rust-genai instead
+
+## Tool Confirmation
+
+Tools that perform potentially dangerous operations (bash commands, file writes) require user confirmation before execution. This is managed through the `ConfirmationHandler` trait.
+
+### Architecture
+
+```
+ConfirmationHandler (trait)       - Async confirmation interface
+    ├── AutoApprove              - Always approve (for tests/trusted contexts)
+    ├── AutoDeny                 - Always deny (safe default)
+    └── InteractiveConfirmation  - CLI terminal prompts (dialoguer)
+
+GemicroToolService               - rust-genai ToolService implementation
+    ├── ToolRegistry             - Available tools
+    ├── ToolSet filter           - Which tools to enable
+    └── ConfirmationHandler      - How to confirm dangerous operations
+```
+
+### Usage
+
+```rust
+use gemicro_core::{AgentContext, ConfirmationHandler, GemicroToolService, ToolRegistry, ToolSet};
+use std::sync::Arc;
+
+// 1. Create tool registry with dangerous tools
+let mut registry = ToolRegistry::new();
+registry.register(Calculator);      // Safe - no confirmation
+registry.register(Bash::default()); // Dangerous - requires confirmation
+
+// 2. Create confirmation handler
+let handler = Arc::new(InteractiveConfirmation::default());
+
+// 3. Wire into GemicroToolService
+let service = GemicroToolService::new(Arc::new(registry))
+    .with_filter(ToolSet::All)
+    .with_confirmation_handler(Arc::clone(&handler));
+
+// 4. Use with rust-genai
+client.interaction()
+    .with_model(MODEL)
+    .with_tool_service(Arc::new(service))
+    .create_with_auto_functions()
+    .await?;
+
+// 5. Or wire into AgentContext for agent-managed tools
+let context = AgentContext::new(llm)
+    .with_confirmation_handler(handler);
+```
+
+### Tool Confirmation Protocol
+
+Tools signal confirmation requirements through the `Tool` trait:
+
+```rust
+trait Tool {
+    fn requires_confirmation(&self, args: &Value) -> bool;
+    fn confirmation_message(&self, args: &Value) -> String;
+}
+```
+
+When a tool requires confirmation:
+1. `GemicroToolService` calls `handler.confirm(tool_name, message, args)`
+2. If approved → tool executes normally
+3. If denied → returns `ToolError::ConfirmationDenied`
+4. LLM receives error message and may try alternative approach
+
+### Built-in Handlers
+
+| Handler | Behavior | Use Case |
+|---------|----------|----------|
+| `AutoApprove` | Always returns true | Tests, trusted automation |
+| `AutoDeny` | Always returns false | Safe default when no handler set |
+| `InteractiveConfirmation` | Terminal prompt | CLI applications |
 
 ## Migration Notes
 
