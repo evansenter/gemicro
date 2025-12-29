@@ -131,6 +131,10 @@ impl Tool for Task {
                             final_answer = Some(answer.to_string());
                         } else {
                             // Fallback to message if answer field isn't present
+                            log::debug!(
+                                "final_result event for subagent '{}' missing 'answer' field, falling back to message",
+                                agent_name
+                            );
                             final_answer = Some(update.message.clone());
                         }
                     }

@@ -96,9 +96,16 @@ impl Tool for FileRead {
         }
 
         // Read the file
-        let content = tokio::fs::read_to_string(path)
-            .await
-            .map_err(|e| ToolError::ExecutionFailed(format!("Failed to read file: {}", e)))?;
+        let content = tokio::fs::read_to_string(path).await.map_err(|e| {
+            if e.kind() == std::io::ErrorKind::InvalidData {
+                ToolError::InvalidInput(format!(
+                    "File appears to be binary or contains invalid UTF-8: {}",
+                    path_str
+                ))
+            } else {
+                ToolError::ExecutionFailed(format!("Failed to read file: {}", e))
+            }
+        })?;
 
         Ok(ToolResult::new(content))
     }
