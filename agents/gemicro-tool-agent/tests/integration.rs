@@ -7,7 +7,8 @@ mod common;
 
 use common::{create_test_context, get_api_key};
 use futures_util::StreamExt;
-use gemicro_tool_agent::{ToolAgent, ToolAgentConfig, ToolType};
+use gemicro_core::ToolSet;
+use gemicro_tool_agent::{ToolAgent, ToolAgentConfig};
 use std::time::Duration;
 
 #[tokio::test]
@@ -21,7 +22,7 @@ async fn test_tool_agent_calculator() {
     let context = create_test_context(&api_key);
 
     let config = ToolAgentConfig::default()
-        .with_tools(vec![ToolType::Calculator])
+        .with_tool_filter(ToolSet::Specific(vec!["calculator".into()]))
         .with_timeout(Duration::from_secs(60))
         .with_system_prompt(
             "You are a math assistant. Use the calculator tool to solve problems. \
@@ -189,7 +190,7 @@ async fn test_tool_agent_current_datetime() {
     let context = create_test_context(&api_key);
 
     let config = ToolAgentConfig::default()
-        .with_tools(vec![ToolType::CurrentDateTime])
+        .with_tool_filter(ToolSet::Specific(vec!["current_datetime".into()]))
         .with_timeout(Duration::from_secs(60))
         .with_system_prompt(
             "You are a helpful assistant. Use the current_datetime tool when asked about time.",
@@ -275,9 +276,9 @@ fn test_tool_agent_config_validation() {
     let config = ToolAgentConfig::default();
     assert!(config.validate().is_ok());
 
-    // Invalid: no tools
-    let config = ToolAgentConfig::default().with_tools(vec![]);
-    assert!(config.validate().is_err());
+    // Valid: ToolSet::None is valid at config time (errors at execute time)
+    let config = ToolAgentConfig::default().with_tool_filter(ToolSet::None);
+    assert!(config.validate().is_ok());
 
     // Invalid: zero timeout
     let config = ToolAgentConfig::default().with_timeout(Duration::ZERO);

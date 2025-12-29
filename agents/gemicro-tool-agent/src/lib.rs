@@ -7,12 +7,14 @@
 //! # Example
 //!
 //! ```no_run
-//! use gemicro_tool_agent::{ToolAgent, ToolAgentConfig, ToolType};
-//! use gemicro_core::{AgentContext, LlmClient, LlmConfig};
+//! use gemicro_tool_agent::{ToolAgent, ToolAgentConfig};
+//! use gemicro_core::{AgentContext, LlmClient, LlmConfig, ToolSet};
 //! use futures_util::StreamExt;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! let config = ToolAgentConfig::default().with_tools(vec![ToolType::Calculator]);
+//! // Use only the calculator tool
+//! let config = ToolAgentConfig::default()
+//!     .with_tool_filter(ToolSet::Specific(vec!["calculator".into()]));
 //! let agent = ToolAgent::new(config)?;
 //!
 //! let genai_client = rust_genai::Client::builder("api-key".to_string()).build();
@@ -30,15 +32,17 @@
 pub mod tools;
 
 use gemicro_core::{
-    remaining_time, timeout_error, with_timeout_and_cancellation, Agent, AgentContext, AgentError,
-    AgentStream, AgentUpdate, ResultMetadata, MODEL,
+    remaining_time, timeout_error, tools_to_callables, with_timeout_and_cancellation, Agent,
+    AgentContext, AgentError, AgentStream, AgentUpdate, ResultMetadata, ToolRegistry, ToolSet,
+    MODEL,
 };
+use tools::default_registry;
 
 use async_stream::try_stream;
 use futures_util::Stream;
 use rust_genai::{AutoFunctionResult, CallableFunction, FunctionDeclaration};
-use rust_genai_macros::tool;
 use serde_json::json;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 // ============================================================================
@@ -50,126 +54,6 @@ const EVENT_TOOL_AGENT_STARTED: &str = "tool_agent_started";
 
 /// Emitted when the agent completes successfully
 const EVENT_TOOL_AGENT_COMPLETE: &str = "tool_agent_complete";
-
-// ============================================================================
-// Tool Definitions using #[tool] macro
-// ============================================================================
-
-/// Maximum allowed length for calculator expressions to prevent abuse.
-const MAX_EXPRESSION_LENGTH: usize = 1000;
-
-/// Calculator tool for evaluating mathematical expressions.
-///
-/// Supports basic arithmetic (+, -, *, /), exponents (^), parentheses,
-/// and common functions (sqrt, sin, cos, tan, log, ln, abs).
-#[tool(expression(
-    description = "A mathematical expression to evaluate, e.g., '2 + 2', 'sqrt(16)', '3.14 * 2^3'"
-))]
-fn calculator(expression: String) -> String {
-    // Validate input length to prevent abuse
-    if expression.len() > MAX_EXPRESSION_LENGTH {
-        return format!(
-            "Error: Expression too long ({} chars, max {})",
-            expression.len(),
-            MAX_EXPRESSION_LENGTH
-        );
-    }
-
-    match meval::eval_str(&expression) {
-        Ok(result) => {
-            if result.is_nan() {
-                "Error: Result is not a number (NaN)".to_string()
-            } else if result.is_infinite() {
-                "Error: Result is infinite (division by zero or overflow)".to_string()
-            } else if result.fract() == 0.0 && result.abs() < 1e15 {
-                format!("{:.0}", result)
-            } else {
-                format!("{}", result)
-            }
-        }
-        Err(e) => format!("Error: {}", e),
-    }
-}
-
-/// Gets the current date and time in UTC.
-///
-/// Note: Only UTC timezone is currently supported.
-#[tool(timezone(
-    description = "The timezone to get the time for. Currently only 'UTC' is supported."
-))]
-fn current_datetime(timezone: String) -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    // Only UTC is supported
-    if !timezone.eq_ignore_ascii_case("utc") {
-        return format!(
-            r#"{{"error": "Only UTC timezone is currently supported, got '{}'"}}"#,
-            timezone
-        );
-    }
-
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default();
-
-    // Calculate time components
-    let total_secs = now.as_secs();
-    let days_since_epoch = total_secs / 86400;
-    let secs_today = total_secs % 86400;
-
-    let hours = secs_today / 3600;
-    let minutes = (secs_today % 3600) / 60;
-    let seconds = secs_today % 60;
-
-    // Calculate date from days since epoch
-    let (year, month, day) = days_to_ymd(days_since_epoch);
-
-    format!(
-        r#"{{"timezone": "UTC", "date": "{:04}-{:02}-{:02}", "time": "{:02}:{:02}:{:02}"}}"#,
-        year, month, day, hours, minutes, seconds
-    )
-}
-
-/// Convert days since Unix epoch to (year, month, day).
-fn days_to_ymd(days_since_epoch: u64) -> (i64, u32, u32) {
-    let mut remaining_days = days_since_epoch as i64;
-    let mut year: i64 = 1970;
-
-    // Find the year
-    loop {
-        let days_in_year = if is_leap_year(year) { 366 } else { 365 };
-        if remaining_days < days_in_year {
-            break;
-        }
-        remaining_days -= days_in_year;
-        year += 1;
-    }
-
-    // Find the month
-    let days_in_months: [i64; 12] = if is_leap_year(year) {
-        [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    } else {
-        [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    };
-
-    let mut month: u32 = 1;
-    for &days_in_month in &days_in_months {
-        if remaining_days < days_in_month {
-            break;
-        }
-        remaining_days -= days_in_month;
-        month += 1;
-    }
-
-    // remaining_days is now days within the month (0-indexed), add 1 for day of month
-    let day = (remaining_days + 1) as u32;
-
-    (year, month, day)
-}
-
-fn is_leap_year(year: i64) -> bool {
-    (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
-}
 
 // ============================================================================
 // Configuration
@@ -185,20 +69,10 @@ pub struct ToolAgentConfig {
     /// System prompt for the agent
     pub system_prompt: String,
 
-    /// Which tools to enable
-    pub enabled_tools: Vec<ToolType>,
-}
-
-/// Available tool types for the ToolAgent.
-///
-/// New variants may be added in future versions.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[non_exhaustive]
-pub enum ToolType {
-    /// Mathematical expression evaluator
-    Calculator,
-    /// Current date and time
-    CurrentDateTime,
+    /// Filter for which tools to enable.
+    ///
+    /// By default, all tools in the registry are enabled.
+    pub tool_filter: ToolSet,
 }
 
 impl Default for ToolAgentConfig {
@@ -210,7 +84,7 @@ impl Default for ToolAgentConfig {
                 For math questions, use the calculator tool. \
                 Always provide a clear, concise final answer."
                 .to_string(),
-            enabled_tools: vec![ToolType::Calculator, ToolType::CurrentDateTime],
+            tool_filter: ToolSet::All,
         }
     }
 }
@@ -226,9 +100,8 @@ impl ToolAgentConfig {
         if self.system_prompt.trim().is_empty() {
             errors.push("system_prompt must not be empty");
         }
-        if self.enabled_tools.is_empty() {
-            errors.push("enabled_tools must not be empty");
-        }
+        // Note: We don't validate tool_filter here since ToolSet::None is valid
+        // (user might want to test with no tools)
 
         if errors.is_empty() {
             Ok(())
@@ -240,7 +113,7 @@ impl ToolAgentConfig {
     /// Create a config with only the calculator tool enabled.
     pub fn calculator_only() -> Self {
         Self {
-            enabled_tools: vec![ToolType::Calculator],
+            tool_filter: ToolSet::Specific(vec!["calculator".into()]),
             system_prompt: "You are a math assistant. Use the calculator tool to solve \
                 mathematical problems. Always show the calculation and provide the answer."
                 .to_string(),
@@ -248,9 +121,9 @@ impl ToolAgentConfig {
         }
     }
 
-    /// Set the enabled tools.
-    pub fn with_tools(mut self, tools: Vec<ToolType>) -> Self {
-        self.enabled_tools = tools;
+    /// Set the tool filter.
+    pub fn with_tool_filter(mut self, filter: ToolSet) -> Self {
+        self.tool_filter = filter;
         self
     }
 
@@ -273,13 +146,17 @@ impl ToolAgentConfig {
 
 /// An agent that uses rust-genai's native function calling.
 ///
-/// This agent leverages the `#[tool]` macro to define tools and uses
-/// `create_with_auto_functions()` for automatic tool execution.
+/// This agent uses the [`Tool`](gemicro_core::Tool) trait implementations
+/// and rust-genai's `create_with_auto_functions()` for automatic tool execution.
 ///
 /// # Available Tools
 ///
+/// By default, the agent uses the built-in tool registry with:
 /// - **calculator**: Evaluates mathematical expressions (e.g., "2 + 2", "sqrt(16)")
-/// - **current_datetime**: Gets the current date and time
+/// - **current_datetime**: Gets the current date and time (UTC)
+///
+/// You can provide a custom registry via [`AgentContext::with_tools()`] or
+/// filter available tools via [`ToolAgentConfig::with_tool_filter()`].
 ///
 /// # Example
 ///
@@ -303,6 +180,8 @@ impl ToolAgentConfig {
 /// ```
 pub struct ToolAgent {
     config: ToolAgentConfig,
+    /// Default tool registry (used when context.tools is None)
+    default_registry: Arc<ToolRegistry>,
 }
 
 impl ToolAgent {
@@ -313,25 +192,10 @@ impl ToolAgent {
     /// Returns `AgentError::InvalidConfig` if the configuration is invalid.
     pub fn new(config: ToolAgentConfig) -> Result<Self, AgentError> {
         config.validate()?;
-        Ok(Self { config })
-    }
-
-    /// Get the function declarations for enabled tools.
-    fn get_function_declarations(&self) -> Vec<FunctionDeclaration> {
-        let mut declarations = Vec::new();
-
-        for tool_type in &self.config.enabled_tools {
-            match tool_type {
-                ToolType::Calculator => {
-                    declarations.push(CalculatorCallable.declaration());
-                }
-                ToolType::CurrentDateTime => {
-                    declarations.push(CurrentDatetimeCallable.declaration());
-                }
-            }
-        }
-
-        declarations
+        Ok(Self {
+            config,
+            default_registry: Arc::new(default_registry()),
+        })
     }
 
     /// Execute the tool agent.
@@ -344,12 +208,24 @@ impl ToolAgent {
     ) -> impl Stream<Item = Result<AgentUpdate, AgentError>> + Send + '_ {
         let query = query.to_string();
         let config = self.config.clone();
-        let functions = self.get_function_declarations();
+        let default_registry = Arc::clone(&self.default_registry);
 
         try_stream! {
             let start_time = Instant::now();
             let mut total_tokens: u32 = 0;
             let mut tokens_unavailable: usize = 0;
+
+            // Use context tools if provided, otherwise use default registry
+            let registry = context.tools.as_ref().unwrap_or(&default_registry);
+            let filtered_tools = registry.filter(&config.tool_filter);
+
+            // Get adapters for the filtered tools
+            let adapters = tools_to_callables(&filtered_tools);
+            let functions: Vec<FunctionDeclaration> = adapters.iter().map(|a| a.declaration()).collect();
+
+            if functions.is_empty() {
+                Err(AgentError::InvalidConfig("No tools available after filtering".into()))?;
+            }
 
             yield AgentUpdate::custom(
                 EVENT_TOOL_AGENT_STARTED,
@@ -470,6 +346,9 @@ impl Agent for ToolAgent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gemicro_core::Tool;
+    use rust_genai::CallableFunction;
+    use tools::{Calculator, CurrentDatetime};
 
     #[test]
     fn test_default_config_is_valid() {
@@ -481,8 +360,7 @@ mod tests {
     fn test_calculator_only_config_is_valid() {
         let config = ToolAgentConfig::calculator_only();
         assert!(config.validate().is_ok());
-        assert_eq!(config.enabled_tools.len(), 1);
-        assert_eq!(config.enabled_tools[0], ToolType::Calculator);
+        assert!(matches!(config.tool_filter, ToolSet::Specific(_)));
     }
 
     #[test]
@@ -494,17 +372,6 @@ mod tests {
         let result = config.validate();
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("timeout"));
-    }
-
-    #[test]
-    fn test_config_rejects_empty_tools() {
-        let config = ToolAgentConfig {
-            enabled_tools: vec![],
-            ..Default::default()
-        };
-        let result = config.validate();
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("enabled_tools"));
     }
 
     #[test]
@@ -523,14 +390,13 @@ mod tests {
         let config = ToolAgentConfig {
             timeout: Duration::ZERO,
             system_prompt: String::new(),
-            enabled_tools: vec![],
+            tool_filter: ToolSet::All,
         };
         let result = config.validate();
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("timeout"));
         assert!(err.contains("system_prompt"));
-        assert!(err.contains("enabled_tools"));
     }
 
     #[test]
@@ -556,81 +422,41 @@ mod tests {
     }
 
     #[test]
-    fn test_get_function_declarations() {
-        let agent = ToolAgent::new(ToolAgentConfig::default()).unwrap();
-        let declarations = agent.get_function_declarations();
-        assert_eq!(declarations.len(), 2);
+    fn test_default_registry_function_declarations() {
+        let registry = default_registry();
+        let tools = registry.filter(&ToolSet::All);
+        let adapters = tools_to_callables(&tools);
+        let declarations: Vec<_> = adapters.iter().map(|a| a.declaration()).collect();
 
+        assert_eq!(declarations.len(), 2);
         let names: Vec<&str> = declarations.iter().map(|d| d.name()).collect();
         assert!(names.contains(&"calculator"));
         assert!(names.contains(&"current_datetime"));
     }
 
     #[test]
-    fn test_calculator_tool_directly() {
-        // Test the calculator function directly
-        assert_eq!(calculator("2 + 2".to_string()), "4");
-        assert_eq!(calculator("10 / 4".to_string()), "2.5");
-        assert_eq!(calculator("sqrt(16)".to_string()), "4");
-        assert!(calculator("invalid".to_string()).starts_with("Error:"));
+    fn test_filtered_function_declarations() {
+        let registry = default_registry();
+        let tools = registry.filter(&ToolSet::Specific(vec!["calculator".into()]));
+        let adapters = tools_to_callables(&tools);
+        let declarations: Vec<_> = adapters.iter().map(|a| a.declaration()).collect();
+
+        assert_eq!(declarations.len(), 1);
+        assert_eq!(declarations[0].name(), "calculator");
     }
 
     #[test]
-    fn test_calculator_rejects_long_expressions() {
-        let long_expr = "1+".repeat(600); // 1200 chars, exceeds MAX_EXPRESSION_LENGTH
-        let result = calculator(long_expr);
-        assert!(result.contains("Error: Expression too long"));
-        assert!(result.contains("max 1000"));
+    fn test_calculator_tool_via_trait() {
+        let calc = Calculator;
+        assert_eq!(calc.name(), "calculator");
+        assert!(!calc.description().is_empty());
     }
 
     #[test]
-    fn test_current_datetime_tool_directly() {
-        let result = current_datetime("UTC".to_string());
-        assert!(result.contains("timezone"));
-        assert!(result.contains("date"));
-        assert!(result.contains("time"));
-
-        // Verify it's valid JSON
-        let json: serde_json::Value = serde_json::from_str(&result).expect("Should be valid JSON");
-        assert_eq!(json["timezone"], "UTC");
-    }
-
-    #[test]
-    fn test_current_datetime_rejects_non_utc() {
-        let result = current_datetime("EST".to_string());
-        assert!(result.contains("error"));
-        assert!(result.contains("Only UTC timezone is currently supported"));
-
-        let result = current_datetime("PST".to_string());
-        assert!(result.contains("error"));
-    }
-
-    #[test]
-    fn test_current_datetime_accepts_utc_case_insensitive() {
-        // All case variations should work
-        for tz in &["UTC", "utc", "Utc", "uTc"] {
-            let result = current_datetime(tz.to_string());
-            assert!(!result.contains("error"), "Should accept {} as UTC", tz);
-            assert!(result.contains("timezone"));
-        }
-    }
-
-    #[test]
-    fn test_days_to_ymd_known_dates() {
-        // Unix epoch: Jan 1, 1970
-        assert_eq!(days_to_ymd(0), (1970, 1, 1));
-
-        // Jan 2, 1970
-        assert_eq!(days_to_ymd(1), (1970, 1, 2));
-
-        // Feb 1, 1970 (31 days after epoch)
-        assert_eq!(days_to_ymd(31), (1970, 2, 1));
-
-        // Jan 1, 1971 (365 days after epoch)
-        assert_eq!(days_to_ymd(365), (1971, 1, 1));
-
-        // 2000-03-01 (known date for validation)
-        assert_eq!(days_to_ymd(11017), (2000, 3, 1));
+    fn test_current_datetime_tool_via_trait() {
+        let dt = CurrentDatetime;
+        assert_eq!(dt.name(), "current_datetime");
+        assert!(!dt.description().is_empty());
     }
 
     #[test]
@@ -640,5 +466,13 @@ mod tests {
         for event in &events {
             assert!(unique.insert(*event), "Duplicate event: {}", event);
         }
+    }
+
+    #[test]
+    fn test_default_registry_has_expected_tools() {
+        let registry = default_registry();
+        assert!(registry.contains("calculator"));
+        assert!(registry.contains("current_datetime"));
+        assert_eq!(registry.len(), 2);
     }
 }
