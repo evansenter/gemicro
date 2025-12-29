@@ -45,6 +45,7 @@ use std::sync::Arc;
 /// let declaration = adapter.declaration();
 /// ```
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ToolCallableAdapter {
     tool: Arc<dyn Tool>,
     confirmation_handler: Option<Arc<dyn ConfirmationHandler>>,

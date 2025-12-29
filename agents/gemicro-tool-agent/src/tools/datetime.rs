@@ -64,9 +64,12 @@ impl Tool for CurrentDatetime {
             )));
         }
 
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default();
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e| {
+            ToolError::ExecutionFailed(format!(
+                "System clock is set before Unix epoch (1970-01-01): {}",
+                e
+            ))
+        })?;
 
         // Calculate time components
         let total_secs = now.as_secs();

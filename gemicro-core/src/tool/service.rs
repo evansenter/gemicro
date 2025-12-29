@@ -39,6 +39,7 @@ use std::sync::Arc;
 /// //     .await?;
 /// ```
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct GemicroToolService {
     registry: Arc<ToolRegistry>,
     filter: ToolSet,

@@ -58,12 +58,23 @@ impl ConfirmationHandler for InteractiveConfirmation {
         };
 
         // Use dialoguer for terminal confirmation
-        // Returns false on error (safe default)
-        Confirm::new()
+        match Confirm::new()
             .with_prompt(prompt)
             .default(false) // Safe default: deny if user just presses Enter
             .interact()
-            .unwrap_or(false)
+        {
+            Ok(confirmed) => confirmed,
+            Err(e) => {
+                // Log the error so users know why confirmation failed
+                // (e.g., terminal not available, stdin closed, signal interrupt)
+                log::warn!(
+                    "Confirmation prompt failed for tool '{}': {}. Denying by default.",
+                    tool_name,
+                    e
+                );
+                false
+            }
+        }
     }
 }
 
