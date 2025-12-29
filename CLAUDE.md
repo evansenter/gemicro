@@ -281,6 +281,33 @@ Use strong typing for:
 - **Cross-agent configuration**: Settings shared by all agents (like `LlmConfig`)
 - **Internal implementation**: Agent internals can use whatever structure they want
 
+### `#[non_exhaustive]` Guidelines
+
+**Always add `#[non_exhaustive]` to:**
+
+| Type Category | Examples | Reason |
+|---------------|----------|--------|
+| **Error enums** | `AgentError`, `ToolError`, `LlmError` | New error variants are common |
+| **Config structs** | `LlmConfig`, `ResearchConfig`, `EvalConfig` | Options grow over time |
+| **Public data structs** | `AgentUpdate`, `ToolResult`, `LlmRequest` | Fields may be added |
+| **Serialized types** | `Trajectory`, `TrajectoryStep` | Format evolution |
+| **Progress/status enums** | `StepStatus`, `EvalProgress` | New states emerge |
+
+**Skip `#[non_exhaustive]` for:**
+
+| Type Category | Examples | Reason |
+|---------------|----------|--------|
+| **Closed enums** | `ToolSet` (All/None/Specific/Except) | Logically complete set |
+| **External mirrors** | `GSM8KSplit` (Test/Train) | Mirrors external dataset |
+| **Unit structs** | `FileRead`, `Glob`, `Calculator` | No fields to add |
+| **Crate-internal types** | CLI `Args`, `Session` | Not public API |
+
+**Checklist for new public types:**
+- [ ] Is this a config struct users construct? → Add `#[non_exhaustive]`
+- [ ] Is this an enum that might get new variants? → Add `#[non_exhaustive]`
+- [ ] Is this serialized/deserialized? → Add `#[non_exhaustive]`
+- [ ] Is this returned from public APIs? → Consider `#[non_exhaustive]`
+
 ## File Structure
 
 ```
