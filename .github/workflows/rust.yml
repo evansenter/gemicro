@@ -45,6 +45,8 @@ jobs:
             packages: "gemicro-deep-research gemicro-simple-qa"
           - group: react-tools
             packages: "gemicro-react gemicro-tool-agent"
+          - group: core-eval
+            packages: "gemicro-core gemicro-eval"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
