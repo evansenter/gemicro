@@ -24,6 +24,7 @@ fn create_test_client(api_key: &str) -> LlmClient {
 }
 
 #[tokio::test]
+#[ignore] // Requires GEMINI_API_KEY
 async fn test_llm_judge_correct_answer() {
     let Some(api_key) = get_api_key() else {
         eprintln!("Skipping test: GEMINI_API_KEY not set");
@@ -68,6 +69,7 @@ async fn test_llm_judge_correct_answer() {
 }
 
 #[tokio::test]
+#[ignore] // Requires GEMINI_API_KEY
 async fn test_llm_judge_incorrect_answer() {
     let Some(api_key) = get_api_key() else {
         eprintln!("Skipping test: GEMINI_API_KEY not set");
@@ -108,6 +110,7 @@ async fn test_llm_judge_incorrect_answer() {
 }
 
 #[tokio::test]
+#[ignore] // Requires GEMINI_API_KEY
 async fn test_llm_judge_semantic_equivalence() {
     let Some(api_key) = get_api_key() else {
         eprintln!("Skipping test: GEMINI_API_KEY not set");
