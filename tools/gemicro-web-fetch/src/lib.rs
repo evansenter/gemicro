@@ -160,8 +160,18 @@ impl Tool for WebFetch {
             )));
         }
 
-        // Convert to string
-        let content = String::from_utf8_lossy(&bytes).into_owned();
+        // Convert to string, logging a warning if lossy conversion occurs
+        let content = match String::from_utf8(bytes.to_vec()) {
+            Ok(s) => s,
+            Err(e) => {
+                log::warn!(
+                    "Response from {} contained invalid UTF-8 at byte {}, using lossy conversion",
+                    url,
+                    e.utf8_error().valid_up_to()
+                );
+                String::from_utf8_lossy(e.as_bytes()).into_owned()
+            }
+        };
 
         Ok(ToolResult::new(content))
     }
