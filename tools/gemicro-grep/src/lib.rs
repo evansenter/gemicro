@@ -28,7 +28,7 @@ const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024;
 /// - `pattern`: The search pattern used
 /// - `path`: The file path searched
 /// - `match_count`: Number of matches found
-/// - `truncated`: Whether results were truncated to [`MAX_MATCHES_PER_FILE`]
+/// - `truncated`: Whether results were truncated (max 50 matches per file)
 /// - `case_insensitive`: Whether case-insensitive matching was used
 ///
 /// # Example
