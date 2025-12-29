@@ -460,8 +460,17 @@ mod tests {
 
         assert!(result.is_ok());
         let metadata = result.unwrap().metadata;
-        // Process killed by signal should have exit_code -1 and signal info
-        assert_eq!(metadata["exit_code"], -1);
-        assert_eq!(metadata["signal"], 15); // SIGTERM
+        let exit_code = metadata["exit_code"].as_i64().unwrap();
+        // Platform-dependent behavior:
+        // - On some systems: code() returns None, we use -1, signal() returns 15
+        // - On others (Linux CI): shell exits with 143 (128+15), code() returns Some(143)
+        assert!(
+            exit_code == -1 || exit_code == 143,
+            "Expected exit_code -1 or 143, got {}",
+            exit_code
+        );
+        if exit_code == -1 {
+            assert_eq!(metadata["signal"], 15); // SIGTERM
+        }
     }
 }
