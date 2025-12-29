@@ -49,9 +49,11 @@
 
 mod adapter;
 mod registry;
+mod service;
 
 pub use adapter::{tools_to_callables, ToolCallableAdapter};
 pub use registry::ToolRegistry;
+pub use service::GemicroToolService;
 
 use async_trait::async_trait;
 use rust_genai::{FunctionDeclaration, FunctionParameters};
