@@ -32,15 +32,14 @@
 pub mod tools;
 
 use gemicro_core::{
-    remaining_time, timeout_error, tools_to_callables, with_timeout_and_cancellation, Agent,
-    AgentContext, AgentError, AgentStream, AgentUpdate, ResultMetadata, ToolRegistry, ToolSet,
-    MODEL,
+    remaining_time, timeout_error, with_timeout_and_cancellation, Agent, AgentContext, AgentError,
+    AgentStream, AgentUpdate, GemicroToolService, ResultMetadata, ToolRegistry, ToolSet, MODEL,
 };
 use tools::default_registry;
 
 use async_stream::try_stream;
 use futures_util::Stream;
-use rust_genai::{AutoFunctionResult, CallableFunction, FunctionDeclaration};
+use rust_genai::AutoFunctionResult;
 use serde_json::json;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -218,23 +217,33 @@ impl ToolAgent {
 
             // Use context tools if provided, otherwise use default registry
             let registry = context.tools.as_ref().unwrap_or(&default_registry);
-            let filtered_tools = registry.filter(&config.tool_filter);
 
-            // Get adapters for the filtered tools
-            // TODO: Phase 3 - Pass confirmation handler from AgentContext
-            let adapters = tools_to_callables(&filtered_tools, None);
-            let functions: Vec<FunctionDeclaration> = adapters.iter().map(|a| a.declaration()).collect();
+            // Build the tool service with filtering and confirmation handler
+            let mut service = GemicroToolService::new(Arc::clone(registry))
+                .with_filter(config.tool_filter.clone());
 
-            if functions.is_empty() {
+            // Add confirmation handler if provided in context
+            if let Some(handler) = &context.confirmation_handler {
+                service = service.with_confirmation_handler(Arc::clone(handler));
+            }
+
+            // Get tool names for the started event
+            let tool_names: Vec<String> = service.registry()
+                .filter(&config.tool_filter)
+                .iter()
+                .map(|t| t.name().to_string())
+                .collect();
+
+            if tool_names.is_empty() {
                 Err(AgentError::InvalidConfig("No tools available after filtering".into()))?;
             }
 
             yield AgentUpdate::custom(
                 EVENT_TOOL_AGENT_STARTED,
-                format!("Processing query with {} tools available", functions.len()),
+                format!("Processing query with {} tools available", tool_names.len()),
                 json!({
                     "query": query,
-                    "tools": functions.iter().map(|f| f.name()).collect::<Vec<_>>(),
+                    "tools": tool_names,
                 }),
             );
 
@@ -245,13 +254,13 @@ impl ToolAgent {
             // Note: We need to use the client directly for function calling
             let client = context.llm.client();
 
-            // Build the interaction with function calling
+            // Build the interaction with tool service (handles confirmation automatically)
             let interaction = client
                 .interaction()
                 .with_model(MODEL)
                 .with_system_instruction(&config.system_prompt)
                 .with_text(&query)
-                .with_functions(functions);
+                .with_tool_service(Arc::new(service));
 
             // Execute with auto function calling and timeout
             let response_future = interaction.create_with_auto_functions();
@@ -356,7 +365,7 @@ impl Agent for ToolAgent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gemicro_core::Tool;
+    use gemicro_core::{tools_to_callables, Tool};
     use rust_genai::CallableFunction;
     use tools::{Calculator, CurrentDatetime};
 

@@ -142,6 +142,8 @@ impl Session {
             llm: self.llm.clone(),
             cancellation_token,
             tools: None,
+            // TODO: Phase 4 will add InteractiveConfirmation handler here
+            confirmation_handler: None,
         }
     }
 
