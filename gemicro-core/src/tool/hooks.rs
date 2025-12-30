@@ -14,8 +14,8 @@
 //!
 //! # Why Hooks Are Enforced in the Adapter
 //!
-//! Hooks live in [`ToolCallableAdapter::call()`](super::ToolCallableAdapter::call)
-//! because it's the **only interception point** when using rust-genai's
+//! Hooks live in [`ToolCallableAdapter`](super::ToolCallableAdapter) because
+//! it's the **only interception point** when using rust-genai's
 //! `create_with_auto_functions()`. The LLM calls `CallableFunction::call()`
 //! directly, bypassing `Tool` and `ToolRegistry` abstractions.
 //!
