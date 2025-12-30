@@ -167,4 +167,131 @@ mod tests {
         let decision = hook.pre_tool_use("test", &input).await.unwrap();
         assert_eq!(decision, HookDecision::Allow);
     }
+
+    // Edge case tests
+
+    #[tokio::test]
+    async fn test_zero_byte_limit() {
+        // Even tiny limits should work (deny everything)
+        let hook = InputSanitizer::new(1);
+        let input = json!({}); // Serializes to "{}" (2 bytes)
+        let decision = hook.pre_tool_use("test", &input).await.unwrap();
+
+        // Should deny - even empty JSON has size
+        match decision {
+            HookDecision::Deny { reason } => {
+                assert!(reason.contains("too large"));
+                assert!(reason.contains("100% over limit"));
+            }
+            _ => panic!("Expected deny for zero-byte limit"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_at_exact_boundary() {
+        let hook = InputSanitizer::new(100);
+
+        // Create input that serializes to EXACTLY 100 bytes
+        // {"data":"xxxx..."} where total is 100 bytes
+        let overhead = "{\"data\":\"\"}".len();
+        let content_len = 100 - overhead;
+        let input = json!({"data": "x".repeat(content_len)});
+
+        let size = serde_json::to_string(&input).unwrap().len();
+        assert_eq!(size, 100, "Test setup: should be exactly 100 bytes");
+
+        let decision = hook.pre_tool_use("test", &input).await.unwrap();
+
+        // At limit should ALLOW (only > limit is denied, see line 86)
+        assert_eq!(
+            decision,
+            HookDecision::Allow,
+            "Should allow at exact boundary"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_one_over_boundary() {
+        let hook = InputSanitizer::new(100);
+
+        let overhead = "{\"data\":\"\"}".len();
+        let content_len = 100 - overhead + 1; // One over
+        let input = json!({"data": "x".repeat(content_len)});
+
+        let decision = hook.pre_tool_use("test", &input).await.unwrap();
+
+        match decision {
+            HookDecision::Deny { reason } => {
+                assert!(reason.contains("101 bytes"));
+                assert!(reason.contains("max: 100 bytes"));
+            }
+            _ => panic!("Expected deny one byte over limit"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_deeply_nested_json() {
+        let hook = InputSanitizer::new(100000); // Large limit
+
+        // Create 100-level nested structure (not too deep to overflow stack)
+        let mut nested = json!("base");
+        for _ in 0..100 {
+            nested = json!([nested]);
+        }
+
+        let input = json!({"data": nested});
+
+        // Should either handle gracefully or return error
+        let result = hook.pre_tool_use("test", &input).await;
+
+        match result {
+            Ok(HookDecision::Allow) => {
+                // Successfully serialized and within limit
+            }
+            Ok(HookDecision::Deny { reason }) => {
+                // Serialized but exceeded limit
+                assert!(reason.contains("too large"));
+            }
+            Err(HookError::ExecutionFailed(msg)) => {
+                // Serialization failed - acceptable
+                assert!(msg.contains("serialize"));
+            }
+            _ => panic!("Unexpected result for deeply nested JSON"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_large_array() {
+        let hook = InputSanitizer::new(100);
+
+        // Large array should be blocked
+        let large_array: Vec<i32> = (0..1000).collect();
+        let input = json!({"numbers": large_array});
+
+        let decision = hook.pre_tool_use("test", &input).await.unwrap();
+
+        match decision {
+            HookDecision::Deny { .. } => {
+                // Expected - large array exceeds limit
+            }
+            _ => panic!("Expected deny for large array"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_unicode_strings() {
+        let hook = InputSanitizer::new(100);
+
+        // Unicode characters can be multiple bytes
+        let input = json!({"text": "日本語 🎌 test"});
+        let size = serde_json::to_string(&input).unwrap().len();
+
+        let decision = hook.pre_tool_use("test", &input).await.unwrap();
+
+        if size > 100 {
+            assert!(matches!(decision, HookDecision::Deny { .. }));
+        } else {
+            assert_eq!(decision, HookDecision::Allow);
+        }
+    }
 }

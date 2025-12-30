@@ -68,6 +68,7 @@ pub struct MetricsSnapshot {
 
 /// Point-in-time statistics for a tool.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ToolStatsSnapshot {
     pub invocations: u64,
     pub successes: u64,
@@ -335,5 +336,106 @@ mod tests {
         assert_eq!(snapshot.total_invocations(), 15);
         assert_eq!(snapshot.total_successes(), 13);
         assert_eq!(snapshot.total_failures(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_invocations() {
+        use std::sync::Arc;
+
+        let metrics = Arc::new(Metrics::new());
+
+        // Spawn 10 tasks, each doing 100 iterations
+        let mut handles = vec![];
+        for _ in 0..10 {
+            let m = Arc::clone(&metrics);
+            handles.push(tokio::spawn(async move {
+                for _ in 0..100 {
+                    m.pre_tool_use("concurrent_tool", &json!({})).await.unwrap();
+                    m.post_tool_use("concurrent_tool", &json!({}), &ToolResult::text("ok"))
+                        .await
+                        .unwrap();
+                }
+            }));
+        }
+
+        // Wait for all tasks
+        for h in handles {
+            h.await.unwrap();
+        }
+
+        // Verify totals
+        let snapshot = metrics.snapshot();
+        let stats = snapshot.get("concurrent_tool").unwrap();
+
+        // 10 tasks * 100 iterations = 1000 total
+        assert_eq!(
+            stats.invocations, 1000,
+            "Concurrent invocations not counted correctly"
+        );
+        assert_eq!(
+            stats.successes, 1000,
+            "Concurrent successes not counted correctly"
+        );
+        assert_eq!(stats.failures, 0);
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_consistency_during_updates() {
+        use std::sync::Arc;
+
+        let metrics = Arc::new(Metrics::new());
+
+        // Start background task doing rapid updates
+        let m = Arc::clone(&metrics);
+        let updater = tokio::spawn(async move {
+            for _ in 0..1000 {
+                m.pre_tool_use("tool", &json!({})).await.unwrap();
+                m.post_tool_use("tool", &json!({}), &ToolResult::text("ok"))
+                    .await
+                    .unwrap();
+            }
+        });
+
+        // Take snapshots concurrently
+        for _ in 0..20 {
+            let snapshot = metrics.snapshot();
+            if let Some(stats) = snapshot.get("tool") {
+                // Invariant: invocations should equal successes + failures
+                assert_eq!(
+                    stats.invocations,
+                    stats.successes + stats.failures,
+                    "Snapshot inconsistency detected"
+                );
+            }
+            tokio::task::yield_now().await;
+        }
+
+        updater.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_reset_during_active_recording() {
+        let metrics = Metrics::new();
+
+        // Start recording
+        metrics.pre_tool_use("tool", &json!({})).await.unwrap();
+
+        // Reset while in "pre" state (before post)
+        metrics.reset();
+
+        // Now call post for a tool that was reset
+        metrics
+            .post_tool_use("tool", &json!({}), &ToolResult::text("ok"))
+            .await
+            .unwrap();
+
+        let snapshot = metrics.snapshot();
+
+        // After reset and post, tool should exist with 0 invocations, 1 success
+        // This is acceptable behavior - metrics are best-effort
+        if let Some(stats) = snapshot.get("tool") {
+            assert_eq!(stats.invocations, 0, "Invocations should be 0 after reset");
+            assert_eq!(stats.successes, 1, "Success recorded after reset");
+        }
     }
 }

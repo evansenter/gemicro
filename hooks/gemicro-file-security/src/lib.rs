@@ -36,13 +36,33 @@ use std::path::PathBuf;
 /// - Blocks any operation where the `path` parameter starts with a blocked path
 /// - Other tools and operations pass through unchanged
 ///
-/// # Security Note
+/// # Security Warnings
 ///
-/// This hook provides defense-in-depth but should not be the only security
-/// layer. Tools can still:
-/// - Read from blocked paths (use separate read hook if needed)
-/// - Use symlinks to bypass checks (resolve symlinks first if critical)
-/// - Use relative paths that escape to blocked locations
+/// **This hook has known bypass vulnerabilities and should NOT be relied upon
+/// as the sole security mechanism:**
+///
+/// ## Known Bypass Methods
+///
+/// 1. **Symlink Attacks**: If `/tmp/evil -> /etc/passwd`, writing to `/tmp/evil`
+///    will NOT be blocked. The hook does not resolve symlinks.
+///
+/// 2. **Relative Path Traversal**: Paths like `../../etc/passwd` or
+///    `/safe/../etc/passwd` may bypass blocks depending on current directory
+///    and path resolution. The hook only checks literal prefix matching.
+///
+/// 3. **Case Sensitivity**: On case-insensitive filesystems (macOS, Windows),
+///    `/ETC/passwd` might bypass `/etc` blocks depending on PathBuf behavior.
+///
+/// ## Recommendations for Production Use
+///
+/// - **Canonicalize paths** before passing to `new()` using
+///   `path.canonicalize()` if paths exist on disk
+/// - **Combine with OS-level controls** like file permissions, SELinux, or
+///   sandboxing
+/// - **Validate inputs** at multiple layers, not just this hook
+/// - **Monitor and audit** tool execution with the audit-log hook
+///
+/// This hook is best used as **defense-in-depth**, not primary security.
 #[derive(Debug, Clone)]
 pub struct FileSecurity {
     blocked_paths: Vec<PathBuf>,
@@ -53,6 +73,11 @@ impl FileSecurity {
     ///
     /// Any tool attempting to write to these paths (or their subdirectories)
     /// will be denied.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `blocked_paths` is empty. Use at least one path to create
+    /// a meaningful security policy.
     ///
     /// # Example
     ///
@@ -66,6 +91,9 @@ impl FileSecurity {
     /// ]);
     /// ```
     pub fn new(blocked_paths: Vec<PathBuf>) -> Self {
+        if blocked_paths.is_empty() {
+            panic!("FileSecurity requires at least one blocked path");
+        }
         Self { blocked_paths }
     }
 
@@ -160,5 +188,59 @@ mod tests {
         let input = json!({"other": "field"});
         let decision = hook.pre_tool_use("file_write", &input).await.unwrap();
         assert_eq!(decision, HookDecision::Allow);
+    }
+
+    #[tokio::test]
+    async fn test_blocks_subdirectories() {
+        let hook = FileSecurity::new(vec![PathBuf::from("/etc")]);
+        let input = json!({"path": "/etc/systemd/system/evil.service"});
+        let decision = hook.pre_tool_use("file_write", &input).await.unwrap();
+        assert!(
+            matches!(decision, HookDecision::Deny { .. }),
+            "Should block subdirectories of blocked paths"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "FileSecurity requires at least one blocked path")]
+    fn test_panics_on_empty_paths() {
+        FileSecurity::new(vec![]);
+    }
+
+    // Tests documenting known security limitations (bypasses)
+
+    #[tokio::test]
+    async fn test_relative_path_traversal_not_prevented() {
+        // KNOWN LIMITATION: Relative path traversal can bypass blocks
+        // This test documents the current behavior - NOT a bug fix
+        let hook = FileSecurity::new(vec![PathBuf::from("/etc")]);
+
+        // Path that escapes to /etc via relative traversal
+        let input = json!({"path": "/home/user/../../etc/passwd"});
+        let decision = hook.pre_tool_use("file_write", &input).await.unwrap();
+
+        // Currently ALLOWS (starts_with check passes because path starts with /home)
+        // This is the documented vulnerability - hook doesn't canonicalize
+        assert_eq!(
+            decision,
+            HookDecision::Allow,
+            "KNOWN BYPASS: Hook allows relative path traversal (no canonicalization)"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_relative_path_from_cwd_not_prevented() {
+        // KNOWN LIMITATION: Relative paths depend on CWD and aren't resolved
+        let hook = FileSecurity::new(vec![PathBuf::from("/etc")]);
+
+        let input = json!({"path": "../../etc/passwd"});
+        let decision = hook.pre_tool_use("file_write", &input).await.unwrap();
+
+        // Currently ALLOWS (doesn't start with /etc)
+        assert_eq!(
+            decision,
+            HookDecision::Allow,
+            "KNOWN BYPASS: Hook allows relative paths (no CWD resolution)"
+        );
     }
 }
