@@ -679,4 +679,249 @@ mod tests {
         let empty_streaming = LlmResponseData::Streaming(vec![]);
         assert_eq!(empty_streaming.text(), None);
     }
+
+    // ========================================================================
+    // Comprehensive round-trip tests (issue #149)
+    // ========================================================================
+
+    /// Comprehensive file round-trip test that verifies ALL fields survive save/load.
+    ///
+    /// This catches subtle serialization issues like:
+    /// - SystemTime precision loss
+    /// - Optional field handling
+    /// - Nested struct serialization
+    #[test]
+    fn test_trajectory_file_roundtrip_comprehensive() {
+        use tempfile::NamedTempFile;
+
+        // Build trajectory with ALL fields populated
+        let trajectory = Trajectory::builder()
+            .query("Comprehensive roundtrip test query")
+            .agent_name("test_agent_comprehensive")
+            .agent_config(json!({
+                "temperature": 0.7,
+                "nested": {"key": "value"},
+                "array": [1, 2, 3]
+            }))
+            .model("test-model-v1")
+            .build(
+                vec![sample_step()],
+                sample_events(),
+                12345,
+                Some("The final answer is 42.".to_string()),
+            );
+
+        // Save to temp file
+        let temp_file = NamedTempFile::new().unwrap();
+        trajectory.save(temp_file.path()).unwrap();
+
+        // Load back
+        let loaded = Trajectory::load(temp_file.path()).unwrap();
+
+        // Verify ALL top-level fields
+        assert_eq!(loaded.id, trajectory.id, "id mismatch");
+        assert_eq!(loaded.query, trajectory.query, "query mismatch");
+        assert_eq!(
+            loaded.agent_name, trajectory.agent_name,
+            "agent_name mismatch"
+        );
+        assert_eq!(
+            loaded.agent_config, trajectory.agent_config,
+            "agent_config mismatch"
+        );
+
+        // Verify metadata
+        assert_eq!(
+            loaded.metadata.total_duration_ms, trajectory.metadata.total_duration_ms,
+            "total_duration_ms mismatch"
+        );
+        assert_eq!(
+            loaded.metadata.total_tokens, trajectory.metadata.total_tokens,
+            "total_tokens mismatch"
+        );
+        assert_eq!(
+            loaded.metadata.tokens_unavailable_count, trajectory.metadata.tokens_unavailable_count,
+            "tokens_unavailable_count mismatch"
+        );
+        assert_eq!(
+            loaded.metadata.final_answer, trajectory.metadata.final_answer,
+            "final_answer mismatch"
+        );
+        assert_eq!(
+            loaded.metadata.model, trajectory.metadata.model,
+            "model mismatch"
+        );
+        assert_eq!(
+            loaded.metadata.schema_version, trajectory.metadata.schema_version,
+            "schema_version mismatch"
+        );
+
+        // Verify steps
+        assert_eq!(
+            loaded.steps.len(),
+            trajectory.steps.len(),
+            "steps length mismatch"
+        );
+        let orig_step = &trajectory.steps[0];
+        let loaded_step = &loaded.steps[0];
+        assert_eq!(loaded_step.phase, orig_step.phase, "step phase mismatch");
+        assert_eq!(
+            loaded_step.duration_ms, orig_step.duration_ms,
+            "step duration_ms mismatch"
+        );
+        assert_eq!(
+            loaded_step.request.prompt, orig_step.request.prompt,
+            "step request.prompt mismatch"
+        );
+        assert_eq!(
+            loaded_step.request.system_instruction, orig_step.request.system_instruction,
+            "step request.system_instruction mismatch"
+        );
+
+        // Verify events
+        assert_eq!(
+            loaded.events.len(),
+            trajectory.events.len(),
+            "events length mismatch"
+        );
+        assert_eq!(
+            loaded.events[0].event_type, trajectory.events[0].event_type,
+            "event type mismatch"
+        );
+        assert_eq!(
+            loaded.events[1].event_type, trajectory.events[1].event_type,
+            "final_result event type mismatch"
+        );
+
+        // Verify timestamps survive round-trip (serialized as whole seconds)
+        // Note: Sub-second precision is intentionally lost per system_time_serde
+        // Compare at seconds granularity since nanoseconds are truncated
+        use std::time::UNIX_EPOCH;
+        let orig_created_secs = trajectory
+            .metadata
+            .created_at
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let loaded_created_secs = loaded
+            .metadata
+            .created_at
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        assert_eq!(
+            loaded_created_secs, orig_created_secs,
+            "trajectory created_at seconds mismatch"
+        );
+
+        let orig_started_secs = orig_step
+            .started_at
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let loaded_started_secs = loaded_step
+            .started_at
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        assert_eq!(
+            loaded_started_secs, orig_started_secs,
+            "step started_at seconds mismatch"
+        );
+    }
+
+    /// Test file round-trip with streaming response data.
+    #[test]
+    fn test_trajectory_file_roundtrip_streaming() {
+        use tempfile::NamedTempFile;
+
+        let streaming_step = TrajectoryStep {
+            phase: "streaming_phase".to_string(),
+            request: sample_request(),
+            response: LlmResponseData::Streaming(vec![
+                SerializableStreamChunk {
+                    text: "First ".to_string(),
+                    offset_ms: 10,
+                },
+                SerializableStreamChunk {
+                    text: "second ".to_string(),
+                    offset_ms: 50,
+                },
+                SerializableStreamChunk {
+                    text: "third".to_string(),
+                    offset_ms: 100,
+                },
+            ]),
+            duration_ms: 150,
+            started_at: SystemTime::now(),
+        };
+
+        let trajectory = Trajectory::builder()
+            .query("Streaming test")
+            .agent_name("streaming_agent")
+            .build(vec![streaming_step], vec![], 150, None);
+
+        let temp_file = NamedTempFile::new().unwrap();
+        trajectory.save(temp_file.path()).unwrap();
+        let loaded = Trajectory::load(temp_file.path()).unwrap();
+
+        // Verify streaming chunks survived
+        let chunks = loaded.steps[0]
+            .response
+            .as_streaming()
+            .expect("Expected streaming response");
+        assert_eq!(chunks.len(), 3);
+        assert_eq!(chunks[0].text, "First ");
+        assert_eq!(chunks[0].offset_ms, 10);
+        assert_eq!(chunks[1].text, "second ");
+        assert_eq!(chunks[2].text, "third");
+        assert_eq!(chunks[2].offset_ms, 100);
+
+        // Verify text extraction works after round-trip
+        assert_eq!(
+            loaded.steps[0].response.text(),
+            Some("First second third".to_string())
+        );
+    }
+
+    /// Test that load() returns appropriate error for corrupted JSON.
+    #[test]
+    fn test_trajectory_load_corrupted_json() {
+        use tempfile::NamedTempFile;
+
+        let temp_file = NamedTempFile::new().unwrap();
+
+        // Write invalid JSON
+        std::fs::write(temp_file.path(), "{ invalid json }").unwrap();
+
+        let result = Trajectory::load(temp_file.path());
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    /// Test that load() returns appropriate error for valid JSON with wrong schema.
+    #[test]
+    fn test_trajectory_load_wrong_schema() {
+        use tempfile::NamedTempFile;
+
+        let temp_file = NamedTempFile::new().unwrap();
+
+        // Write valid JSON but wrong schema (missing required fields)
+        std::fs::write(temp_file.path(), r#"{"foo": "bar"}"#).unwrap();
+
+        let result = Trajectory::load(temp_file.path());
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    /// Test that load() returns appropriate error for nonexistent file.
+    #[test]
+    fn test_trajectory_load_nonexistent() {
+        let result = Trajectory::load("/nonexistent/path/to/trajectory.json");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+    }
 }
