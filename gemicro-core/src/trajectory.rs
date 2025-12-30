@@ -792,6 +792,42 @@ mod tests {
             loaded.events[1].event_type, trajectory.events[1].event_type,
             "final_result event type mismatch"
         );
+
+        // Verify timestamps survive round-trip (serialized as whole seconds)
+        // Note: Sub-second precision is intentionally lost per system_time_serde
+        // Compare at seconds granularity since nanoseconds are truncated
+        use std::time::UNIX_EPOCH;
+        let orig_created_secs = trajectory
+            .metadata
+            .created_at
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let loaded_created_secs = loaded
+            .metadata
+            .created_at
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        assert_eq!(
+            loaded_created_secs, orig_created_secs,
+            "trajectory created_at seconds mismatch"
+        );
+
+        let orig_started_secs = orig_step
+            .started_at
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let loaded_started_secs = loaded_step
+            .started_at
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        assert_eq!(
+            loaded_started_secs, orig_started_secs,
+            "step started_at seconds mismatch"
+        );
     }
 
     /// Test file round-trip with streaming response data.
