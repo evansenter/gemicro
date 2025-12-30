@@ -3,7 +3,7 @@
 //! Provides [`GemicroToolService`] which implements rust-genai's `ToolService` trait,
 //! enabling gemicro tools to work with `create_with_auto_functions()`.
 
-use super::{ConfirmationHandler, ToolCallableAdapter, ToolRegistry, ToolSet};
+use super::{ConfirmationHandler, HookRegistry, ToolCallableAdapter, ToolRegistry, ToolSet};
 use rust_genai::{CallableFunction, ToolService};
 use std::sync::Arc;
 
@@ -44,6 +44,7 @@ pub struct GemicroToolService {
     registry: Arc<ToolRegistry>,
     filter: ToolSet,
     confirmation_handler: Option<Arc<dyn ConfirmationHandler>>,
+    hooks: Option<Arc<HookRegistry>>,
 }
 
 impl GemicroToolService {
@@ -60,6 +61,7 @@ impl GemicroToolService {
             registry,
             filter: ToolSet::All,
             confirmation_handler: None,
+            hooks: None,
         }
     }
 
@@ -108,6 +110,27 @@ impl GemicroToolService {
         self
     }
 
+    /// Set the hook registry for tool interception.
+    ///
+    /// Hooks are called before and after tool execution for validation,
+    /// logging, and security controls.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use gemicro_core::tool::{GemicroToolService, ToolRegistry, HookRegistry};
+    /// use std::sync::Arc;
+    ///
+    /// let registry = ToolRegistry::new();
+    /// let hooks = HookRegistry::new();
+    /// let service = GemicroToolService::new(Arc::new(registry))
+    ///     .with_hooks(Arc::new(hooks));
+    /// ```
+    pub fn with_hooks(mut self, hooks: Arc<HookRegistry>) -> Self {
+        self.hooks = Some(hooks);
+        self
+    }
+
     /// Get the underlying registry.
     pub fn registry(&self) -> &Arc<ToolRegistry> {
         &self.registry
@@ -133,6 +156,9 @@ impl ToolService for GemicroToolService {
                 let mut adapter = ToolCallableAdapter::new(tool);
                 if let Some(h) = &self.confirmation_handler {
                     adapter = adapter.with_confirmation_handler(Arc::clone(h));
+                }
+                if let Some(h) = &self.hooks {
+                    adapter = adapter.with_hooks(Arc::clone(h));
                 }
                 Arc::new(adapter) as Arc<dyn CallableFunction>
             })

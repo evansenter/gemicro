@@ -2,8 +2,39 @@
 //!
 //! This module provides [`ToolCallableAdapter`] which bridges the gap between
 //! our async [`Tool`] trait and rust-genai's async `CallableFunction` trait.
+//!
+//! # Architecture: Why Hooks Live Here
+//!
+//! The adapter is the **critical interception point** for tool execution:
+//!
+//! ```text
+//! LLM (via rust-genai)
+//!     ↓ calls create_with_auto_functions()
+//! CallableFunction::call()  ← ONLY INTERCEPTION POINT
+//!     ↓ implemented by
+//! ToolCallableAdapter
+//!     ├─ Pre-hooks (validation, security)
+//!     ├─ Confirmation (user approval)
+//!     ├─ Tool::execute()
+//!     └─ Post-hooks (logging, metrics)
+//! ```
+//!
+//! When using rust-genai's automatic function calling, the LLM invokes
+//! `CallableFunction::call()` directly. There is no opportunity to intercept
+//! at the `Tool` or `ToolRegistry` level - those abstractions are bypassed.
+//!
+//! **Alternative designs considered:**
+//! - Hooks in `ToolRegistry::execute()` ❌ Bypassed by rust-genai
+//! - Hooks in `Tool::execute()` ❌ Couples all tools to hook logic
+//! - Hooks in `ToolCallableAdapter::call()` ✅ Single enforcement point
+//!
+//! **Trade-off:**
+//! Direct calls to `tool.execute()` bypass hooks. This is acceptable because:
+//! - Direct calls are for testing or manual tool invocation
+//! - LLM function calling (the primary use case) goes through the adapter
+//! - Hooks are opt-in via `with_hooks()` builder method
 
-use super::{ConfirmationHandler, Tool, ToolError};
+use super::{ConfirmationHandler, HookDecision, HookRegistry, Tool, ToolError};
 use async_trait::async_trait;
 use rust_genai::{CallableFunction, FunctionDeclaration, FunctionError};
 use serde_json::Value;
@@ -49,6 +80,7 @@ use std::sync::Arc;
 pub struct ToolCallableAdapter {
     tool: Arc<dyn Tool>,
     confirmation_handler: Option<Arc<dyn ConfirmationHandler>>,
+    hooks: Option<Arc<HookRegistry>>,
 }
 
 impl ToolCallableAdapter {
@@ -61,6 +93,7 @@ impl ToolCallableAdapter {
         Self {
             tool,
             confirmation_handler: None,
+            hooks: None,
         }
     }
 
@@ -82,6 +115,28 @@ impl ToolCallableAdapter {
     /// ```
     pub fn with_confirmation_handler(mut self, handler: Arc<dyn ConfirmationHandler>) -> Self {
         self.confirmation_handler = Some(handler);
+        self
+    }
+
+    /// Set a hook registry for this adapter.
+    ///
+    /// Hooks are called before and after tool execution for validation,
+    /// logging, and security controls.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use gemicro_core::tool::{ToolCallableAdapter, HookRegistry};
+    /// use std::sync::Arc;
+    ///
+    /// # fn example(tool: Arc<dyn gemicro_core::tool::Tool>) {
+    /// let hooks = HookRegistry::new();
+    /// let adapter = ToolCallableAdapter::new(tool)
+    ///     .with_hooks(Arc::new(hooks));
+    /// # }
+    /// ```
+    pub fn with_hooks(mut self, hooks: Arc<HookRegistry>) -> Self {
+        self.hooks = Some(hooks);
         self
     }
 
@@ -112,13 +167,63 @@ impl CallableFunction for ToolCallableAdapter {
     }
 
     async fn call(&self, args: Value) -> Result<Value, FunctionError> {
-        // Check confirmation before execution for tools that require it
-        if self.tool.requires_confirmation(&args) {
-            let message = self.tool.confirmation_message(&args);
+        // 1. PRE-HOOKS: Validate and potentially modify input
+        let mut final_args = args.clone();
+        if let Some(hooks) = &self.hooks {
+            match hooks.pre_tool_use(self.tool.name(), &args).await {
+                Ok(HookDecision::Allow) => {
+                    // Continue with original args
+                }
+                Ok(HookDecision::AllowWithModifiedInput(modified)) => {
+                    // Use modified args for execution
+                    final_args = modified;
+                }
+                Ok(HookDecision::RequestPermission { message }) => {
+                    // Hook requests permission - use confirmation handler
+                    match &self.confirmation_handler {
+                        Some(handler) => {
+                            if !handler.confirm(self.tool.name(), &message, &args).await {
+                                return Err(FunctionError::ExecutionError(Box::new(
+                                    ToolError::ConfirmationDenied(message),
+                                )));
+                            }
+                            // Permission granted - continue with original args
+                        }
+                        None => {
+                            // No handler = deny by default for safety
+                            return Err(FunctionError::ExecutionError(Box::new(
+                                ToolError::ConfirmationDenied(format!(
+                                    "Hook requested permission but no confirmation handler configured: {}",
+                                    message
+                                )),
+                            )));
+                        }
+                    }
+                }
+                Ok(HookDecision::Deny { reason }) => {
+                    return Err(FunctionError::ExecutionError(Box::new(
+                        ToolError::HookDenied(reason),
+                    )));
+                }
+                Err(e) => {
+                    // Hook failure = deny for safety
+                    return Err(FunctionError::ExecutionError(Box::new(
+                        ToolError::HookFailed(format!("Pre-hook failed: {}", e)),
+                    )));
+                }
+            }
+        }
+
+        // 2. CONFIRMATION: Check if user approval is needed
+        if self.tool.requires_confirmation(&final_args) {
+            let message = self.tool.confirmation_message(&final_args);
 
             match &self.confirmation_handler {
                 Some(handler) => {
-                    if !handler.confirm(self.tool.name(), &message, &args).await {
+                    if !handler
+                        .confirm(self.tool.name(), &message, &final_args)
+                        .await
+                    {
                         return Err(FunctionError::ExecutionError(Box::new(
                             ToolError::ConfirmationDenied(message),
                         )));
@@ -137,18 +242,29 @@ impl CallableFunction for ToolCallableAdapter {
             }
         }
 
-        // Execute the tool
-        match self.tool.execute(args).await {
-            Ok(result) => {
-                // Return content directly - it's already a Value.
-                // Note: ToolResult::metadata is intentionally not returned here because
-                // rust-genai's CallableFunction expects a simple Value result that gets
-                // passed back to the LLM. Metadata is for observability/logging within
-                // gemicro, not for LLM consumption.
-                Ok(result.content)
+        // 3. EXECUTE: Run the tool
+        let result = match self.tool.execute(final_args.clone()).await {
+            Ok(result) => result,
+            Err(e) => return Err(FunctionError::ExecutionError(Box::new(e))),
+        };
+
+        // 4. POST-HOOKS: Observability (errors logged, don't fail execution)
+        if let Some(hooks) = &self.hooks {
+            if let Err(e) = hooks
+                .post_tool_use(self.tool.name(), &final_args, &result)
+                .await
+            {
+                log::warn!("Post-hook failed for tool '{}': {}", self.tool.name(), e);
+                // Continue - post-hooks don't block results
             }
-            Err(e) => Err(FunctionError::ExecutionError(Box::new(e))),
         }
+
+        // Return content directly - it's already a Value.
+        // Note: ToolResult::metadata is intentionally not returned here because
+        // rust-genai's CallableFunction expects a simple Value result that gets
+        // passed back to the LLM. Metadata is for observability/logging within
+        // gemicro, not for LLM consumption.
+        Ok(result.content)
     }
 }
 

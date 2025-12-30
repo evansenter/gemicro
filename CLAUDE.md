@@ -599,6 +599,142 @@ When a tool requires confirmation:
 | `AutoDeny` | Always returns false | Safe default when no handler set |
 | `InteractiveConfirmation` | Terminal prompt | CLI applications |
 
+## Hook System
+
+The hook system intercepts tool execution for validation, logging, security controls, and custom logic without modifying tools themselves.
+
+### Architecture
+
+```
+ToolCallableAdapter (enforces hooks)
+    ├─ Pre-hooks → Validate/modify/deny execution
+    ├─ Confirmation → User approval for dangerous operations
+    ├─ Tool::execute() → Actual tool logic
+    └─ Post-hooks → Logging, metrics (observability only)
+```
+
+**Critical Design:** Hooks are enforced in `ToolCallableAdapter::call()` because it's the **only interception point** when using rust-genai's `create_with_auto_functions()`. The LLM calls `CallableFunction::call()` directly, bypassing `Tool` and `ToolRegistry` abstractions. See `gemicro-core/src/tool/adapter.rs` for detailed rationale.
+
+### Usage
+
+```rust
+use gemicro_core::tool::{
+    HookRegistry, GemicroToolService, ToolRegistry,
+    example_hooks::{AuditLogHook, FileSecurityHook, MetricsHook},
+};
+use std::sync::Arc;
+use std::path::PathBuf;
+
+// 1. Create hooks
+let hooks = Arc::new(
+    HookRegistry::new()
+        .with_hook(AuditLogHook)  // Log all tool invocations
+        .with_hook(FileSecurityHook::new(vec![
+            PathBuf::from("/etc"),
+            PathBuf::from("/var"),
+        ]))  // Block writes to sensitive paths
+        .with_hook(MetricsHook)  // Collect usage metrics
+);
+
+// 2. Wire into service
+let mut registry = ToolRegistry::new();
+// ... register tools ...
+
+let service = GemicroToolService::new(Arc::new(registry))
+    .with_hooks(hooks)
+    .with_confirmation_handler(Arc::new(AutoApprove));
+
+// 3. Use with rust-genai
+// client.interaction()
+//     .with_tool_service(Arc::new(service))
+//     .create_with_auto_functions()
+//     .await?;
+```
+
+### Hook Interface
+
+```rust
+#[async_trait]
+pub trait ToolHook: Send + Sync {
+    /// Called before tool execution
+    /// Returns: Allow | AllowWithModifiedInput(Value) | Deny { reason }
+    async fn pre_tool_use(&self, tool_name: &str, input: &Value)
+        -> Result<HookDecision, HookError>;
+
+    /// Called after tool execution (observability only)
+    async fn post_tool_use(&self, tool_name: &str, input: &Value, output: &ToolResult)
+        -> Result<(), HookError>;
+}
+```
+
+### Execution Order
+
+Multiple hooks run in registration order:
+```
+pre_hook_1 → pre_hook_2 → ... → EXECUTE → ... → post_hook_2 → post_hook_1
+```
+
+- First `Deny` stops the chain and prevents execution
+- First `AllowWithModifiedInput` modifies input for subsequent hooks
+- If all return `Allow`, execution proceeds with original input
+- Post-hooks run even if earlier post-hooks fail (logged, not fatal)
+
+### Built-in Example Hooks
+
+| Hook | Purpose | Use Case |
+|------|---------|----------|
+| `AuditLogHook` | Log all tool invocations | Compliance, debugging |
+| `FileSecurityHook` | Block writes to sensitive paths | Security policy enforcement |
+| `InputSanitizerHook` | Enforce input size limits | Resource protection |
+| `MetricsHook` | Track tool usage metrics | Observability |
+
+See `gemicro-core/src/tool/example_hooks.rs` for implementations.
+
+### Custom Hooks
+
+```rust
+use gemicro_core::tool::{ToolHook, HookDecision, HookError, ToolResult};
+use async_trait::async_trait;
+use serde_json::Value;
+
+#[derive(Debug)]
+struct MyCustomHook;
+
+#[async_trait]
+impl ToolHook for MyCustomHook {
+    async fn pre_tool_use(&self, tool_name: &str, input: &Value)
+        -> Result<HookDecision, HookError>
+    {
+        // Custom validation logic
+        if tool_name == "bash" && input["command"].as_str() == Some("rm -rf /") {
+            return Ok(HookDecision::Deny {
+                reason: "Dangerous command blocked".into()
+            });
+        }
+        Ok(HookDecision::Allow)
+    }
+
+    async fn post_tool_use(&self, _: &str, _: &Value, _: &ToolResult)
+        -> Result<(), HookError>
+    {
+        // Logging, metrics, etc.
+        Ok(())
+    }
+}
+```
+
+### Design Trade-offs
+
+**Why hooks live in the adapter:**
+- rust-genai calls `CallableFunction::call()` directly
+- No other interception point exists for auto-function calling
+- Tools stay simple, adapter handles cross-cutting concerns
+
+**Trade-off:**
+- Direct calls to `tool.execute()` bypass hooks
+- Acceptable because direct calls are for testing/manual use
+- LLM function calling (primary use case) always goes through adapter
+
 ## Troubleshooting
 
 | Issue | Solution |
