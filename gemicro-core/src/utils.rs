@@ -114,7 +114,7 @@ mod tests {
 
     fn test_response(usage: Option<rust_genai::UsageMetadata>) -> InteractionResponse {
         InteractionResponse {
-            id: "test".to_string(),
+            id: Some("test".to_string()),
             model: None,
             agent: None,
             input: vec![],
