@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Gemicro is a CLI agent exploration platform for experimenting with AI agent implementation patterns, powered by the Gemini API via the rust-genai library.
 
-**Key Architecture**: 18-crate workspace with layered dependencies (5 agent crates in `agents/`, 9 tool crates in `tools/`)
+**Key Architecture**: 23-crate workspace with layered dependencies (5 agent crates in `agents/`, 9 tool crates in `tools/`, 5 hook crates in `hooks/`)
 
 **Current Status**: Core implementation complete. Remaining work tracked in [GitHub Issues](https://github.com/evansenter/gemicro/issues).
 
@@ -78,9 +78,10 @@ REPL commands: `/help`, `/agent [name]`, `/history`, `/clear`, `/reload`, `/quit
 ## Crate Layers
 
 ```text
-gemicro-core (Agent trait, Tool trait, events, LLM - GENERIC ONLY)
+gemicro-core (Agent trait, Tool trait, ToolHook trait, events, LLM - GENERIC ONLY)
     ↓
 tools/* (one crate per tool - file_read, web_fetch, task, web_search, glob, grep, file_write, file_edit, bash)
+hooks/* (one crate per hook - audit_log, file_security, input_sanitizer, conditional_permission, metrics)
 agents/* (one crate per agent - hermetic isolation)
     ↓
 gemicro-runner (execution state, metrics, runner)
@@ -95,8 +96,9 @@ Each crate has a specific purpose. Before adding code, verify it belongs in that
 
 | Crate | Contains | Does NOT Contain |
 |-------|----------|------------------|
-| **gemicro-core** | Agent trait, Tool trait, AgentContext, AgentUpdate, ToolRegistry, ToolSet, LlmClient, LlmConfig, errors | Agent/tool implementations, agent-specific configs |
-| **tools/*** | One tool per crate (FileRead, WebFetch, Bash, etc.) | Other tools, agent logic |
+| **gemicro-core** | Agent trait, Tool trait, ToolHook trait, HookRegistry, AgentContext, AgentUpdate, ToolRegistry, ToolSet, LlmClient, LlmConfig, errors | Agent/tool/hook implementations, agent-specific configs |
+| **tools/*** | One tool per crate (FileRead, WebFetch, Bash, etc.) | Other tools, agent logic, hook logic |
+| **hooks/*** | One hook per crate (AuditLog, FileSecurity, Metrics, etc.) | Other hooks, agent logic, tool logic |
 | **agents/*** | One agent per crate with its config and events | Other agents, core infrastructure |
 | **gemicro-runner** | AgentRunner, AgentRegistry, ExecutionState, metrics | Agent implementations |
 | **gemicro-eval** | EvalHarness, Scorers, Datasets | Agent implementations |
@@ -106,6 +108,7 @@ Each crate has a specific purpose. Before adding code, verify it belongs in that
 
 - [ ] Is this a new agent? → Create new `agents/gemicro-{agent-name}` crate
 - [ ] Is this a new tool? → Create new `tools/gemicro-{tool-name}` crate
+- [ ] Is this a new hook? → Create new `hooks/gemicro-{hook-name}` crate
 - [ ] Is this agent-specific config/events? → Put in the agent's crate
 - [ ] Is this cross-agent infrastructure? → gemicro-core
 - [ ] Is this evaluation-specific? → gemicro-eval
@@ -128,6 +131,7 @@ Each agent crate:
 |------|------------------|
 | `Agent`, `AgentContext`, `AgentUpdate`, `AgentError` | `gemicro_core` |
 | `Tool`, `ToolRegistry`, `ToolSet`, `ToolResult`, `ToolError` | `gemicro_core::tool` |
+| `ToolHook`, `HookRegistry`, `HookDecision`, `HookError` | `gemicro_core::tool` |
 | `ConfirmationHandler`, `AutoApprove`, `AutoDeny`, `GemicroToolService` | `gemicro_core::tool` |
 | `Calculator`, `CurrentDatetime` | `gemicro_tool_agent::tools` |
 | `FileRead` | `gemicro_file_read` |
@@ -139,6 +143,11 @@ Each agent crate:
 | `FileWrite` | `gemicro_file_write` |
 | `FileEdit` | `gemicro_file_edit` |
 | `Bash` | `gemicro_bash` |
+| `AuditLog` | `gemicro_audit_log` |
+| `FileSecurity` | `gemicro_file_security` |
+| `InputSanitizer` | `gemicro_input_sanitizer` |
+| `ConditionalPermission` | `gemicro_conditional_permission` |
+| `Metrics` | `gemicro_metrics` |
 | `DeepResearchAgent`, `ResearchConfig` | `gemicro_deep_research` |
 | `ReactAgent`, `ReactConfig` | `gemicro_react` |
 | `LlmJudgeAgent`, `JudgeConfig` | `gemicro_judge` |
@@ -618,22 +627,22 @@ ToolCallableAdapter (enforces hooks)
 ### Usage
 
 ```rust
-use gemicro_core::tool::{
-    HookRegistry, GemicroToolService, ToolRegistry,
-    example_hooks::{AuditLogHook, FileSecurityHook, MetricsHook},
-};
+use gemicro_audit_log::AuditLog;
+use gemicro_file_security::FileSecurity;
+use gemicro_metrics::Metrics;
+use gemicro_core::tool::{HookRegistry, GemicroToolService, ToolRegistry};
 use std::sync::Arc;
 use std::path::PathBuf;
 
 // 1. Create hooks
 let hooks = Arc::new(
     HookRegistry::new()
-        .with_hook(AuditLogHook)  // Log all tool invocations
-        .with_hook(FileSecurityHook::new(vec![
+        .with_hook(AuditLog)  // Log all tool invocations
+        .with_hook(FileSecurity::new(vec![
             PathBuf::from("/etc"),
             PathBuf::from("/var"),
         ]))  // Block writes to sensitive paths
-        .with_hook(MetricsHook)  // Collect usage metrics
+        .with_hook(Metrics::new())  // Collect usage metrics
 );
 
 // 2. Wire into service
@@ -679,16 +688,18 @@ pre_hook_1 → pre_hook_2 → ... → EXECUTE → ... → post_hook_2 → post_h
 - If all return `Allow`, execution proceeds with original input
 - Post-hooks run even if earlier post-hooks fail (logged, not fatal)
 
-### Built-in Example Hooks
+### Built-in Hook Crates
 
-| Hook | Purpose | Use Case |
-|------|---------|----------|
-| `AuditLogHook` | Log all tool invocations | Compliance, debugging |
-| `FileSecurityHook` | Block writes to sensitive paths | Security policy enforcement |
-| `InputSanitizerHook` | Enforce input size limits | Resource protection |
-| `MetricsHook` | Track tool usage metrics | Observability |
+| Hook Crate | Purpose | Use Case |
+|------------|---------|----------|
+| `gemicro-audit-log` | Log all tool invocations | Compliance, debugging |
+| `gemicro-file-security` | Block writes to sensitive paths | Security policy enforcement |
+| `gemicro-input-sanitizer` | Enforce input size limits | Resource protection |
+| `gemicro-conditional-permission` | Request permission for dangerous operations | Dynamic security controls |
+| `gemicro-metrics` | Track tool usage metrics | Observability |
 
-See `gemicro-core/src/tool/example_hooks.rs` for implementations.
+Each hook is a separate crate in `hooks/` following the same pattern as tools and agents.
+See individual crate documentation for usage examples and configuration options.
 
 ### Custom Hooks
 

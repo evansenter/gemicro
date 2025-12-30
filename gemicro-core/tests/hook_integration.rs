@@ -1,11 +1,14 @@
 //! Integration tests for hook system with adapters and tools.
 
 use async_trait::async_trait;
+use gemicro_audit_log::AuditLog;
 use gemicro_core::tool::{
-    example_hooks::{AuditLogHook, FileSecurityHook, InputSanitizerHook, MetricsHook},
     HookDecision, HookError, HookRegistry, Tool, ToolCallableAdapter, ToolError, ToolHook,
     ToolResult,
 };
+use gemicro_file_security::FileSecurity;
+use gemicro_input_sanitizer::InputSanitizer;
+use gemicro_metrics::Metrics;
 use rust_genai::CallableFunction;
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -45,8 +48,8 @@ async fn test_hooks_integrated_with_adapter() {
     // Create hooks
     let hooks = Arc::new(
         HookRegistry::new()
-            .with_hook(AuditLogHook)
-            .with_hook(MetricsHook),
+            .with_hook(AuditLog)
+            .with_hook(Metrics::new()),
     );
 
     // Create adapter with hooks
@@ -147,7 +150,7 @@ async fn test_file_security_hook_integration() {
     }
 
     let hooks =
-        Arc::new(HookRegistry::new().with_hook(FileSecurityHook::new(vec![PathBuf::from("/etc")])));
+        Arc::new(HookRegistry::new().with_hook(FileSecurity::new(vec![PathBuf::from("/etc")])));
 
     let tool = Arc::new(FileWriteTool);
     let adapter = ToolCallableAdapter::new(tool).with_hooks(hooks);
@@ -167,7 +170,7 @@ async fn test_file_security_hook_integration() {
 
 #[tokio::test]
 async fn test_input_sanitizer_integration() {
-    let hooks = Arc::new(HookRegistry::new().with_hook(InputSanitizerHook::new(50)));
+    let hooks = Arc::new(HookRegistry::new().with_hook(InputSanitizer::new(50)));
 
     let tool = Arc::new(TestTool);
     let adapter = ToolCallableAdapter::new(tool).with_hooks(hooks);

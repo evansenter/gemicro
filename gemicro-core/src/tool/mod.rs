@@ -48,7 +48,6 @@
 //! ```
 
 mod adapter;
-pub mod example_hooks;
 mod hooks;
 mod registry;
 mod service;

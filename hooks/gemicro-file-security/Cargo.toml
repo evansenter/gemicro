@@ -1,0 +1,17 @@
+[package]
+name = "gemicro-file-security"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+description = "File security hook for gemicro - blocks writes to sensitive paths"
+
+[dependencies]
+gemicro-core = { path = "../../gemicro-core" }
+async-trait.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "macros"] }

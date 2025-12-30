@@ -1,0 +1,17 @@
+[package]
+name = "gemicro-input-sanitizer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+description = "Input sanitization hook for gemicro - enforces size limits on tool inputs"
+
+[dependencies]
+gemicro-core = { path = "../../gemicro-core" }
+async-trait.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "macros"] }

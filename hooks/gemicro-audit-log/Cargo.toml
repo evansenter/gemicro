@@ -1,0 +1,18 @@
+[package]
+name = "gemicro-audit-log"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+description = "Audit logging hook for gemicro tool execution"
+
+[dependencies]
+gemicro-core = { path = "../../gemicro-core" }
+async-trait.workspace = true
+serde_json.workspace = true
+log.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "macros"] }
