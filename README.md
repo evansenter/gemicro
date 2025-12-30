@@ -25,8 +25,8 @@ Gemicro allows you to explore and interact with different AI agent patterns thro
 ```
 gemicro-core (Agent trait, Tool trait, events, LLM - GENERIC ONLY)
     ↓
-tools/* (one crate per tool - file_read, web_fetch, bash, etc.)
-agents/* (one crate per agent - hermetic isolation)
+tools/* (9 tool crates - file_read, web_fetch, bash, glob, grep, etc.)
+agents/* (5 agent crates - hermetic isolation)
     ↓
 gemicro-runner (execution state, metrics, runner)
     ↓
@@ -34,17 +34,14 @@ gemicro-eval (datasets, scorers, harness)
 gemicro-cli (terminal rendering)
 ```
 
-| Crate | Purpose |
-|-------|---------|
-| **gemicro-core** | Platform-agnostic library: Agent trait, AgentContext, AgentUpdate events, LlmClient, conversation history. **No agent implementations.** |
-| **agents/gemicro-deep-research** | DeepResearchAgent: query decomposition, parallel sub-query execution, synthesis |
-| **agents/gemicro-react** | ReactAgent: Thought → Action → Observation reasoning loops |
-| **agents/gemicro-simple-qa** | SimpleQaAgent: minimal reference implementation |
-| **agents/gemicro-tool-agent** | ToolAgent: native function calling with calculator/datetime tools |
-| **agents/gemicro-judge** | LlmJudgeAgent: LLM-based evaluation scoring |
-| **gemicro-runner** | Headless execution runtime: ExecutionState, AgentRunner, AgentRegistry, metrics collection |
-| **gemicro-eval** | Evaluation framework: HotpotQA/custom datasets, scorers (Contains, LLM Judge) |
-| **gemicro-cli** | Terminal UI: indicatif progress display, rustyline REPL, markdown rendering |
+| Layer | Crates |
+|-------|--------|
+| **gemicro-core** | Agent/Tool traits, AgentContext, AgentUpdate events, LlmClient. **No implementations.** |
+| **tools/** | file_read, web_fetch, task, web_search, glob, grep, file_write, file_edit, bash |
+| **agents/** | deep_research, react, simple_qa, tool_agent, judge |
+| **gemicro-runner** | Headless execution: AgentRunner, AgentRegistry, ExecutionState, metrics |
+| **gemicro-eval** | Evaluation: HotpotQA/custom datasets, scorers (Contains, LLM Judge) |
+| **gemicro-cli** | Terminal UI: indicatif progress, rustyline REPL, markdown rendering |
 
 ### Design Philosophy
 
@@ -64,10 +61,6 @@ use gemicro_core::{Agent, AgentContext, AgentUpdate};     // Core types
 use gemicro_deep_research::{DeepResearchAgent, ResearchConfig}; // Agent + config
 use gemicro_judge::LlmJudgeAgent;                          // Judge agent
 ```
-
-## Project Status
-
-🚧 **Active Development** - Core features complete, see [GitHub Issues](https://github.com/evansenter/gemicro/issues) for roadmap.
 
 ## Quick Start
 
