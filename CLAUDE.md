@@ -80,7 +80,7 @@ REPL commands: `/help`, `/agent [name]`, `/history`, `/clear`, `/reload`, `/quit
 ```text
 gemicro-core (Agent trait, Tool trait, events, LLM - GENERIC ONLY)
     ↓
-tools/* (one crate per tool - file_read, web_fetch, task, web_search)
+tools/* (one crate per tool - file_read, web_fetch, task, web_search, glob, grep, file_write, file_edit, bash)
 agents/* (one crate per agent - hermetic isolation)
     ↓
 gemicro-runner (execution state, metrics, runner)
@@ -89,22 +89,6 @@ gemicro-eval (datasets, scorers, harness)
 gemicro-cli (terminal rendering)
 ```
 
-| Crate | Purpose |
-|-------|---------|
-| **gemicro-core** | Platform-agnostic library: Agent trait, Tool trait, AgentContext, AgentUpdate events, LlmClient, conversation history. **No agent/tool implementations.** |
-| **tools/gemicro-file-read** | FileRead tool: read file contents (1MB limit) |
-| **tools/gemicro-web-fetch** | WebFetch tool: HTTP GET with timeout (5MB limit) |
-| **tools/gemicro-task** | Task tool: spawn subagents for delegation |
-| **tools/gemicro-web-search** | WebSearch tool: real-time web search via Gemini grounding |
-| **agents/gemicro-deep-research** | DeepResearchAgent: query decomposition, parallel sub-query execution, synthesis |
-| **agents/gemicro-react** | ReactAgent: Thought → Action → Observation reasoning loops |
-| **agents/gemicro-simple-qa** | SimpleQaAgent: minimal reference implementation |
-| **agents/gemicro-tool-agent** | ToolAgent: native function calling with built-in tools |
-| **agents/gemicro-judge** | LlmJudgeAgent: LLM-based evaluation scoring |
-| **gemicro-runner** | Headless execution runtime: ExecutionState, AgentRunner, AgentRegistry, metrics collection |
-| **gemicro-eval** | Evaluation framework: HotpotQA/custom datasets, scorers (Contains, LLM Judge) |
-| **gemicro-cli** | Terminal UI: indicatif progress display, rustyline REPL, markdown rendering |
-
 ## Crate Responsibilities
 
 Each crate has a specific purpose. Before adding code, verify it belongs in that crate.
@@ -112,21 +96,9 @@ Each crate has a specific purpose. Before adding code, verify it belongs in that
 | Crate | Contains | Does NOT Contain |
 |-------|----------|------------------|
 | **gemicro-core** | Agent trait, Tool trait, AgentContext, AgentUpdate, ToolRegistry, ToolSet, LlmClient, LlmConfig, errors | Agent/tool implementations, agent-specific configs |
-| **tools/gemicro-file-read** | FileRead tool implementation | Other tools |
-| **tools/gemicro-web-fetch** | WebFetch tool implementation | Other tools |
-| **tools/gemicro-task** | Task tool implementation | Other tools |
-| **tools/gemicro-web-search** | WebSearch tool implementation | Other tools |
-| **tools/gemicro-glob** | Glob tool (find files by pattern) | Other tools |
-| **tools/gemicro-grep** | Grep tool (search file contents) | Other tools |
-| **tools/gemicro-file-write** | FileWrite tool (requires confirmation) | Other tools |
-| **tools/gemicro-file-edit** | FileEdit tool (requires confirmation) | Other tools |
-| **tools/gemicro-bash** | Bash tool (requires confirmation) | Other tools |
-| **agents/gemicro-deep-research** | DeepResearchAgent, ResearchConfig, DeepResearchEventExt | Other agents, core infrastructure |
-| **agents/gemicro-react** | ReactAgent, ReactConfig | Other agents, core infrastructure |
-| **agents/gemicro-simple-qa** | SimpleQaAgent, SimpleQaConfig | Other agents, core infrastructure |
-| **agents/gemicro-tool-agent** | ToolAgent, ToolAgentConfig, Calculator, CurrentDatetime | Other agents, core infrastructure |
-| **agents/gemicro-judge** | LlmJudgeAgent, JudgeConfig | Other agents, core infrastructure |
-| **gemicro-runner** | AgentRunner, AgentRegistry, generic execution infrastructure | Agent implementations |
+| **tools/*** | One tool per crate (FileRead, WebFetch, Bash, etc.) | Other tools, agent logic |
+| **agents/*** | One agent per crate with its config and events | Other agents, core infrastructure |
+| **gemicro-runner** | AgentRunner, AgentRegistry, ExecutionState, metrics | Agent implementations |
 | **gemicro-eval** | EvalHarness, Scorers, Datasets | Agent implementations |
 | **gemicro-cli** | Terminal UI, REPL, argument parsing, InteractiveConfirmation | Agent implementations |
 
@@ -347,109 +319,16 @@ Use strong typing for:
 - [ ] Is this serialized/deserialized? → Add `#[non_exhaustive]`
 - [ ] Is this returned from public APIs? → Consider `#[non_exhaustive]`
 
-## File Structure
+## Key Files
 
-```
-gemicro/
-├── Cargo.toml                    # Workspace manifest
-├── CLAUDE.md                     # This file
-├── README.md                     # Public documentation
-├── docs/AGENT_AUTHORING.md       # Guide for implementing new agents
-│
-├── tools/                        # Tool crates (one per tool, hermetic)
-│   ├── gemicro-file-read/        # FileRead tool
-│   │   └── src/lib.rs
-│   ├── gemicro-web-fetch/        # WebFetch tool
-│   │   └── src/lib.rs
-│   ├── gemicro-task/             # Task tool (spawns subagents)
-│   │   └── src/lib.rs
-│   ├── gemicro-web-search/       # WebSearch tool (Gemini grounding)
-│   │   └── src/lib.rs
-│   ├── gemicro-glob/             # Glob tool (find files by pattern)
-│   │   └── src/lib.rs
-│   ├── gemicro-grep/             # Grep tool (search file contents)
-│   │   └── src/lib.rs
-│   ├── gemicro-file-write/       # FileWrite tool (requires confirmation)
-│   │   └── src/lib.rs
-│   ├── gemicro-file-edit/        # FileEdit tool (requires confirmation)
-│   │   └── src/lib.rs
-│   └── gemicro-bash/             # Bash tool (requires confirmation)
-│       └── src/lib.rs
-│
-├── agents/                       # Agent crates (one per agent, hermetic)
-│   ├── gemicro-deep-research/    # DeepResearchAgent
-│   │   ├── src/
-│   │   │   ├── lib.rs            # Public exports
-│   │   │   ├── agent.rs          # Agent implementation
-│   │   │   ├── config.rs         # ResearchConfig, ResearchPrompts
-│   │   │   └── events.rs         # DeepResearchEventExt, SubQueryResult
-│   │   └── tests/integration.rs
-│   ├── gemicro-react/            # ReactAgent
-│   │   ├── src/
-│   │   │   ├── lib.rs
-│   │   │   ├── agent.rs
-│   │   │   └── config.rs         # ReactConfig, ReactPrompts
-│   │   └── tests/integration.rs
-│   ├── gemicro-simple-qa/        # SimpleQaAgent (reference impl)
-│   │   ├── src/lib.rs
-│   │   └── tests/integration.rs
-│   ├── gemicro-tool-agent/       # ToolAgent (function calling)
-│   │   ├── src/
-│   │   │   ├── lib.rs
-│   │   │   ├── agent.rs
-│   │   │   ├── config.rs
-│   │   │   └── tools.rs          # calculator(), current_datetime()
-│   │   └── tests/integration.rs
-│   └── gemicro-judge/            # LlmJudgeAgent (evaluation)
-│       └── src/lib.rs
-│
-├── gemicro-core/                 # Platform-agnostic library (GENERIC ONLY)
-│   ├── src/
-│   │   ├── lib.rs                # Public API exports
-│   │   ├── agent.rs              # Agent trait, AgentContext, helpers (NO implementations)
-│   │   ├── update.rs             # Soft-typed AgentUpdate
-│   │   ├── error.rs              # Error types (#[non_exhaustive])
-│   │   ├── config.rs             # LlmConfig only (no agent configs)
-│   │   ├── llm.rs                # LLM client (buffered + streaming)
-│   │   ├── history.rs            # ConversationHistory, HistoryEntry
-│   │   └── utils.rs              # Shared utilities (truncation, etc.)
-│   └── tests/
-│       ├── llm_integration.rs    # LLM integration tests (#[ignore])
-│       └── common/mod.rs         # Shared test helpers
-│
-├── gemicro-runner/               # Headless execution runtime
-│   └── src/
-│       ├── lib.rs
-│       ├── state.rs              # ExecutionState, Phase tracking
-│       ├── metrics.rs            # ExecutionMetrics, SubQueryTiming
-│       ├── runner.rs             # AgentRunner for headless execution
-│       ├── registry.rs           # AgentRegistry, AgentFactory
-│       └── utils.rs              # Formatting utilities
-│
-├── gemicro-eval/                 # Evaluation framework
-│   └── src/
-│       ├── lib.rs
-│       ├── dataset.rs            # HotpotQA, JsonFileDataset
-│       ├── scorer.rs             # Contains, LlmJudgeScorer
-│       ├── harness.rs            # EvalHarness, EvalConfig
-│       └── results.rs            # EvalSummary, EvalResult
-│
-└── gemicro-cli/                  # Terminal UI binary
-    └── src/
-        ├── main.rs               # Entry point, stream orchestration
-        ├── cli.rs                # Clap argument parsing, OutputConfig
-        ├── format.rs             # Text utilities, markdown rendering
-        ├── error.rs              # CLI-specific error handling
-        ├── confirmation.rs       # InteractiveConfirmation handler
-        ├── display/              # State-renderer pattern
-        │   ├── mod.rs
-        │   ├── renderer.rs       # Renderer trait for swappable backends
-        │   └── indicatif.rs      # IndicatifRenderer implementation
-        └── repl/                 # Interactive REPL mode
-            ├── mod.rs
-            ├── session.rs        # REPL session management
-            └── commands.rs       # /help, /agent, /history, etc.
-```
+| File | Purpose |
+|------|---------|
+| `Cargo.toml` | Workspace manifest with all 18 crate members |
+| `docs/AGENT_AUTHORING.md` | Complete guide for implementing new agents |
+| `agents/gemicro-simple-qa/` | Reference implementation for new agents |
+| `gemicro-core/src/agent.rs` | Agent trait, AgentContext, timeout helpers |
+| `gemicro-core/src/update.rs` | Soft-typed AgentUpdate |
+| `gemicro-core/src/tool.rs` | Tool trait, ToolRegistry, GemicroToolService |
 
 ## Key Architectural Decisions
 
@@ -720,34 +599,29 @@ When a tool requires confirmation:
 | `AutoDeny` | Always returns false | Safe default when no handler set |
 | `InteractiveConfirmation` | Terminal prompt | CLI applications |
 
-## Migration Notes
+## Troubleshooting
 
-### ToolAgent: ToolType → ToolSet (PR #133)
+| Issue | Solution |
+|-------|----------|
+| `cargo build` fails with "can't find crate" | Add new crate to `[workspace.members]` in root `Cargo.toml` |
+| Integration tests skipped silently | Set `GEMINI_API_KEY` env var; tests use `#[ignore]` |
+| `cargo test` passes but `make check` fails | Run `cargo fmt --all` to fix formatting |
+| "Unknown event type" warnings in CLI | Expected behavior - consumers ignore unknown events per Evergreen philosophy |
+| Tool confirmation prompts hang in tests | Use `AutoApprove` handler in test contexts |
+| Clippy errors on CI but not locally | CI runs `cargo clippy -- -D warnings`; run `make clippy` locally |
 
-The `ToolType` enum has been replaced with string-based `ToolSet` filtering:
+## ToolSet Reference
 
-**Before:**
-```rust
-use gemicro_tool_agent::{ToolAgentConfig, ToolType};
+String-based tool filtering (replaced the old `ToolType` enum):
 
-let config = ToolAgentConfig::default()
-    .with_tools(vec![ToolType::Calculator]);
-```
-
-**After:**
 ```rust
 use gemicro_core::ToolSet;
-use gemicro_tool_agent::ToolAgentConfig;
 
-let config = ToolAgentConfig::default()
-    .with_tool_filter(ToolSet::Specific(vec!["calculator".into()]));
+ToolSet::All                              // Use all registered tools (default)
+ToolSet::None                             // Use no tools
+ToolSet::Specific(vec!["calc".into()])    // Use only named tools
+ToolSet::Except(vec!["bash".into()])      // Use all except named tools
 ```
-
-**ToolSet options:**
-- `ToolSet::All` - Use all registered tools (default)
-- `ToolSet::None` - Use no tools
-- `ToolSet::Specific(vec!["name".into()])` - Use only named tools
-- `ToolSet::Except(vec!["name".into()])` - Use all except named tools
 
 ## Known Limitations & Tracked Issues
 
