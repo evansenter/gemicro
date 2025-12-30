@@ -41,8 +41,10 @@ use serde_json::Value;
 /// let hook = InputSanitizer::new(10 * 1024);
 /// ```
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct InputSanitizer {
-    max_input_size_bytes: usize,
+    /// Maximum input size in bytes.
+    pub max_input_size_bytes: usize,
 }
 
 impl InputSanitizer {
@@ -292,6 +294,69 @@ mod tests {
             assert!(matches!(decision, HookDecision::Deny { .. }));
         } else {
             assert_eq!(decision, HookDecision::Allow);
+        }
+    }
+
+    // Property-based tests
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            /// Property: Size <= max should always allow
+            #[test]
+            fn size_under_limit_always_allows(
+                max_size in 10usize..10000,
+                data in ".*",
+            ) {
+                // Only test inputs that are actually under the limit
+                let input = json!({"data": data});
+                let size = serde_json::to_string(&input).unwrap().len();
+
+                // Skip cases where size exceeds limit (we test those separately)
+                prop_assume!(size <= max_size);
+
+                let hook = InputSanitizer::new(max_size);
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                let decision = rt.block_on(hook.pre_tool_use("test", &input)).unwrap();
+
+                prop_assert_eq!(decision, HookDecision::Allow);
+            }
+
+            /// Property: Size > max should always deny
+            #[test]
+            fn size_over_limit_always_denies(
+                max_size in 10usize..100,
+                data in ".*",
+            ) {
+                let input = json!({"data": data});
+                let size = serde_json::to_string(&input).unwrap().len();
+
+                // Only test cases where size exceeds limit
+                prop_assume!(size > max_size);
+
+                let hook = InputSanitizer::new(max_size);
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                let decision = rt.block_on(hook.pre_tool_use("test", &input)).unwrap();
+
+                match decision {
+                    HookDecision::Deny { .. } => Ok(()),
+                    _ => Err(TestCaseError::fail("Expected Deny for size over limit")),
+                }?;
+            }
+
+            /// Property: Estimation is deterministic (same input = same size)
+            #[test]
+            fn estimation_is_deterministic(data in ".*") {
+                let hook = InputSanitizer::new(1000);
+                let input = json!({"data": data});
+
+                let size1 = hook.estimate_size(&input).unwrap();
+                let size2 = hook.estimate_size(&input).unwrap();
+
+                prop_assert_eq!(size1, size2);
+            }
         }
     }
 }

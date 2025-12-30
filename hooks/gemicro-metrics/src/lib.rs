@@ -144,6 +144,19 @@ impl Metrics {
     }
 
     /// Reset all metrics to zero.
+    ///
+    /// # Concurrency Note
+    ///
+    /// This method clears the internal HashMap, removing all tool entries.
+    /// If metrics are being recorded concurrently (via `record_invocation` etc.),
+    /// there may be brief inconsistencies where a tool has non-zero stats but
+    /// zero invocations, due to the sequence:
+    /// 1. Thread A: Creates tool entry via `get_or_create_stats`
+    /// 2. Thread B: Calls `reset()`, clearing the HashMap
+    /// 3. Thread A: Increments stats on the now-orphaned ToolStats
+    ///
+    /// This is acceptable for best-effort metrics. For strict consistency,
+    /// avoid calling `reset()` during active tool execution.
     pub fn reset(&self) {
         let mut tools = self.tools.write().unwrap();
         tools.clear();
@@ -436,6 +449,145 @@ mod tests {
         if let Some(stats) = snapshot.get("tool") {
             assert_eq!(stats.invocations, 0, "Invocations should be 0 after reset");
             assert_eq!(stats.successes, 1, "Success recorded after reset");
+        }
+    }
+
+    // Property-based tests
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            /// Property: invocations = successes + failures (after complete call pairs)
+            #[test]
+            fn invocations_equals_successes_plus_failures(
+                num_success in 0usize..100,
+                num_failure in 0usize..100,
+            ) {
+                let metrics = Metrics::new();
+                let rt = tokio::runtime::Runtime::new().unwrap();
+
+                rt.block_on(async {
+                    // Record successes
+                    for _ in 0..num_success {
+                        metrics.pre_tool_use("tool", &json!({})).await.unwrap();
+                        metrics
+                            .post_tool_use("tool", &json!({}), &ToolResult::text("ok"))
+                            .await
+                            .unwrap();
+                    }
+
+                    // Record failures
+                    for _ in 0..num_failure {
+                        metrics.pre_tool_use("tool", &json!({})).await.unwrap();
+                        metrics
+                            .post_tool_use(
+                                "tool",
+                                &json!({}),
+                                &ToolResult::text("err").with_metadata(json!({"error": "fail"})),
+                            )
+                            .await
+                            .unwrap();
+                    }
+
+                    let snapshot = metrics.snapshot();
+                    if let Some(stats) = snapshot.get("tool") {
+                        prop_assert_eq!(
+                            stats.invocations,
+                            (num_success + num_failure) as u64,
+                            "Invocations should equal sum"
+                        );
+                        prop_assert_eq!(stats.successes, num_success as u64);
+                        prop_assert_eq!(stats.failures, num_failure as u64);
+                    } else if num_success + num_failure > 0 {
+                        return Err(TestCaseError::fail("Expected stats but none found"));
+                    }
+
+                    Ok(())
+                })?;
+            }
+
+            /// Property: Reset clears all metrics
+            #[test]
+            fn reset_clears_all_metrics(num_invocations in 1usize..50) {
+                let metrics = Metrics::new();
+                let rt = tokio::runtime::Runtime::new().unwrap();
+
+                rt.block_on(async {
+                    // Record some invocations
+                    for _ in 0..num_invocations {
+                        metrics.pre_tool_use("tool", &json!({})).await.unwrap();
+                        metrics
+                            .post_tool_use("tool", &json!({}), &ToolResult::text("ok"))
+                            .await
+                            .unwrap();
+                    }
+
+                    // Verify non-zero
+                    prop_assert!(metrics.snapshot().total_invocations() > 0);
+
+                    // Reset
+                    metrics.reset();
+
+                    // Verify zero
+                    prop_assert_eq!(metrics.snapshot().total_invocations(), 0);
+
+                    Ok(())
+                })?;
+            }
+
+            /// Property: Multiple tools tracked independently
+            #[test]
+            fn multiple_tools_independent(
+                tool1_calls in 0usize..20,
+                tool2_calls in 0usize..20,
+            ) {
+                let metrics = Metrics::new();
+                let rt = tokio::runtime::Runtime::new().unwrap();
+
+                rt.block_on(async {
+                    // Record tool1 calls
+                    for _ in 0..tool1_calls {
+                        metrics.pre_tool_use("tool1", &json!({})).await.unwrap();
+                        metrics
+                            .post_tool_use("tool1", &json!({}), &ToolResult::text("ok"))
+                            .await
+                            .unwrap();
+                    }
+
+                    // Record tool2 calls
+                    for _ in 0..tool2_calls {
+                        metrics.pre_tool_use("tool2", &json!({})).await.unwrap();
+                        metrics
+                            .post_tool_use("tool2", &json!({}), &ToolResult::text("ok"))
+                            .await
+                            .unwrap();
+                    }
+
+                    let snapshot = metrics.snapshot();
+
+                    // Verify tool1
+                    if tool1_calls > 0 {
+                        let tool1_stats = snapshot.get("tool1").unwrap();
+                        prop_assert_eq!(tool1_stats.invocations, tool1_calls as u64);
+                    }
+
+                    // Verify tool2
+                    if tool2_calls > 0 {
+                        let tool2_stats = snapshot.get("tool2").unwrap();
+                        prop_assert_eq!(tool2_stats.invocations, tool2_calls as u64);
+                    }
+
+                    // Verify total
+                    prop_assert_eq!(
+                        snapshot.total_invocations(),
+                        (tool1_calls + tool2_calls) as u64
+                    );
+
+                    Ok(())
+                })?;
+            }
         }
     }
 }

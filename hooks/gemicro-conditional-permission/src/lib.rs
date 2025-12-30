@@ -162,12 +162,14 @@ pub struct ConditionalPermissionBuilder {
 
 impl ConditionalPermissionBuilder {
     /// Add a dangerous pattern to check for.
+    #[must_use]
     pub fn add_pattern(mut self, pattern: impl Into<String>) -> Self {
         self.patterns.push(pattern.into());
         self
     }
 
     /// Add a field name to check for patterns.
+    #[must_use]
     pub fn check_field(mut self, field: impl Into<String>) -> Self {
         self.fields.push(field.into());
         self

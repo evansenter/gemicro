@@ -58,16 +58,19 @@ impl ToolHook for AuditLog {
     ) -> Result<(), HookError> {
         let content_preview = match &output.content {
             Value::String(s) => {
-                if s.len() > 100 {
-                    format!("{}...", &s[..100])
+                // Use char-aware truncation to avoid panicking on UTF-8 boundaries
+                if s.chars().count() > 100 {
+                    let truncated: String = s.chars().take(100).collect();
+                    format!("{}...", truncated)
                 } else {
                     s.clone()
                 }
             }
             other => {
                 let formatted = format!("{:?}", other);
-                if formatted.len() > 100 {
-                    format!("{}...", &formatted[..100])
+                if formatted.chars().count() > 100 {
+                    let truncated: String = formatted.chars().take(100).collect();
+                    format!("{}...", truncated)
                 } else {
                     formatted
                 }

@@ -64,8 +64,10 @@ use std::path::PathBuf;
 ///
 /// This hook is best used as **defense-in-depth**, not primary security.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct FileSecurity {
-    blocked_paths: Vec<PathBuf>,
+    /// Paths that are blocked from write operations.
+    pub blocked_paths: Vec<PathBuf>,
 }
 
 impl FileSecurity {
