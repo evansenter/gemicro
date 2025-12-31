@@ -208,13 +208,16 @@ cargo run -p gemicro-eval --example ab_comparison
 
 ### Evaluation
 
-Run evaluations against HotpotQA, GSM8K, or custom datasets:
+Run evaluations against built-in or custom datasets (requires `GEMINI_API_KEY`):
+
+- **HotpotQA**: Multi-hop question answering benchmark
+- **GSM8K**: Grade school math word problems (8,500 questions)
 
 ```bash
 # Basic evaluation with default scorers
 gemicro-eval --dataset hotpotqa --sample 10
 
-# With specific scorer
+# With specific scorer (GSM8K math problems)
 gemicro-eval --dataset gsm8k --scorer contains --sample 50
 
 # Full evaluation with LLM judge
