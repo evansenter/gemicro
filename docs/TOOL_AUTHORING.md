@@ -91,6 +91,30 @@ pub enum ToolError {
 }
 ```
 
+### Error Signaling Convention
+
+When a tool encounters an error but can still return a response to the LLM (as opposed to returning `Err(ToolError)`), use `metadata["error"]` to signal the failure:
+
+```rust
+// Recoverable error: return Ok with error metadata
+Ok(ToolResult::text("Command failed with exit code 1")
+    .with_metadata(json!({"error": "exit code 1"})))
+
+// Fatal error: return Err
+Err(ToolError::InvalidInput("Missing required 'path' field".into()))
+```
+
+**When to use each approach:**
+
+| Scenario | Approach |
+|----------|----------|
+| Invalid input from LLM | `Err(ToolError::InvalidInput)` |
+| Fatal execution failure | `Err(ToolError::ExecutionFailed)` |
+| Non-zero exit code (LLM should see output) | `Ok(ToolResult)` + `metadata["error"]` |
+| Partial success with warnings | `Ok(ToolResult)` + `metadata["error"]` |
+
+**Why this matters:** Hooks like [`Metrics`](../hooks/gemicro-metrics/) detect failures by checking `output.metadata.get("error").is_some()`. Following this convention ensures accurate failure tracking.
+
 ## Complete Example: FileRead Tool
 
 The `FileRead` tool is a reference implementation. See `tools/gemicro-file-read/src/lib.rs`.
