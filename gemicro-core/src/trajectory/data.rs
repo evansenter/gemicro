@@ -1,53 +1,13 @@
-//! Trajectory serialization for offline replay and evaluation
-//!
-//! This module provides types and utilities for capturing full LLM interaction
-//! traces during agent execution, enabling:
-//!
-//! - **Offline replay**: Re-run agent logic without API calls
-//! - **Evaluation datasets**: Build test sets from real production runs
-//! - **Debugging**: Inspect exact LLM requests and responses
-//!
-//! # Architecture
-//!
-//! A `Trajectory` captures an entire agent execution:
-//! - `steps`: Raw LLM request/response pairs with timing
-//! - `events`: High-level `AgentUpdate` events for compatibility
-//! - `metadata`: Execution summary (tokens, duration, etc.)
-//!
-//! # Example
-//!
-//! ```no_run
-//! use gemicro_core::trajectory::Trajectory;
-//!
-//! // Save a trajectory
-//! # fn example(trajectory: Trajectory) -> std::io::Result<()> {
-//! trajectory.save("trajectories/run_001.json")?;
-//!
-//! // Load and inspect
-//! let loaded = Trajectory::load("trajectories/run_001.json")?;
-//! println!("Query: {}", loaded.query);
-//! println!("Steps: {}", loaded.steps.len());
-//! for step in &loaded.steps {
-//!     println!("  Phase: {}, Duration: {}ms", step.phase, step.duration_ms);
-//! }
-//! # Ok(())
-//! # }
-//! ```
+//! Trajectory data types and serialization.
 
 use crate::llm::LlmRequest;
+use crate::trajectory::TrajectoryBuilder;
 use crate::update::AgentUpdate;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io;
 use std::path::Path;
 use std::time::SystemTime;
-
-/// Current schema version for trajectory files
-///
-/// Version history:
-/// - 1.0.0: Initial release with dual Option pattern for response/stream_chunks
-/// - 2.0.0: Changed to LlmResponseData enum for type-safe response mode
-pub const SCHEMA_VERSION: &str = "2.0.0";
 
 /// Response data from an LLM call
 ///
@@ -302,127 +262,8 @@ impl Trajectory {
     }
 }
 
-/// Builder for constructing trajectories
-#[derive(Debug, Default)]
-pub struct TrajectoryBuilder {
-    query: Option<String>,
-    agent_name: Option<String>,
-    agent_config: Option<serde_json::Value>,
-    model: Option<String>,
-}
-
-impl TrajectoryBuilder {
-    /// Set the query
-    pub fn query(mut self, query: impl Into<String>) -> Self {
-        self.query = Some(query.into());
-        self
-    }
-
-    /// Set the agent name
-    pub fn agent_name(mut self, name: impl Into<String>) -> Self {
-        self.agent_name = Some(name.into());
-        self
-    }
-
-    /// Set the agent configuration
-    pub fn agent_config(mut self, config: serde_json::Value) -> Self {
-        self.agent_config = Some(config);
-        self
-    }
-
-    /// Set the agent configuration from a serializable type
-    ///
-    /// Logs a warning if serialization fails.
-    pub fn agent_config_from<T: Serialize>(mut self, config: &T) -> Self {
-        match serde_json::to_value(config) {
-            Ok(v) => self.agent_config = Some(v),
-            Err(e) => {
-                log::warn!(
-                    "Failed to serialize agent config for trajectory: {}. Config will be null.",
-                    e
-                );
-            }
-        }
-        self
-    }
-
-    /// Set the model name
-    pub fn model(mut self, model: impl Into<String>) -> Self {
-        self.model = Some(model.into());
-        self
-    }
-
-    /// Build the trajectory from recorded steps and events
-    ///
-    /// Logs warnings if required fields (query, agent_name) are not set.
-    ///
-    /// # Arguments
-    ///
-    /// * `steps` - The recorded LLM interaction steps
-    /// * `events` - The high-level agent events
-    /// * `total_duration_ms` - Total execution time in milliseconds
-    /// * `final_answer` - The final answer, if available
-    pub fn build(
-        self,
-        steps: Vec<TrajectoryStep>,
-        events: Vec<AgentUpdate>,
-        total_duration_ms: u64,
-        final_answer: Option<String>,
-    ) -> Trajectory {
-        // Warn on missing required fields
-        if self.query.is_none() {
-            log::warn!("Building trajectory without query - this may indicate a bug");
-        }
-        if self.agent_name.is_none() {
-            log::warn!("Building trajectory without agent_name - will be recorded as 'unknown'");
-        }
-
-        // Calculate total tokens from steps (only available for buffered responses)
-        let (total_tokens, tokens_unavailable_count) =
-            steps.iter().fold((0u32, 0usize), |acc, step| {
-                match &step.response {
-                    LlmResponseData::Buffered(response) => {
-                        if let Some(tokens) = response
-                            .get("usage")
-                            .and_then(|u| u.get("total_tokens"))
-                            .and_then(|t| t.as_u64())
-                        {
-                            (acc.0.saturating_add(tokens as u32), acc.1)
-                        } else {
-                            (acc.0, acc.1 + 1)
-                        }
-                    }
-                    LlmResponseData::Streaming(_) => {
-                        // Streaming responses don't include token counts
-                        (acc.0, acc.1 + 1)
-                    }
-                }
-            });
-
-        Trajectory {
-            id: uuid::Uuid::new_v4().to_string(),
-            query: self.query.unwrap_or_default(),
-            agent_name: self.agent_name.unwrap_or_else(|| "unknown".to_string()),
-            agent_config: self.agent_config.unwrap_or(serde_json::Value::Null),
-            steps,
-            events,
-            metadata: TrajectoryMetadata {
-                created_at: SystemTime::now(),
-                total_duration_ms,
-                total_tokens,
-                tokens_unavailable_count,
-                final_answer,
-                model: self
-                    .model
-                    .unwrap_or_else(|| crate::config::MODEL.to_string()),
-                schema_version: SCHEMA_VERSION.to_string(),
-            },
-        }
-    }
-}
-
 /// Serde helper for SystemTime (stores as seconds since UNIX_EPOCH)
-mod system_time_serde {
+pub(crate) mod system_time_serde {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -550,7 +391,10 @@ mod tests {
         assert_eq!(restored.agent_name, trajectory.agent_name);
         assert_eq!(restored.steps.len(), 1);
         assert_eq!(restored.events.len(), 2);
-        assert_eq!(restored.metadata.schema_version, SCHEMA_VERSION);
+        assert_eq!(
+            restored.metadata.schema_version,
+            crate::trajectory::SCHEMA_VERSION
+        );
     }
 
     #[test]
@@ -613,7 +457,10 @@ mod tests {
             .query("Version test")
             .build(vec![], vec![], 0, None);
 
-        assert_eq!(trajectory.metadata.schema_version, SCHEMA_VERSION);
+        assert_eq!(
+            trajectory.metadata.schema_version,
+            crate::trajectory::SCHEMA_VERSION
+        );
     }
 
     #[test]

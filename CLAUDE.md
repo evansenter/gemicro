@@ -130,6 +130,7 @@ Each agent crate:
 | Type | Canonical Import |
 |------|------------------|
 | `Agent`, `AgentContext`, `AgentUpdate`, `AgentError` | `gemicro_core` |
+| `FinalResult`, `ResultMetadata` | `gemicro_core` |
 | `Tool`, `ToolRegistry`, `ToolSet`, `ToolResult`, `ToolError` | `gemicro_core::tool` |
 | `ToolHook`, `HookRegistry`, `HookDecision`, `HookError` | `gemicro_core::tool` |
 | `ConfirmationHandler`, `AutoApprove`, `AutoDeny`, `GemicroToolService` | `gemicro_core::tool` |

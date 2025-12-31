@@ -92,15 +92,10 @@ impl From<&ExecutionState> for ExecutionMetrics {
             .steps()
             .iter()
             .map(|step| {
-                // Allow unreachable_patterns: StepStatus is #[non_exhaustive], but the
-                // wildcard is unreachable within this crate. We keep it for consistency with
-                // how downstream crates must handle this enum.
-                #[allow(unreachable_patterns)]
                 let (succeeded, tokens_used) = match &step.status {
                     StepStatus::Completed { tokens, .. } => (Some(true), *tokens),
                     StepStatus::Failed { .. } => (Some(false), None),
                     StepStatus::Pending | StepStatus::InProgress => (None, None),
-                    _ => (None, None),
                 };
 
                 StepTiming {
@@ -125,8 +120,8 @@ impl From<&ExecutionState> for ExecutionMetrics {
         let (total_tokens, tokens_unavailable_count, final_answer) =
             if let Some(result) = state.final_result() {
                 (
-                    result.total_tokens,
-                    result.tokens_unavailable_count,
+                    result.metadata.total_tokens,
+                    result.metadata.tokens_unavailable_count,
                     Some(result.answer.clone()),
                 )
             } else {
@@ -156,11 +151,6 @@ impl From<&ExecutionState> for ExecutionMetrics {
 }
 
 impl ExecutionMetrics {
-    /// Create metrics from an ExecutionState.
-    pub fn from_state(state: &ExecutionState) -> Self {
-        Self::from(state)
-    }
-
     /// Create metrics from an ExecutionTracking trait object.
     ///
     /// This is the preferred method when using `agent.create_tracker()`.
@@ -169,11 +159,11 @@ impl ExecutionMetrics {
         let (total_tokens, tokens_unavailable_count, final_answer, completion_phase, extra) =
             if let Some(result) = tracker.final_result() {
                 (
-                    result.total_tokens,
-                    result.tokens_unavailable_count,
+                    result.metadata.total_tokens,
+                    result.metadata.tokens_unavailable_count,
                     Some(result.answer.clone()),
                     "complete".to_string(),
-                    result.extra.clone(),
+                    result.metadata.extra.clone(),
                 )
             } else {
                 let phase = if tracker.is_complete() {
@@ -247,7 +237,9 @@ impl ExecutionMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{ExecutionState, ExecutionStep, FinalResultData, StepStatus};
+    use crate::state::{ExecutionState, ExecutionStep, StepStatus};
+    use gemicro_core::{FinalResult, ResultMetadata};
+    use serde_json::json;
 
     /// Create state directly for testing metrics conversion.
     /// This builds state without relying on any agent-specific handler.
@@ -284,13 +276,18 @@ mod tests {
 
         state.add_steps(vec![step0, step1, step2]);
 
-        // Set final result
-        state.set_final_result(FinalResultData {
+        // Set final result using FinalResult from update.rs
+        state.set_final_result(FinalResult {
             answer: "Final answer".to_string(),
-            total_tokens: 150,
-            tokens_unavailable_count: 0,
-            steps_succeeded: 2,
-            steps_failed: 1,
+            metadata: ResultMetadata::with_extra(
+                150, // total_tokens
+                0,   // tokens_unavailable_count
+                0,   // duration_ms (not used in metrics tests)
+                json!({
+                    "steps_succeeded": 2,
+                    "steps_failed": 1,
+                }),
+            ),
         });
 
         state
@@ -369,14 +366,6 @@ mod tests {
         assert_eq!(deserialized.steps_total, metrics.steps_total);
         assert_eq!(deserialized.total_tokens, metrics.total_tokens);
         assert_eq!(deserialized.final_answer, metrics.final_answer);
-    }
-
-    #[test]
-    fn test_metrics_from_state_method() {
-        let state = create_completed_state();
-        let metrics = ExecutionMetrics::from_state(&state);
-
-        assert!(metrics.is_complete());
     }
 
     #[test]

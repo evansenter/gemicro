@@ -1,6 +1,6 @@
 //! Text formatting utilities shared across renderers.
 
-use gemicro_core::FinalResultData;
+use gemicro_core::FinalResult;
 use std::io::IsTerminal;
 use std::panic;
 use std::time::Duration;
@@ -54,12 +54,12 @@ pub fn render_markdown(text: &str) -> String {
 
 /// Print the final result with formatting.
 ///
-/// Uses `FinalResultData` from gemicro-core which contains the answer,
-/// token counts, and agent-specific metadata in the `extra` field.
+/// Uses `FinalResult` from gemicro-core which contains the answer
+/// and metadata (token counts, duration, agent-specific data in `extra`).
 ///
 /// If `plain` is false and stdout is a terminal, the answer will be rendered
 /// as markdown with syntax highlighting and formatting.
-pub fn print_final_result(result: &FinalResultData, elapsed: Duration, plain: bool) {
+pub fn print_final_result(result: &FinalResult, elapsed: Duration, plain: bool) {
     println!();
     println!("╔══════════════════════════════════════════════════════════════╗");
     println!("║                    SYNTHESIZED ANSWER                        ║");
@@ -78,11 +78,13 @@ pub fn print_final_result(result: &FinalResultData, elapsed: Duration, plain: bo
     // Extract step counts from extra field (agent-specific data)
     // Use .get() for safe access since extra field contents are agent-specific
     let steps_succeeded = result
+        .metadata
         .extra
         .get("steps_succeeded")
         .and_then(|v| v.as_u64())
         .unwrap_or(0) as usize;
     let steps_failed = result
+        .metadata
         .extra
         .get("steps_failed")
         .and_then(|v| v.as_u64())
@@ -98,8 +100,8 @@ pub fn print_final_result(result: &FinalResultData, elapsed: Duration, plain: bo
     }
 
     // Show tokens if available and non-zero
-    if result.tokens_unavailable_count == 0 && result.total_tokens > 0 {
-        println!("   Tokens used: {}", result.total_tokens);
+    if result.metadata.tokens_unavailable_count == 0 && result.metadata.total_tokens > 0 {
+        println!("   Tokens used: {}", result.metadata.total_tokens);
     }
 }
 

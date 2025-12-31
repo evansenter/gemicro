@@ -13,6 +13,7 @@
 //! For agent-specific event handling, use the `ExecutionTracking` trait from
 //! gemicro-core with `agent.create_tracker()`.
 
+use gemicro_core::FinalResult;
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 
@@ -108,18 +109,6 @@ impl ExecutionStep {
     }
 }
 
-/// Data from the final result event.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FinalResultData {
-    pub answer: String,
-    pub total_tokens: u32,
-    pub tokens_unavailable_count: usize,
-    /// Number of steps that succeeded (generic, was sub_queries_succeeded)
-    pub steps_succeeded: usize,
-    /// Number of steps that failed (generic, was sub_queries_failed)
-    pub steps_failed: usize,
-}
-
 /// Terminal-agnostic state machine for agent execution.
 ///
 /// Tracks the current phase, execution steps, timing information,
@@ -130,7 +119,7 @@ pub struct ExecutionState {
     phase: String,
     steps: Vec<ExecutionStep>,
     start_time: Instant,
-    final_result: Option<FinalResultData>,
+    final_result: Option<FinalResult>,
 }
 
 impl ExecutionState {
@@ -200,13 +189,13 @@ impl ExecutionState {
     }
 
     /// Set the final result.
-    pub fn set_final_result(&mut self, result: FinalResultData) {
+    pub fn set_final_result(&mut self, result: FinalResult) {
         self.final_result = Some(result);
         self.phase = phases::COMPLETE.to_string();
     }
 
     /// Get the final result data, if available.
-    pub fn final_result(&self) -> Option<&FinalResultData> {
+    pub fn final_result(&self) -> Option<&FinalResult> {
         self.final_result.as_ref()
     }
 

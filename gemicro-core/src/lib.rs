@@ -65,13 +65,11 @@ pub use error::{AgentError, GemicroError, LlmError};
 pub use history::{ConversationHistory, HistoryEntry};
 pub use llm::{LlmClient, LlmRequest, LlmStreamChunk};
 pub use mock_llm::MockLlmClient;
-// Re-export rust-genai types for convenience
-pub use rust_genai::{InteractionResponse, UsageMetadata};
 pub use tool::{
     tools_to_callables, AutoApprove, AutoDeny, ConfirmationHandler, GemicroToolService, Tool,
     ToolCallableAdapter, ToolError, ToolRegistry, ToolResult, ToolSet,
 };
-pub use tracking::{DefaultTracker, ExecutionTracking, FinalResultData};
+pub use tracking::{DefaultTracker, ExecutionTracking};
 pub use trajectory::{
     LlmResponseData, SerializableLlmRequest, SerializableStreamChunk, Trajectory,
     TrajectoryBuilder, TrajectoryMetadata, TrajectoryStep, SCHEMA_VERSION,
