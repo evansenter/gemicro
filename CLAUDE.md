@@ -497,67 +497,20 @@ match update.event_type.as_str() {
 
 ### When to Wrap rust-genai Types
 
-**Wrap when gemicro adds observability concerns:**
-- Trajectory recording (type must serialize for replay)
-- Metadata fields (e.g., `ToolResult.metadata`)
-- Richer error categorization for agent-level handling
-
-**Use rust-genai types directly when just passing through.**
-
 | gemicro Type | Wraps | Why |
 |--------------|-------|-----|
 | `LlmRequest` | `InteractionBuilder` params | Serialized in trajectories |
 | `LlmClient` | `Client` | Adds recording capability |
-| `Tool` trait | `CallableFunction` | Adds metadata, confirmation, richer errors |
-| `GemicroToolService` | `ToolService` | Adds registry, filtering, confirmation |
-| `InteractionResponse` | (re-exported) | No additions needed |
-| `FunctionDeclaration` | (used directly) | No additions needed |
+| `Tool` trait | `CallableFunction` | Adds metadata, confirmation |
+| `GemicroToolService` | `ToolService` | Adds registry, filtering |
 
-### When to Request Features (Not Work Around)
-
-Since we control rust-genai, **fix gaps at the source**:
-
-1. **Don't** build complex gemicro abstractions to work around rust-genai limitations
-2. **Do** file an issue or implement it in rust-genai
-3. Keep gemicro's wrapper layer thin
-
-**Examples:**
-- Need structured output? → Added to rust-genai, gemicro just calls it
-- Need Google Search grounding? → rust-genai exposes `with_google_search()`, gemicro forwards it
-- Need async tool execution? → rust-genai's `CallableFunction::call` is async
-
-### Where Concerns Live
-
-| Concern | Layer | Rationale |
-|---------|-------|-----------|
-| Gemini API types | rust-genai | Single source of truth for API contract |
-| Streaming primitives | rust-genai | `StreamChunk::Delta/Complete` pattern |
-| Function calling | rust-genai | `CallableFunction`, `AutoFunctionResult` |
-| Agent patterns | gemicro | DeepResearch, ReAct, etc. |
-| Trajectory recording | gemicro | Agent-level observability |
-| Tool orchestration | gemicro | Registry, filtering, metadata |
-| Evaluation harness | gemicro | Datasets, scorers, harness |
+Use rust-genai types directly when just passing through (e.g., `InteractionResponse`, `FunctionDeclaration`).
 
 ### Error Propagation
 
 ```
-rust_genai::GenaiError
-    ↓ wrapped by
-gemicro_core::LlmError
-    ↓ wrapped by
-gemicro_core::AgentError
+rust_genai::GenaiError → gemicro_core::LlmError → gemicro_core::AgentError
 ```
-
-Errors bubble up with context added at each layer. Don't swallow errors.
-
-### Testing Strategy
-
-| Test Type | Location | Runs When |
-|-----------|----------|-----------|
-| Unit tests | Both libraries | Always (`cargo test`) |
-| Doc tests | Both libraries | Always |
-| LLM integration | gemicro | `#[ignore]`, needs `GEMINI_API_KEY` |
-| API canary tests | rust-genai | CI with secrets |
 
 ### What NOT to Add to gemicro
 
@@ -567,81 +520,28 @@ Errors bubble up with context added at each layer. Don't swallow errors.
 
 ## Tool Confirmation
 
-Tools that perform potentially dangerous operations (bash commands, file writes) require user confirmation before execution. This is managed through the `ConfirmationHandler` trait.
-
-### Architecture
+Tools that perform dangerous operations require user confirmation via `ConfirmationHandler`.
 
 ```
-ConfirmationHandler (trait)       - Async confirmation interface
-    ├── AutoApprove              - Always approve (for tests/trusted contexts)
+ConfirmationHandler (trait)
+    ├── AutoApprove              - Always approve (for tests)
     ├── AutoDeny                 - Always deny (safe default)
-    └── InteractiveConfirmation  - CLI terminal prompts (dialoguer)
-
-GemicroToolService               - rust-genai ToolService implementation
-    ├── ToolRegistry             - Available tools
-    ├── ToolSet filter           - Which tools to enable
-    └── ConfirmationHandler      - How to confirm dangerous operations
+    └── InteractiveConfirmation  - CLI terminal prompts
 ```
 
-### Usage
-
-```rust
-use gemicro_core::{AgentContext, ConfirmationHandler, GemicroToolService, ToolRegistry, ToolSet};
-use std::sync::Arc;
-
-// 1. Create tool registry with dangerous tools
-let mut registry = ToolRegistry::new();
-registry.register(Calculator);      // Safe - no confirmation
-registry.register(Bash::default()); // Dangerous - requires confirmation
-
-// 2. Create confirmation handler
-let handler = Arc::new(InteractiveConfirmation::default());
-
-// 3. Wire into GemicroToolService
-let service = GemicroToolService::new(Arc::new(registry))
-    .with_filter(ToolSet::All)
-    .with_confirmation_handler(Arc::clone(&handler));
-
-// 4. Use with rust-genai
-client.interaction()
-    .with_model(MODEL)
-    .with_tool_service(Arc::new(service))
-    .create_with_auto_functions()
-    .await?;
-
-// 5. Or wire into AgentContext for agent-managed tools
-let context = AgentContext::new(llm)
-    .with_confirmation_handler(handler);
-```
-
-### Tool Confirmation Protocol
-
-Tools signal confirmation requirements through the `Tool` trait:
-
-```rust
-trait Tool {
-    fn requires_confirmation(&self, args: &Value) -> bool;
-    fn confirmation_message(&self, args: &Value) -> String;
-}
-```
-
-When a tool requires confirmation:
-1. `GemicroToolService` calls `handler.confirm(tool_name, message, args)`
-2. If approved → tool executes normally
-3. If denied → returns `ToolError::ConfirmationDenied`
-4. LLM receives error message and may try alternative approach
-
-### Built-in Handlers
+Tools implement `requires_confirmation()` and `confirmation_message()`. When confirmation is needed, `GemicroToolService` calls the handler; denial returns `ToolError::ConfirmationDenied`.
 
 | Handler | Behavior | Use Case |
 |---------|----------|----------|
-| `AutoApprove` | Always returns true | Tests, trusted automation |
-| `AutoDeny` | Always returns false | Safe default when no handler set |
+| `AutoApprove` | Always true | Tests, trusted automation |
+| `AutoDeny` | Always false | Safe default |
 | `InteractiveConfirmation` | Terminal prompt | CLI applications |
+
+See [`docs/TOOL_AUTHORING.md`](docs/TOOL_AUTHORING.md) for implementation details.
 
 ## Hook System
 
-The hook system intercepts tool execution for validation, logging, security controls, and custom logic without modifying tools themselves.
+Hooks intercept tool execution for validation, logging, and security without modifying tools.
 
 ### Architecture
 
@@ -653,276 +553,40 @@ ToolCallableAdapter (enforces hooks)
     └─ Post-hooks → Logging, metrics (observability only)
 ```
 
-**Critical Design:** Hooks are enforced in `ToolCallableAdapter::call()` because it's the **only interception point** when using rust-genai's automatic function calling (`create_with_auto_functions()` or `create_stream_with_auto_functions()`). The LLM calls `CallableFunction::call()` directly, bypassing `Tool` and `ToolRegistry` abstractions. See `gemicro-core/src/tool/adapter.rs` for detailed rationale.
-
-**Streaming Support:** Hooks work identically in both streaming and non-streaming modes. Use `create_stream_with_auto_functions()` for real-time incremental text updates via `AutoFunctionStreamChunk` while maintaining full hook/confirmation enforcement. See `gemicro-tool-agent/examples/streaming_tool_agent.rs` for a complete example and `gemicro-tool-agent/tests/integration.rs::test_streaming_function_calling_with_hooks` for verification.
-
-### Usage
-
-```rust
-use gemicro_audit_log::AuditLog;
-use gemicro_file_security::FileSecurity;
-use gemicro_metrics::Metrics;
-use gemicro_core::tool::{HookRegistry, GemicroToolService, ToolRegistry};
-use std::sync::Arc;
-use std::path::PathBuf;
-
-// 1. Create metrics first to retain a reference for later access
-let metrics = Metrics::new();
-
-// 2. Create hooks registry (clone metrics to share with registry)
-let hooks = Arc::new(
-    HookRegistry::new()
-        .with_hook(AuditLog)  // Log all tool invocations
-        .with_hook(FileSecurity::new(vec![
-            PathBuf::from("/etc"),
-            PathBuf::from("/var"),
-        ]))  // Block writes to sensitive paths
-        .with_hook(metrics.clone())  // Collect usage metrics
-);
-
-// 3. Wire into service
-let mut registry = ToolRegistry::new();
-// ... register tools ...
-
-let service = GemicroToolService::new(Arc::new(registry))
-    .with_hooks(hooks)
-    .with_confirmation_handler(Arc::new(AutoApprove));
-
-// 4. Use with rust-genai
-// client.interaction()
-//     .with_tool_service(Arc::new(service))
-//     .create_with_auto_functions()
-//     .await?;
-
-// 5. Later: access metrics via the original reference
-let snapshot = metrics.snapshot();
-```
-
-### Hook Interface
-
-```rust
-#[async_trait]
-pub trait ToolHook: Send + Sync {
-    /// Called before tool execution
-    /// Returns: Allow | AllowWithModifiedInput(Value) | Deny { reason }
-    async fn pre_tool_use(&self, tool_name: &str, input: &Value)
-        -> Result<HookDecision, HookError>;
-
-    /// Called after tool execution (observability only)
-    async fn post_tool_use(&self, tool_name: &str, input: &Value, output: &ToolResult)
-        -> Result<(), HookError>;
-}
-```
+Hooks are enforced in `ToolCallableAdapter::call()` - the only interception point for rust-genai's automatic function calling. See `gemicro-core/src/tool/adapter.rs` for rationale.
 
 ### Execution Order
 
-Multiple hooks run in registration order:
 ```
 pre_hook_1 → pre_hook_2 → ... → EXECUTE → post_hook_1 → post_hook_2 → ...
 ```
 
-- First `Deny` stops the chain and prevents execution
-- First `AllowWithModifiedInput` modifies input for subsequent hooks
-- If all return `Allow`, execution proceeds with original input
-- Post-hooks run in the same order as pre-hooks (registration order)
+- First `Deny` stops chain and prevents execution
 - Post-hooks run even if earlier post-hooks fail (logged, not fatal)
 
 ### Built-in Hook Crates
 
-| Hook Crate | Purpose | Use Case |
-|------------|---------|----------|
-| `gemicro-audit-log` | Log all tool invocations | Compliance, debugging |
-| `gemicro-file-security` | Block writes to sensitive paths | Security policy enforcement |
-| `gemicro-input-sanitizer` | Enforce input size limits | Resource protection |
-| `gemicro-conditional-permission` | Request permission for dangerous operations | Dynamic security controls |
-| `gemicro-metrics` | Track tool usage metrics | Observability |
+| Hook Crate | Purpose |
+|------------|---------|
+| `gemicro-audit-log` | Log all tool invocations |
+| `gemicro-file-security` | Block writes to sensitive paths |
+| `gemicro-input-sanitizer` | Enforce input size limits |
+| `gemicro-conditional-permission` | Request permission for dangerous operations |
+| `gemicro-metrics` | Track tool usage metrics |
 
-Each hook is a separate crate in `hooks/` following the same pattern as tools and agents.
-See individual crate documentation for usage examples and configuration options.
+### Hook Compatibility
 
-### Custom Hooks
+Hooks **only work** with automatic function calling:
 
-```rust
-use gemicro_core::tool::{ToolHook, HookDecision, HookError, ToolResult};
-use async_trait::async_trait;
-use serde_json::Value;
+| Pattern | Method | Hooks? |
+|---------|--------|--------|
+| Automatic | `create_with_auto_functions()` | ✅ Yes |
+| Automatic streaming | `create_stream_with_auto_functions()` | ✅ Yes |
+| Manual | `create()` + loop | ❌ No |
 
-#[derive(Debug)]
-struct MyCustomHook;
+Manual FC bypasses hooks because you handle execution yourself. Use automatic FC for hook enforcement.
 
-#[async_trait]
-impl ToolHook for MyCustomHook {
-    async fn pre_tool_use(&self, tool_name: &str, input: &Value)
-        -> Result<HookDecision, HookError>
-    {
-        // Custom validation logic
-        if tool_name == "bash" && input["command"].as_str() == Some("rm -rf /") {
-            return Ok(HookDecision::Deny {
-                reason: "Dangerous command blocked".into()
-            });
-        }
-        Ok(HookDecision::Allow)
-    }
-
-    async fn post_tool_use(&self, _: &str, _: &Value, _: &ToolResult)
-        -> Result<(), HookError>
-    {
-        // Logging, metrics, etc.
-        Ok(())
-    }
-}
-```
-
-### Hook Design Guidelines
-
-When creating new hooks, follow these patterns for consistency:
-
-#### **Struct Patterns**
-
-| Hook Type | Pattern | Example | Rationale |
-|-----------|---------|---------|-----------|
-| **Stateless** | Unit struct + Default | `AuditLog` | No configuration needed |
-| **Config** | Struct + pub fields + #[non_exhaustive] | `FileSecurity`, `InputSanitizer` | Simple config with field access |
-| **Complex Config** | Struct + pub fields + builder + #[non_exhaustive] | `ConditionalPermission` | Multiple optional fields |
-| **Stateful** | Struct + private fields + accessors + #[non_exhaustive] | `Metrics` | Runtime mutable state |
-
-#### **Field Visibility Rules**
-
-- **Config hooks**: Use `pub` fields + `#[non_exhaustive]`
-  - Allows inspection and debugging
-  - `#[non_exhaustive]` prevents struct literals, forces constructor/builder
-  - Examples: `FileSecurity { pub blocked_paths }`, `InputSanitizer { pub max_input_size_bytes }`
-
-- **Stateful hooks**: Use private fields + accessors
-  - Encapsulates internal mutable state
-  - Provides controlled access via methods
-  - Example: `Metrics { tools: Arc<RwLock<...>> }` with `snapshot()` method
-
-- **Unit structs**: No fields
-  - For hooks with no configuration
-  - Just derive `Default`
-  - Example: `AuditLog`
-
-#### **Required Traits**
-
-All hooks must implement:
-- `ToolHook` (async trait with `pre_tool_use` and `post_tool_use`)
-- `Clone` (for sharing across registries)
-- `Debug` (for observability)
-
-#### **Cargo.toml Standards**
-
-```toml
-[package]
-name = "gemicro-<hook-name>"
-version.workspace = true     # Always use workspace version
-edition.workspace = true     # Always use workspace edition
-description = "Brief description"
-
-[dependencies]
-gemicro-core = { path = "../../gemicro-core" }
-async-trait = { workspace = true }
-serde_json = { workspace = true }
-# ... hook-specific deps
-```
-
-#### **Naming Conventions**
-
-- **Crate**: `gemicro-<kebab-case>`  (e.g., `gemicro-audit-log`)
-- **Struct**: `<PascalCase>` (e.g., `AuditLog`)
-- **No "Hook" suffix** - the `ToolHook` trait provides type context
-
-#### **When to Use #[non_exhaustive]**
-
-Always add `#[non_exhaustive]` to:
-- Public hook structs (even if no fields currently)
-- Public snapshot/result structs
-- Config builders
-
-This allows adding fields in the future without breaking semver.
-
-### Function Calling Patterns and Hook Compatibility
-
-rust-genai supports multiple function calling patterns. Hooks **only work** with patterns that use `ToolService`:
-
-| Pattern | rust-genai Method | Hook Support | Confirmation Support | Status | Use Case |
-|---------|-------------------|--------------|---------------------|--------|----------|
-| **Automatic (non-streaming)** | `create_with_auto_functions()` | ✅ Full | ✅ Full | ✅ **Available** | Production agents, CLI tools |
-| **Automatic (streaming)** | `create_stream_with_auto_functions()` | ✅ Full | ✅ Full | ✅ **Available** | Real-time UIs, progress updates |
-| **Manual (non-streaming)** | `create()` + loop | ❌ No | ❌ No | ✅ Available | Custom control flow, specialized logic |
-| **Manual (streaming)** | `create_stream()` + loop | ❌ No | ❌ No | ✅ Available | Custom streaming control |
-
-**Why Manual FC is Incompatible with Hooks:**
-
-Manual function calling gives you raw `FunctionCall` objects and expects you to handle execution yourself:
-
-```rust
-// Manual FC pattern (hooks NOT applied)
-let response = client.interaction()
-    .with_functions(vec![my_function_decl])  // FunctionDeclaration, not ToolService
-    .create()
-    .await?;
-
-if let Some(calls) = response.function_calls() {
-    for call in calls {
-        // You write custom execution logic here
-        // No Tool trait, no adapter, no hooks
-        let result = my_custom_logic(&call.arguments);
-    }
-}
-```
-
-**Key differences:**
-- **Automatic FC**: "LLM, here are my tools (ToolService), execute them automatically" → Hooks intercept at `CallableFunction::call()`
-- **Manual FC**: "LLM, tell me what you want, I'll handle execution myself" → No tool abstraction, no interception point
-
-**Recommendation:**
-- **Use automatic FC** (`create_with_auto_functions()` or `create_stream_with_auto_functions()`) when you want:
-  - Automatic hook enforcement (logging, validation, security)
-  - Confirmation prompts for dangerous operations
-  - The `Tool` trait abstraction for reusable tools
-- **Use manual FC** when you:
-  - Need raw control over execution flow
-  - Have logic that doesn't fit the `Tool` trait
-  - Want to bypass all abstractions for specialized cases
-
-**Can you apply hooks in manual FC?** Technically yes, but it defeats the purpose:
-
-```rust
-// Possible but NOT recommended
-if let Some(calls) = response.function_calls() {
-    for call in calls {
-        // You could manually get the tool and apply hooks...
-        let tool = registry.get(&call.name)?;
-        let adapter = ToolCallableAdapter::new(tool)
-            .with_hooks(hooks);
-        let result = adapter.call(&call.arguments).await?;
-        // But if you're doing this, just use automatic FC!
-    }
-}
-```
-
-This is **opt-in** (not enforced) and if you're using the `Tool` trait anyway, you should use automatic FC. Manual FC is for users who explicitly want to bypass abstractions.
-
-**Testing:** See `gemicro-tool-agent/tests/integration.rs`:
-- `test_streaming_function_calling_with_hooks()` - Verifies streaming automatic FC with hooks and confirmation
-- `test_tool_agent_calculator()` - Verifies non-streaming automatic FC
-- Both streaming and non-streaming automatic FC are fully tested and working
-
-**Example:** `gemicro-tool-agent/examples/streaming_tool_agent.rs` demonstrates streaming FC with hooks, showing real-time text updates via `AutoFunctionStreamChunk` while maintaining full hook enforcement.
-
-### Design Trade-offs
-
-**Why hooks live in the adapter:**
-- rust-genai calls `CallableFunction::call()` directly
-- No other interception point exists for auto-function calling
-- Tools stay simple, adapter handles cross-cutting concerns
-
-**Trade-off:**
-- Direct calls to `tool.execute()` bypass hooks
-- Acceptable because direct calls are for testing/manual use
-- LLM function calling (primary use case) always goes through adapter
+See [`docs/HOOK_AUTHORING.md`](docs/HOOK_AUTHORING.md) for implementation details, design guidelines, and examples.
 
 ## Troubleshooting
 
