@@ -17,7 +17,7 @@ fn create_test_scorer(api_key: &str) -> LlmJudgeScorer {
     let config = LlmConfig::default()
         .with_timeout(Duration::from_secs(30))
         .with_max_tokens(1024)
-        .with_temperature(0.7)
+        .with_temperature(0.0)
         .with_max_retries(1)
         .with_retry_base_delay_ms(500);
     let llm = Arc::new(LlmClient::new(genai_client, config));
@@ -116,6 +116,50 @@ async fn test_llm_judge_scorer_semantic_equivalence() {
     assert!(
         (score - 1.0).abs() < f64::EPSILON,
         "Semantically equivalent answers should return 1.0, got: {score}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore] // Requires GEMINI_API_KEY
+async fn test_llm_judge_scorer_empty_strings() {
+    let Some(api_key) = get_api_key() else {
+        eprintln!("Skipping test: GEMINI_API_KEY not set");
+        return;
+    };
+
+    let scorer = create_test_scorer(&api_key);
+
+    // Empty predicted against non-empty ground truth should be incorrect
+    let score = scorer.score("", "Paris");
+
+    // Should return a valid score (not NaN) even for edge cases
+    assert!(
+        !score.is_nan(),
+        "Scorer should handle empty strings gracefully"
+    );
+    assert!(
+        score.abs() < f64::EPSILON,
+        "Empty answer should return 0.0, got: {score}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore] // Requires GEMINI_API_KEY
+async fn test_llm_judge_scorer_numeric_answer() {
+    let Some(api_key) = get_api_key() else {
+        eprintln!("Skipping test: GEMINI_API_KEY not set");
+        return;
+    };
+
+    let scorer = create_test_scorer(&api_key);
+
+    // Numeric answers should be compared correctly
+    let score = scorer.score("42", "42");
+
+    assert!(!score.is_nan(), "Scorer should handle numeric answers");
+    assert!(
+        (score - 1.0).abs() < f64::EPSILON,
+        "Matching numeric answer should return 1.0, got: {score}"
     );
 }
 
