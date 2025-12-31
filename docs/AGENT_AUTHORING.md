@@ -246,6 +246,216 @@ impl Agent for SimpleQaAgent {
 }
 ```
 
+## Execution Tracking and Phases
+
+Agents provide their own execution tracking logic via the `create_tracker()` method. This enables the CLI and runner to remain agent-agnostic while still providing meaningful progress updates.
+
+### The ExecutionTracking Trait
+
+Location: `gemicro-core/src/tracking.rs`
+
+```rust
+pub trait ExecutionTracking: Send + Sync {
+    /// Process an event and update internal state.
+    fn handle_event(&mut self, event: &AgentUpdate);
+
+    /// Current status message for display.
+    fn status_message(&self) -> Option<&str>;
+
+    /// Whether execution is complete.
+    fn is_complete(&self) -> bool;
+
+    /// Final result data (available only when is_complete() is true).
+    fn final_result(&self) -> Option<&FinalResult>;
+}
+```
+
+### DefaultTracker
+
+For simple agents, use `DefaultTracker` which extracts status from each event's `message` field:
+
+```rust
+fn create_tracker(&self) -> Box<dyn ExecutionTracking> {
+    Box::new(DefaultTracker::default())
+}
+```
+
+`DefaultTracker`:
+- Updates `status_message()` with each event's `message` field
+- Captures `final_result` when `final_result` event arrives
+- Returns `is_complete() = true` once the final result is set
+
+This is sufficient for most agents since the event `message` field provides the human-readable status.
+
+### Custom Trackers
+
+For agents with complex execution patterns (e.g., tracking step counts, parallel progress), implement a custom tracker:
+
+```rust
+struct MyAgentTracker {
+    current_step: usize,
+    total_steps: usize,
+    status: String,
+    result: Option<FinalResult>,
+}
+
+impl ExecutionTracking for MyAgentTracker {
+    fn handle_event(&mut self, event: &AgentUpdate) {
+        match event.event_type.as_str() {
+            "my_agent_step_started" => {
+                self.current_step = event.data["step"].as_u64().unwrap_or(0) as usize;
+                self.total_steps = event.data["total"].as_u64().unwrap_or(0) as usize;
+                self.status = format!("Processing step {}/{}", self.current_step, self.total_steps);
+            }
+            "final_result" => {
+                if let Some(result) = event.as_final_result() {
+                    self.result = Some(result);
+                }
+            }
+            _ => {
+                // Unknown events: update status from message (graceful handling)
+                self.status = event.message.clone();
+            }
+        }
+    }
+
+    fn status_message(&self) -> Option<&str> {
+        if self.status.is_empty() { None } else { Some(&self.status) }
+    }
+
+    fn is_complete(&self) -> bool {
+        self.result.is_some()
+    }
+
+    fn final_result(&self) -> Option<&FinalResult> {
+        self.result.as_ref()
+    }
+}
+```
+
+### How Tracking Works
+
+```text
+┌─────────────────────────────────────────────────────────────────────┐
+│                         Execution Flow                               │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│   Agent.execute()           Tracker                   CLI/Runner     │
+│        │                       │                           │         │
+│        │  AgentUpdate          │                           │         │
+│        ├──────────────────────>│                           │         │
+│        │                       │  handle_event()           │         │
+│        │                       ├────────────────────────>  │         │
+│        │                       │                           │         │
+│        │                       │  status_message()         │         │
+│        │                       │<─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ │         │
+│        │                       │                           │         │
+│        │                       │       Display             │         │
+│        │                       │      "Step 2/5..."        │         │
+│        │                       │                           │         │
+│        │  final_result         │                           │         │
+│        ├──────────────────────>│                           │         │
+│        │                       │  final_result()           │         │
+│        │                       │<─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ │         │
+│        │                       │                           │         │
+│                                                                      │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Phases vs Events
+
+Gemicro has two related but distinct concepts:
+
+| Concept | Location | Purpose |
+|---------|----------|---------|
+| **Events** | `AgentUpdate.event_type` | Semantic identifiers for what happened |
+| **Phases** | `ExecutionState.phase` | High-level execution stage for state tracking |
+
+**Events** are emitted by agents. **Phases** are used by `ExecutionState` (in gemicro-runner) for detailed state tracking, typically in rich UIs.
+
+#### Well-Known Phases
+
+Location: `gemicro-runner/src/state.rs`
+
+```rust
+pub mod phases {
+    pub const NOT_STARTED: &str = "not_started";
+    pub const COMPLETE: &str = "complete";
+
+    // DeepResearch phases
+    pub const DECOMPOSING: &str = "decomposing";
+    pub const EXECUTING: &str = "executing";
+    pub const SYNTHESIZING: &str = "synthesizing";
+
+    // ReAct phases
+    pub const THINKING: &str = "thinking";
+    pub const ACTING: &str = "acting";
+    pub const OBSERVING: &str = "observing";
+}
+```
+
+Agents can use these or define their own phase names.
+
+#### Event-to-Phase Mapping
+
+For agents that integrate with `ExecutionState`, events map to phases:
+
+**DeepResearchAgent:**
+| Event | Phase |
+|-------|-------|
+| `decomposition_started` | `decomposing` |
+| `decomposition_complete` | (still `decomposing`) |
+| `sub_query_started` | `executing` |
+| `sub_query_completed`/`sub_query_failed` | (still `executing`) |
+| `synthesis_started` | `synthesizing` |
+| `final_result` | `complete` |
+
+**ReactAgent:**
+| Event | Phase |
+|-------|-------|
+| `react_started` | `thinking` |
+| `react_thought` | `thinking` |
+| `react_action` | `acting` |
+| `react_observation` | `observing` |
+| `react_complete`/`react_max_iterations` | `complete` |
+| `final_result` | `complete` |
+
+### When to Use What
+
+| Use Case | Mechanism |
+|----------|-----------|
+| **Simple CLI spinner** | `DefaultTracker` + event messages |
+| **Step-by-step progress** | Custom tracker counting events |
+| **Rich TUI with state** | `ExecutionState` with phase tracking |
+| **Metrics collection** | `ExecutionMetrics.from_tracker()` |
+
+### Status Message Best Practices
+
+The `message` field in `AgentUpdate::custom()` becomes the status message in `DefaultTracker`:
+
+```rust
+// ✅ Good: Human-readable, informative
+yield AgentUpdate::custom(
+    "sub_query_started",
+    "Researching: What are the benefits of Rust?",  // Displayed to user
+    json!({ "id": 0, "query": "What are the benefits of Rust?" }),
+);
+
+// ✅ Good: Shows progress
+yield AgentUpdate::custom(
+    "sub_query_completed",
+    "Sub-query 3/5 completed",  // User sees "Sub-query 3/5 completed"
+    json!({ "id": 2, "result": "..." }),
+);
+
+// ❌ Avoid: Technical, not user-friendly
+yield AgentUpdate::custom(
+    "sub_query_completed",
+    "SQ_COMPLETE",  // User sees "SQ_COMPLETE" 🤔
+    json!({ "id": 2 }),
+);
+```
+
 ## Event System Patterns
 
 ### Creating Custom Events
