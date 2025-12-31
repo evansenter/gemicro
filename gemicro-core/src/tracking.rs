@@ -34,34 +34,7 @@
 //! }
 //! ```
 
-use crate::update::AgentUpdate;
-
-/// Data from a completed agent execution.
-///
-/// Contains generic fields plus an extensible `extra` for agent-specific data.
-/// This mirrors the structure of `ResultMetadata` but is owned by the tracker.
-#[derive(Debug, Clone)]
-pub struct FinalResultData {
-    /// The synthesized answer from the agent.
-    pub answer: String,
-
-    /// Total tokens used across all LLM calls.
-    pub total_tokens: u32,
-
-    /// Number of LLM calls that didn't report token usage.
-    pub tokens_unavailable_count: usize,
-
-    /// Total execution time in milliseconds.
-    pub duration_ms: u64,
-
-    /// Agent-specific metadata (steps, iterations, tool calls, etc.).
-    ///
-    /// Examples:
-    /// - DeepResearch: `{"steps_succeeded": 3, "steps_failed": 1}`
-    /// - ReAct: `{"iterations": 5, "tools_used": ["calculator", "search"]}`
-    /// - SimpleQA: `{}`
-    pub extra: serde_json::Value,
-}
+use crate::update::{AgentUpdate, FinalResult};
 
 /// Tracks agent execution state for display purposes.
 ///
@@ -99,7 +72,7 @@ pub trait ExecutionTracking: Send + Sync {
     /// Final result data (available only when `is_complete()` is true).
     ///
     /// Returns `None` if execution hasn't completed yet.
-    fn final_result(&self) -> Option<&FinalResultData>;
+    fn final_result(&self) -> Option<&FinalResult>;
 }
 
 /// A no-op tracker for agents that don't need custom tracking.
@@ -120,7 +93,7 @@ pub trait ExecutionTracking: Send + Sync {
 #[derive(Debug, Default)]
 pub struct DefaultTracker {
     status: String,
-    result: Option<FinalResultData>,
+    result: Option<FinalResult>,
 }
 
 impl ExecutionTracking for DefaultTracker {
@@ -130,13 +103,7 @@ impl ExecutionTracking for DefaultTracker {
 
         // Check for final_result event
         if let Some(result) = event.as_final_result() {
-            self.result = Some(FinalResultData {
-                answer: result.answer,
-                total_tokens: result.metadata.total_tokens,
-                tokens_unavailable_count: result.metadata.tokens_unavailable_count,
-                duration_ms: result.metadata.duration_ms,
-                extra: result.metadata.extra.clone(),
-            });
+            self.result = Some(result);
         }
     }
 
@@ -152,7 +119,7 @@ impl ExecutionTracking for DefaultTracker {
         self.result.is_some()
     }
 
-    fn final_result(&self) -> Option<&FinalResultData> {
+    fn final_result(&self) -> Option<&FinalResult> {
         self.result.as_ref()
     }
 }
@@ -201,9 +168,9 @@ mod tests {
         assert!(tracker.is_complete());
         let result = tracker.final_result().unwrap();
         assert_eq!(result.answer, "The answer is 42");
-        assert_eq!(result.total_tokens, 100);
-        assert_eq!(result.duration_ms, 5000);
-        assert_eq!(result.extra["steps_succeeded"], 3);
+        assert_eq!(result.metadata.total_tokens, 100);
+        assert_eq!(result.metadata.duration_ms, 5000);
+        assert_eq!(result.metadata.extra["steps_succeeded"], 3);
     }
 
     #[test]

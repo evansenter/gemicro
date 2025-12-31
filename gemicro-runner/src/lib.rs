@@ -60,13 +60,5 @@ pub mod utils;
 pub use metrics::{ExecutionMetrics, StepTiming};
 pub use registry::{AgentFactory, AgentRegistry};
 pub use runner::AgentRunner;
-pub use state::{phases, ExecutionState, ExecutionStep, FinalResultData, StepStatus};
+pub use state::{phases, ExecutionState, ExecutionStep, StepStatus};
 pub use utils::{first_sentence, format_duration, truncate};
-
-// Backwards compatibility aliases (deprecated)
-#[deprecated(since = "0.2.0", note = "Use StepTiming instead")]
-pub type SubQueryTiming = StepTiming;
-#[deprecated(since = "0.2.0", note = "Use ExecutionStep instead")]
-pub type SubQueryState = ExecutionStep;
-#[deprecated(since = "0.2.0", note = "Use StepStatus instead")]
-pub type SubQueryStatus = StepStatus;
