@@ -11,6 +11,7 @@ description = "Conditional permission hook for gemicro - dynamic safety prompts 
 [dependencies]
 gemicro-core = { path = "../../gemicro-core" }
 async-trait.workspace = true
+log.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]

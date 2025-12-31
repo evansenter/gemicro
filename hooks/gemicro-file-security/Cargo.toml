@@ -11,6 +11,7 @@ description = "File security hook for gemicro - blocks writes to sensitive paths
 [dependencies]
 gemicro-core = { path = "../../gemicro-core" }
 async-trait.workspace = true
+log.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]

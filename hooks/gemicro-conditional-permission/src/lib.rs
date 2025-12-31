@@ -73,9 +73,12 @@ use serde_json::Value;
 ///     .build();
 /// ```
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ConditionalPermission {
-    dangerous_patterns: Vec<String>,
-    fields_to_check: Vec<String>,
+    /// Patterns to match against (case-insensitive)
+    pub dangerous_patterns: Vec<String>,
+    /// Field names to check for dangerous patterns
+    pub fields_to_check: Vec<String>,
 }
 
 impl ConditionalPermission {
@@ -221,6 +224,11 @@ impl ToolHook for ConditionalPermission {
         input: &Value,
     ) -> Result<HookDecision, HookError> {
         if let Some(pattern) = self.is_dangerous(input) {
+            log::info!(
+                "ConditionalPermission: Requesting permission for tool '{}' (matched pattern: '{}')",
+                tool_name,
+                pattern
+            );
             return Ok(HookDecision::RequestPermission {
                 message: format!(
                     "Tool '{}' wants to perform operation containing '{}'. Allow?",

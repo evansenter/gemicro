@@ -123,14 +123,30 @@ impl ToolHook for FileSecurity {
             return Ok(HookDecision::Allow);
         }
 
-        // Extract path from input
+        // Extract path from input - deny if missing (fail-closed for security)
         let path = match input.get("path").and_then(|p| p.as_str()) {
             Some(p) => p,
-            None => return Ok(HookDecision::Allow), // No path = let tool handle error
+            None => {
+                log::error!(
+                    "FileSecurity: {} tool invocation has missing or non-string 'path' parameter - DENYING for safety",
+                    tool_name
+                );
+                return Ok(HookDecision::Deny {
+                    reason: format!(
+                        "Tool '{}' missing required 'path' parameter - cannot validate security policy",
+                        tool_name
+                    ),
+                });
+            }
         };
 
         // Check if blocked
         if self.is_blocked(path) {
+            log::warn!(
+                "FileSecurity: BLOCKED write attempt to protected path '{}' by tool '{}'",
+                path,
+                tool_name
+            );
             return Ok(HookDecision::Deny {
                 reason: format!("Writing to '{}' is blocked by security policy", path),
             });
@@ -185,11 +201,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_allows_missing_path() {
+    async fn test_denies_missing_path() {
+        // Security: fail-closed when path cannot be validated
         let hook = FileSecurity::new(vec![PathBuf::from("/etc")]);
         let input = json!({"other": "field"});
         let decision = hook.pre_tool_use("file_write", &input).await.unwrap();
-        assert_eq!(decision, HookDecision::Allow);
+        assert!(
+            matches!(decision, HookDecision::Deny { .. }),
+            "Should deny when path is missing (fail-closed for security)"
+        );
     }
 
     #[tokio::test]

@@ -1,7 +1,7 @@
 [package]
 name = "gemicro-deep-research"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
 description = "Deep Research agent: query decomposition, parallel sub-query execution, synthesis"
 
 [dependencies]

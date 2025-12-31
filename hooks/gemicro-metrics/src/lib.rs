@@ -48,6 +48,7 @@ use std::sync::{Arc, RwLock};
 /// }
 /// ```
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct Metrics {
     tools: Arc<RwLock<HashMap<String, ToolStats>>>,
 }
@@ -62,6 +63,7 @@ struct ToolStats {
 
 /// Snapshot of metrics at a point in time.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct MetricsSnapshot {
     tools: HashMap<String, ToolStatsSnapshot>,
 }
@@ -84,17 +86,35 @@ impl Metrics {
     }
 
     /// Get or create stats for a tool.
+    ///
+    /// Handles RwLock poisoning gracefully by recovering the data and continuing.
+    /// This is appropriate for best-effort metrics collection.
     fn get_or_create_stats(&self, tool_name: &str) -> ToolStats {
         // Fast path: read lock
         {
-            let tools = self.tools.read().unwrap();
+            let tools = match self.tools.read() {
+                Ok(guard) => guard,
+                Err(poisoned) => {
+                    log::warn!("Metrics lock was poisoned (read), recovering: {}", poisoned);
+                    poisoned.into_inner()
+                }
+            };
             if let Some(stats) = tools.get(tool_name) {
                 return stats.clone();
             }
         }
 
         // Slow path: write lock
-        let mut tools = self.tools.write().unwrap();
+        let mut tools = match self.tools.write() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                log::warn!(
+                    "Metrics lock was poisoned (write), recovering: {}",
+                    poisoned
+                );
+                poisoned.into_inner()
+            }
+        };
         tools.entry(tool_name.to_string()).or_default().clone()
     }
 
@@ -122,8 +142,18 @@ impl Metrics {
     /// Get a snapshot of current metrics.
     ///
     /// Returns a point-in-time copy of all collected metrics.
+    /// Handles lock poisoning gracefully by recovering the data.
     pub fn snapshot(&self) -> MetricsSnapshot {
-        let tools = self.tools.read().unwrap();
+        let tools = match self.tools.read() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                log::warn!(
+                    "Metrics lock was poisoned (snapshot), recovering: {}",
+                    poisoned
+                );
+                poisoned.into_inner()
+            }
+        };
         let snapshot_tools = tools
             .iter()
             .map(|(name, stats)| {
@@ -158,7 +188,16 @@ impl Metrics {
     /// This is acceptable for best-effort metrics. For strict consistency,
     /// avoid calling `reset()` during active tool execution.
     pub fn reset(&self) {
-        let mut tools = self.tools.write().unwrap();
+        let mut tools = match self.tools.write() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                log::warn!(
+                    "Metrics lock was poisoned (reset), recovering: {}",
+                    poisoned
+                );
+                poisoned.into_inner()
+            }
+        };
         tools.clear();
     }
 }
@@ -450,6 +489,87 @@ mod tests {
             assert_eq!(stats.invocations, 0, "Invocations should be 0 after reset");
             assert_eq!(stats.successes, 1, "Success recorded after reset");
         }
+    }
+
+    #[tokio::test]
+    async fn test_incomplete_tool_execution() {
+        // Documents behavior when pre_tool_use is called but post_tool_use never is
+        // (e.g., tool execution crashes between hooks)
+        let metrics = Metrics::new();
+
+        // Call pre_tool_use but never call post_tool_use
+        metrics.pre_tool_use("tool", &json!({})).await.unwrap();
+
+        let snapshot = metrics.snapshot();
+        let stats = snapshot.get("tool").unwrap();
+
+        // Document the expected invariant violation:
+        // invocations is incremented but successes + failures is not
+        assert_eq!(stats.invocations, 1);
+        assert_eq!(
+            stats.successes + stats.failures,
+            0,
+            "Expected invariant gap when post_tool_use never called"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_error_metadata_edge_cases() {
+        let metrics = Metrics::new();
+
+        // Test 1: null value in error field - should NOT count as failure
+        metrics.pre_tool_use("tool1", &json!({})).await.unwrap();
+        metrics
+            .post_tool_use(
+                "tool1",
+                &json!({}),
+                &ToolResult::text("ok").with_metadata(json!({"error": null})),
+            )
+            .await
+            .unwrap();
+
+        // Test 2: empty object in error field - should count as failure (key exists)
+        metrics.pre_tool_use("tool2", &json!({})).await.unwrap();
+        metrics
+            .post_tool_use(
+                "tool2",
+                &json!({}),
+                &ToolResult::text("ok").with_metadata(json!({"error": {}})),
+            )
+            .await
+            .unwrap();
+
+        // Test 3: false in error field - should count as failure (key exists)
+        metrics.pre_tool_use("tool3", &json!({})).await.unwrap();
+        metrics
+            .post_tool_use(
+                "tool3",
+                &json!({}),
+                &ToolResult::text("ok").with_metadata(json!({"error": false})),
+            )
+            .await
+            .unwrap();
+
+        let snapshot = metrics.snapshot();
+
+        // null counts as "exists" in JSON, so is_some() returns true
+        let tool1_stats = snapshot.get("tool1").unwrap();
+        assert_eq!(
+            tool1_stats.failures, 1,
+            "null error value should count as failure (key exists)"
+        );
+
+        let tool2_stats = snapshot.get("tool2").unwrap();
+        assert_eq!(
+            tool2_stats.failures, 1,
+            "empty object error should count as failure"
+        );
+
+        let tool3_stats = snapshot.get("tool3").unwrap();
+        assert_eq!(
+            tool3_stats.failures, 1,
+            "false error value should count as failure"
+        );
     }
 
     // Property-based tests

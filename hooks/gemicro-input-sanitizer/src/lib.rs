@@ -86,13 +86,19 @@ impl ToolHook for InputSanitizer {
         let size = self.estimate_size(input)?;
 
         if size > self.max_input_size_bytes {
+            // Calculate percentage over limit, handling zero max gracefully
+            let percent_over = if self.max_input_size_bytes == 0 {
+                "N/A".to_string()
+            } else {
+                format!(
+                    "{}",
+                    ((size as f64 / self.max_input_size_bytes as f64 - 1.0) * 100.0) as usize
+                )
+            };
             return Ok(HookDecision::Deny {
                 reason: format!(
                     "Input too large for tool '{}': {} bytes (max: {} bytes, {}% over limit)",
-                    tool_name,
-                    size,
-                    self.max_input_size_bytes,
-                    ((size as f64 / self.max_input_size_bytes as f64 - 1.0) * 100.0) as usize
+                    tool_name, size, self.max_input_size_bytes, percent_over
                 ),
             });
         }
@@ -173,7 +179,30 @@ mod tests {
     // Edge case tests
 
     #[tokio::test]
-    async fn test_zero_byte_limit() {
+    async fn test_actual_zero_byte_limit() {
+        // Zero-byte limit should deny everything (pathological but valid config)
+        let hook = InputSanitizer::new(0);
+        let input = json!({}); // Even empty object has size
+
+        let decision = hook.pre_tool_use("test", &input).await.unwrap();
+
+        // Should deny - size > 0 always true for any valid JSON
+        // Should show "N/A% over limit" to avoid division by zero
+        match decision {
+            HookDecision::Deny { reason } => {
+                assert!(reason.contains("too large"));
+                assert!(
+                    reason.contains("N/A% over limit"),
+                    "Should show N/A for zero limit, got: {}",
+                    reason
+                );
+            }
+            _ => panic!("Expected deny for zero-byte limit"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_one_byte_limit() {
         // Even tiny limits should work (deny everything)
         let hook = InputSanitizer::new(1);
         let input = json!({}); // Serializes to "{}" (2 bytes)
@@ -185,7 +214,7 @@ mod tests {
                 assert!(reason.contains("too large"));
                 assert!(reason.contains("100% over limit"));
             }
-            _ => panic!("Expected deny for zero-byte limit"),
+            _ => panic!("Expected deny for one-byte limit"),
         }
     }
 

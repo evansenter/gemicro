@@ -662,10 +662,83 @@ async fn evaluate_from_trajectories() -> Result<(), Box<dyn std::error::Error>> 
 }
 ```
 
+## Using Tools in Agents
+
+Agents can use tools via the `AgentContext.tools` field, which provides access to a shared `ToolRegistry`.
+
+### Basic Tool Usage
+
+```rust
+impl Agent for MyToolAgent {
+    fn execute(&self, query: &str, context: AgentContext) -> AgentStream<'_> {
+        Box::pin(try_stream! {
+            // Get tool from registry
+            let tools = context.tools
+                .ok_or(AgentError::Other("No tools available".into()))?;
+
+            let file_read = tools.get("file_read")
+                .ok_or(AgentError::Other("file_read tool not found".into()))?;
+
+            // Execute tool
+            let result = file_read.execute(json!({"path": "/etc/hosts"}))
+                .await
+                .map_err(|e| AgentError::Other(format!("Tool error: {}", e)))?;
+
+            yield AgentUpdate::custom("tool_result", result.content.to_string(), json!({}));
+        })
+    }
+}
+```
+
+### Using rust-genai's Automatic Function Calling
+
+For LLM-driven tool use (where the model decides which tools to call), use `GemicroToolService` with rust-genai:
+
+```rust
+use gemicro_core::tool::{GemicroToolService, ToolSet};
+use std::sync::Arc;
+
+impl Agent for ToolAgent {
+    fn execute(&self, query: &str, context: AgentContext) -> AgentStream<'_> {
+        Box::pin(try_stream! {
+            let tools = context.tools.clone().unwrap();
+
+            // Create tool service for rust-genai
+            let service = Arc::new(
+                GemicroToolService::new(tools)
+                    .with_filter(ToolSet::All)
+                    .with_confirmation_handler(
+                        context.confirmation_handler.clone().unwrap_or_else(|| Arc::new(AutoDeny))
+                    )
+            );
+
+            // Use with automatic function calling
+            let response = context.llm.genai_client()
+                .interaction()
+                .with_model("gemini-2.0-flash")
+                .with_system(&self.config.system_prompt)
+                .with_user(query)
+                .with_tool_service(service)
+                .create_with_auto_functions()
+                .await?;
+
+            // LLM automatically called tools as needed
+            let answer = response.text().unwrap_or("");
+            yield AgentUpdate::final_result(answer.to_string(), ResultMetadata::default());
+        })
+    }
+}
+```
+
+See `agents/gemicro-tool-agent/` for a complete implementation.
+
 ## See Also
 
 - `agents/gemicro-simple-qa/src/lib.rs` - Full reference implementation
 - `agents/gemicro-deep-research/src/` - Complex multi-phase example
+- `agents/gemicro-tool-agent/src/` - Tool-using agent example
 - `agents/gemicro-simple-qa/tests/integration.rs` - Integration test examples
 - `agents/gemicro-simple-qa/examples/trajectory_recording.rs` - Trajectory recording example
+- `docs/TOOL_AUTHORING.md` - Creating new tools
+- `docs/HOOK_AUTHORING.md` - Creating hooks to intercept tools
 - `CLAUDE.md` - Project design philosophy and crate responsibilities
