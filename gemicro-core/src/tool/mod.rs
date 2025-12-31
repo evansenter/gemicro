@@ -171,6 +171,43 @@ impl ConfirmationHandler for AutoDeny {
 ///
 /// The `content` field is sent to the LLM as the tool's response.
 /// The `metadata` field is for observability/logging and is NOT sent to the LLM.
+///
+/// # Error Signaling Convention
+///
+/// When a tool encounters an error but can still return a response to the LLM
+/// (as opposed to returning `Err(ToolError)`), use `metadata["error"]` to signal
+/// the failure. This allows hooks like [`Metrics`] to track tool failures.
+///
+/// **Recommended pattern:**
+///
+/// ```
+/// use gemicro_core::tool::ToolResult;
+/// use serde_json::json;
+///
+/// // Tool failed but wants to communicate the failure to the LLM
+/// let result = ToolResult::text("File not found: config.toml")
+///     .with_metadata(json!({"error": "File not found: config.toml"}));
+/// ```
+///
+/// The value of `metadata["error"]` can be any non-null JSON value (string, object, etc.)
+/// that provides context about the failure. Hooks detect errors by checking if the key
+/// exists with a non-null value:
+///
+/// ```text
+/// output.metadata.get("error").map(|v| !v.is_null()).unwrap_or(false)
+/// ```
+///
+/// **Note:** `{"error": null}` is treated as success (no error), while
+/// `{"error": "message"}` signals failure.
+///
+/// # When to Use Error Metadata vs ToolError
+///
+/// - **Return `Err(ToolError)`**: For fatal errors that should stop execution
+///   (e.g., invalid input that can't be processed).
+/// - **Return `Ok(ToolResult)` with `metadata["error"]`**: For recoverable errors
+///   where the LLM should receive feedback and may retry or adjust its approach.
+///
+/// [`Metrics`]: ../../../gemicro_metrics/index.html
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct ToolResult {
@@ -225,14 +262,26 @@ impl ToolResult {
     ///
     /// Metadata is for observability and logging, NOT sent to the LLM.
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```
     /// use gemicro_core::tool::ToolResult;
     /// use serde_json::json;
     ///
+    /// // Add timing metadata for observability
     /// let result = ToolResult::text("42")
     ///     .with_metadata(json!({"execution_time_ms": 5}));
+    /// ```
+    ///
+    /// To signal an error (see [`ToolResult`] for details):
+    ///
+    /// ```
+    /// use gemicro_core::tool::ToolResult;
+    /// use serde_json::json;
+    ///
+    /// // Signal failure via metadata["error"] so hooks can track it
+    /// let result = ToolResult::text("Permission denied: /etc/shadow")
+    ///     .with_metadata(json!({"error": "Permission denied"}));
     /// ```
     pub fn with_metadata(mut self, metadata: Value) -> Self {
         self.metadata = metadata;

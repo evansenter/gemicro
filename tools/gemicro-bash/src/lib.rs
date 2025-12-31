@@ -223,6 +223,14 @@ impl Tool for Bash {
         // callers to check status when needed, but the output itself is valuable
         // for agent reasoning even when commands "fail".
 
+        // Set "error" key for non-zero exits so hooks like Metrics can track failures.
+        // The convention is: non-null "error" value = failure, null/absent = success.
+        let error_value: Value = if success {
+            Value::Null
+        } else {
+            json!(format!("exit code {}", exit_code))
+        };
+
         #[cfg(unix)]
         let metadata = json!({
             "exit_code": exit_code,
@@ -233,6 +241,7 @@ impl Tool for Bash {
             "stdout_truncated": stdout_truncated,
             "stderr_truncated": stderr_truncated,
             "timeout_secs": timeout_secs,
+            "error": error_value,
         });
 
         #[cfg(not(unix))]
@@ -244,6 +253,7 @@ impl Tool for Bash {
             "stdout_truncated": stdout_truncated,
             "stderr_truncated": stderr_truncated,
             "timeout_secs": timeout_secs,
+            "error": error_value,
         });
 
         Ok(ToolResult::text(content).with_metadata(metadata))
