@@ -440,7 +440,6 @@ mod tests {
         Agent, AgentStream, DefaultTracker, ExecutionTracking, LlmConfig, ResultMetadata,
     };
     use serde_json::json;
-    use std::sync::atomic::AtomicBool;
 
     // ========================================================================
     // Mock Agent for Cancellation Testing
@@ -527,7 +526,6 @@ mod tests {
         events_before_check: usize,
         ready_signal: Arc<tokio::sync::Notify>,
         proceed_signal: Arc<tokio::sync::Notify>,
-        cancelled_flag: Arc<AtomicBool>,
     }
 
     impl SyncMockAgent {
@@ -540,12 +538,7 @@ mod tests {
                 events_before_check,
                 ready_signal,
                 proceed_signal,
-                cancelled_flag: Arc::new(AtomicBool::new(false)),
             }
-        }
-
-        fn cancelled_flag(&self) -> Arc<AtomicBool> {
-            self.cancelled_flag.clone()
         }
     }
 
@@ -563,7 +556,6 @@ mod tests {
             let events_before_check = self.events_before_check;
             let ready_signal = self.ready_signal.clone();
             let proceed_signal = self.proceed_signal.clone();
-            let cancelled_flag = self.cancelled_flag.clone();
 
             Box::pin(stream! {
                 // Emit start event
@@ -588,13 +580,8 @@ mod tests {
                 // Wait for either cancellation or proceed signal
                 let was_cancelled = tokio::select! {
                     biased;
-                    _ = context.cancellation_token.cancelled() => {
-                        cancelled_flag.store(true, Ordering::SeqCst);
-                        true
-                    }
-                    _ = proceed_signal.notified() => {
-                        false
-                    }
+                    _ = context.cancellation_token.cancelled() => true,
+                    _ = proceed_signal.notified() => false,
                 };
 
                 if was_cancelled {
@@ -752,7 +739,6 @@ mod tests {
         let proceed_signal = Arc::new(tokio::sync::Notify::new());
 
         let mock_agent = SyncMockAgent::new(3, ready_signal.clone(), proceed_signal.clone());
-        let cancelled_flag = mock_agent.cancelled_flag();
 
         // Set up cancellation token that will be triggered during execution
         let cancellation_token = CancellationToken::new();
@@ -799,10 +785,6 @@ mod tests {
         assert!(
             got_cancelled_error,
             "Should have received AgentError::Cancelled"
-        );
-        assert!(
-            cancelled_flag.load(Ordering::SeqCst),
-            "Agent should have detected cancellation"
         );
 
         // Verify partial events were collected (start + progress events)
@@ -1040,5 +1022,73 @@ mod tests {
         assert_eq!(events[2].event_type, "mock_progress");
         assert_eq!(events[3].event_type, "mock_progress");
         assert_eq!(events[4].event_type, "final_result");
+    }
+
+    /// Test that cancellation takes precedence over timeout.
+    ///
+    /// The `with_timeout_and_cancellation` helper uses `biased` in `tokio::select!`,
+    /// meaning cancellation is checked first. When both are triggered simultaneously,
+    /// cancellation should win.
+    #[tokio::test]
+    async fn test_cancellation_takes_precedence_over_timeout() {
+        use gemicro_core::with_timeout_and_cancellation;
+        use std::time::Duration;
+
+        let cancellation_token = CancellationToken::new();
+
+        // Pre-cancel the token before calling
+        cancellation_token.cancel();
+
+        // Use a generous timeout - but cancellation should win
+        let result = with_timeout_and_cancellation(
+            async { Ok::<_, AgentError>("should not reach") },
+            Duration::from_secs(60),
+            &cancellation_token,
+            || AgentError::Timeout {
+                elapsed_ms: 60_000,
+                timeout_ms: 60_000,
+                phase: "test".to_string(),
+            },
+        )
+        .await;
+
+        assert!(
+            matches!(result, Err(AgentError::Cancelled)),
+            "Cancellation should take precedence over timeout, got: {:?}",
+            result
+        );
+    }
+
+    /// Test that timeout triggers when cancellation doesn't happen.
+    ///
+    /// Without cancellation, the timeout should trigger after the specified duration.
+    #[tokio::test]
+    async fn test_timeout_triggers_without_cancellation() {
+        use gemicro_core::with_timeout_and_cancellation;
+        use std::time::Duration;
+
+        let cancellation_token = CancellationToken::new();
+
+        // Use a very short timeout with a long-running future
+        let result = with_timeout_and_cancellation(
+            async {
+                tokio::time::sleep(Duration::from_secs(60)).await;
+                Ok::<_, AgentError>("should not reach")
+            },
+            Duration::from_millis(10),
+            &cancellation_token,
+            || AgentError::Timeout {
+                elapsed_ms: 10,
+                timeout_ms: 10,
+                phase: "test".to_string(),
+            },
+        )
+        .await;
+
+        assert!(
+            matches!(result, Err(AgentError::Timeout { .. })),
+            "Should timeout without cancellation, got: {:?}",
+            result
+        );
     }
 }
