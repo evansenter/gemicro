@@ -787,9 +787,14 @@ mod tests {
             "Should have received AgentError::Cancelled"
         );
 
-        // Verify partial events were collected (start + progress events)
-        // Should have: 1 start + 3 progress = 4 events
-        assert_eq!(events.len(), 4, "Should have 4 events before cancellation");
+        // Verify partial events were collected (start + progress events).
+        // Cancellation is only checked after all progress events are emitted,
+        // so we expect: 1 start + 3 progress = 4 events
+        assert_eq!(
+            events.len(),
+            4,
+            "Should have 4 events before cancellation check"
+        );
         assert_eq!(
             events[0].event_type, "mock_started",
             "First event should be mock_started"
@@ -953,12 +958,13 @@ mod tests {
         );
     }
 
-    /// Test that pre-cancelled token causes immediate termination.
+    /// Test that pre-cancelled token causes exit at next cancellation check.
     ///
     /// If the cancellation token is already cancelled when execution starts,
-    /// the agent should exit immediately with Cancelled error.
+    /// the agent emits all events before its cancellation check, then exits
+    /// with Cancelled error. This verifies the check happens at the expected point.
     #[tokio::test]
-    async fn test_pre_cancelled_token_immediate_exit() {
+    async fn test_pre_cancelled_token_exits_at_check() {
         let mock_agent = MockCancellableAgent::new(10); // Would emit 10 progress events
 
         // Pre-cancel the token
