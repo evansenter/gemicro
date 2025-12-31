@@ -775,7 +775,9 @@ mod tests {
         });
 
         // Wait for agent to signal it's ready, then trigger cancellation
-        ready_signal.notified().await;
+        tokio::time::timeout(std::time::Duration::from_secs(5), ready_signal.notified())
+            .await
+            .expect("Agent should signal readiness within 5 seconds");
         cancel_token_clone.cancel();
 
         // Wait for execution to complete
@@ -910,19 +912,51 @@ mod tests {
         });
 
         // Wait for agent to be ready, then cancel
-        ready_signal.notified().await;
+        tokio::time::timeout(std::time::Duration::from_secs(5), ready_signal.notified())
+            .await
+            .expect("Agent should signal readiness within 5 seconds");
         cancel_token_clone.cancel();
 
         let events = exec_handle.await.unwrap();
 
         // Should have: 1 start + 5 progress = 6 events before cancellation
         assert_eq!(events.len(), 6, "Should have 6 events before cancellation");
-        assert_eq!(events[0].event_type, "mock_started");
+
+        // Explicit event type checking for each expected event
+        assert_eq!(
+            events[0].event_type, "mock_started",
+            "First event should be start"
+        );
+        assert_eq!(
+            events[1].event_type, "mock_progress",
+            "Event 1 should be progress"
+        );
+        assert_eq!(
+            events[2].event_type, "mock_progress",
+            "Event 2 should be progress"
+        );
+        assert_eq!(
+            events[3].event_type, "mock_progress",
+            "Event 3 should be progress"
+        );
+        assert_eq!(
+            events[4].event_type, "mock_progress",
+            "Event 4 should be progress"
+        );
+        assert_eq!(
+            events[5].event_type, "mock_progress",
+            "Event 5 should be progress"
+        );
+
+        // Verify step data matches expected sequence
         for (i, event) in events.iter().skip(1).enumerate() {
-            assert_eq!(event.event_type, "mock_progress");
-            // Verify step data
             let step = event.data.get("step").and_then(|v| v.as_u64()).unwrap();
-            assert_eq!(step, (i + 1) as u64);
+            assert_eq!(
+                step,
+                (i + 1) as u64,
+                "Step {} should have correct data",
+                i + 1
+            );
         }
     }
 
