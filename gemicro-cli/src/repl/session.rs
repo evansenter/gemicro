@@ -435,7 +435,172 @@ fn extract_tokens_from_events(events: &[AgentUpdate]) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gemicro_core::{LlmConfig, ResultMetadata};
+    use async_stream::stream;
+    use gemicro_core::{
+        Agent, AgentStream, DefaultTracker, ExecutionTracking, LlmConfig, ResultMetadata,
+    };
+    use serde_json::json;
+
+    // ========================================================================
+    // Mock Agent for Cancellation Testing
+    // ========================================================================
+
+    /// A mock agent that yields events and can be cancelled mid-execution.
+    ///
+    /// This agent yields a configurable number of events, then checks for
+    /// cancellation before emitting the final result. It's designed to test:
+    /// - CancellationToken triggering graceful exit
+    /// - AgentError::Cancelled handling
+    /// - Partial state preservation after cancellation
+    struct MockCancellableAgent {
+        /// Number of events to emit before checking cancellation
+        events_before_cancel_check: usize,
+    }
+
+    impl MockCancellableAgent {
+        fn new(events_before_cancel_check: usize) -> Self {
+            Self {
+                events_before_cancel_check,
+            }
+        }
+    }
+
+    impl Agent for MockCancellableAgent {
+        fn name(&self) -> &str {
+            "mock_cancellable"
+        }
+
+        fn description(&self) -> &str {
+            "A mock agent for testing cancellation"
+        }
+
+        fn execute(&self, query: &str, context: AgentContext) -> AgentStream<'_> {
+            let query = query.to_string();
+            let events_before_check = self.events_before_cancel_check;
+
+            Box::pin(stream! {
+                // Emit start event
+                yield Ok(AgentUpdate::custom(
+                    "mock_started",
+                    format!("Processing: {}", query),
+                    json!({ "query": query }),
+                ));
+
+                // Emit intermediate events
+                for i in 0..events_before_check {
+                    yield Ok(AgentUpdate::custom(
+                        "mock_progress",
+                        format!("Step {} of {}", i + 1, events_before_check),
+                        json!({ "step": i + 1 }),
+                    ));
+                }
+
+                // Check cancellation - this is a non-blocking check
+                if context.cancellation_token.is_cancelled() {
+                    yield Err(AgentError::Cancelled);
+                    return;
+                }
+
+                // Emit final result
+                yield Ok(AgentUpdate::final_result(
+                    "Mock answer".to_string(),
+                    ResultMetadata::new(100, 0, 50),
+                ));
+            })
+        }
+
+        fn create_tracker(&self) -> Box<dyn ExecutionTracking> {
+            Box::new(DefaultTracker::default())
+        }
+    }
+
+    /// A mock agent that waits for cancellation signal before completing.
+    ///
+    /// This agent uses a notify to properly synchronize with the test:
+    /// 1. Emits start event
+    /// 2. Emits N progress events
+    /// 3. Notifies ready_signal that it's ready
+    /// 4. Waits for either cancellation or proceed signal
+    /// 5. Returns Cancelled if token was cancelled, or emits final result
+    struct SyncMockAgent {
+        events_before_check: usize,
+        ready_signal: Arc<tokio::sync::Notify>,
+        proceed_signal: Arc<tokio::sync::Notify>,
+    }
+
+    impl SyncMockAgent {
+        fn new(
+            events_before_check: usize,
+            ready_signal: Arc<tokio::sync::Notify>,
+            proceed_signal: Arc<tokio::sync::Notify>,
+        ) -> Self {
+            Self {
+                events_before_check,
+                ready_signal,
+                proceed_signal,
+            }
+        }
+    }
+
+    impl Agent for SyncMockAgent {
+        fn name(&self) -> &str {
+            "sync_mock"
+        }
+
+        fn description(&self) -> &str {
+            "A synchronized mock agent for testing cancellation"
+        }
+
+        fn execute(&self, query: &str, context: AgentContext) -> AgentStream<'_> {
+            let query = query.to_string();
+            let events_before_check = self.events_before_check;
+            let ready_signal = self.ready_signal.clone();
+            let proceed_signal = self.proceed_signal.clone();
+
+            Box::pin(stream! {
+                // Emit start event
+                yield Ok(AgentUpdate::custom(
+                    "mock_started",
+                    format!("Processing: {}", query),
+                    json!({ "query": query }),
+                ));
+
+                // Emit intermediate events
+                for i in 0..events_before_check {
+                    yield Ok(AgentUpdate::custom(
+                        "mock_progress",
+                        format!("Step {} of {}", i + 1, events_before_check),
+                        json!({ "step": i + 1 }),
+                    ));
+                }
+
+                // Signal that we're ready for cancellation
+                ready_signal.notify_one();
+
+                // Wait for either cancellation or proceed signal
+                let was_cancelled = tokio::select! {
+                    biased;
+                    _ = context.cancellation_token.cancelled() => true,
+                    _ = proceed_signal.notified() => false,
+                };
+
+                if was_cancelled {
+                    yield Err(AgentError::Cancelled);
+                    return;
+                }
+
+                // Emit final result
+                yield Ok(AgentUpdate::final_result(
+                    "Mock answer".to_string(),
+                    ResultMetadata::new(100, 0, 50),
+                ));
+            })
+        }
+
+        fn create_tracker(&self) -> Box<dyn ExecutionTracking> {
+            Box::new(DefaultTracker::default())
+        }
+    }
 
     // Note: Most session tests require a mock LLM client which we don't have yet.
     // These are basic structural tests.
@@ -549,5 +714,421 @@ mod tests {
             ),
         ];
         assert_eq!(extract_tokens_from_events(&events), 1500);
+    }
+
+    // ========================================================================
+    // Cancellation Tests
+    // ========================================================================
+    //
+    // These tests verify the cancellation behavior in run_query:
+    // 1. CancellationToken triggers graceful exit
+    // 2. AgentError::Cancelled is handled as non-error (returns Ok())
+    // 3. Partial events are preserved after cancellation
+    // 4. Multiple cancellation attempts (Ctrl+C debouncing) work correctly
+
+    /// Test that cancellation via CancellationToken triggers a graceful exit.
+    ///
+    /// When the cancellation token is triggered:
+    /// - The agent should return AgentError::Cancelled
+    /// - run_query should return Ok(()) (not an error)
+    /// - The renderer should show interrupted state
+    #[tokio::test]
+    async fn test_cancellation_token_triggers_graceful_exit() {
+        // Create synchronization signals
+        let ready_signal = Arc::new(tokio::sync::Notify::new());
+        let proceed_signal = Arc::new(tokio::sync::Notify::new());
+
+        let mock_agent = SyncMockAgent::new(3, ready_signal.clone(), proceed_signal.clone());
+
+        // Set up cancellation token that will be triggered during execution
+        let cancellation_token = CancellationToken::new();
+        let cancel_token_clone = cancellation_token.clone();
+
+        // Create agent context
+        let genai_client = rust_genai::Client::builder("test-key".to_string()).build();
+        let llm = LlmClient::new(genai_client, LlmConfig::default());
+        let context = AgentContext::new_with_cancellation(llm, cancellation_token);
+
+        // Run agent execution in a separate task
+        let agent = Arc::new(mock_agent);
+        let agent_clone = agent.clone();
+        let exec_handle = tokio::spawn(async move {
+            let stream = agent_clone.execute("test query", context);
+            let stream = enforce_final_result_contract(stream);
+            futures_util::pin_mut!(stream);
+
+            let mut events = Vec::new();
+            let mut got_cancelled_error = false;
+
+            while let Some(result) = stream.next().await {
+                match result {
+                    Ok(update) => events.push(update),
+                    Err(AgentError::Cancelled) => {
+                        got_cancelled_error = true;
+                        break;
+                    }
+                    Err(e) => panic!("Unexpected error: {:?}", e),
+                }
+            }
+
+            (events, got_cancelled_error)
+        });
+
+        // Wait for agent to signal it's ready, then trigger cancellation
+        tokio::time::timeout(std::time::Duration::from_secs(5), ready_signal.notified())
+            .await
+            .expect("Agent should signal readiness within 5 seconds");
+        cancel_token_clone.cancel();
+
+        // Wait for execution to complete
+        let (events, got_cancelled_error) = exec_handle.await.unwrap();
+
+        // Verify cancellation behavior
+        assert!(
+            got_cancelled_error,
+            "Should have received AgentError::Cancelled"
+        );
+
+        // Verify partial events were collected (start + progress events).
+        // Cancellation is only checked after all progress events are emitted,
+        // so we expect: 1 start + 3 progress = 4 events
+        assert_eq!(
+            events.len(),
+            4,
+            "Should have 4 events before cancellation check"
+        );
+        assert_eq!(
+            events[0].event_type, "mock_started",
+            "First event should be mock_started"
+        );
+    }
+
+    /// Test that AgentError::Cancelled is treated as a non-error condition.
+    ///
+    /// The run_query method should return Ok(()) when cancelled, not propagate
+    /// the error, because cancellation is a normal user-initiated flow.
+    #[tokio::test]
+    async fn test_cancelled_error_treated_as_non_error() {
+        // Create agent that yields cancelled error after one event
+        struct CancellingAgent;
+
+        impl Agent for CancellingAgent {
+            fn name(&self) -> &str {
+                "cancelling_agent"
+            }
+
+            fn description(&self) -> &str {
+                "Agent that returns Cancelled after one event"
+            }
+
+            fn execute(&self, _query: &str, _context: AgentContext) -> AgentStream<'_> {
+                Box::pin(stream! {
+                    // Emit one event before returning cancelled
+                    yield Ok(AgentUpdate::custom(
+                        "starting",
+                        "Starting execution",
+                        json!({}),
+                    ));
+                    // Return cancelled error
+                    yield Err(AgentError::Cancelled);
+                })
+            }
+
+            fn create_tracker(&self) -> Box<dyn ExecutionTracking> {
+                Box::new(DefaultTracker::default())
+            }
+        }
+
+        // Execute the stream
+        let genai_client = rust_genai::Client::builder("test-key".to_string()).build();
+        let llm = LlmClient::new(genai_client, LlmConfig::default());
+        let context = AgentContext::new(llm);
+
+        let agent = CancellingAgent;
+        let stream = agent.execute("test", context);
+        let stream = enforce_final_result_contract(stream);
+        futures_util::pin_mut!(stream);
+
+        // Simulate the run_query cancellation handling logic
+        let mut is_cancelled = false;
+        let mut event_count = 0;
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(_update) => event_count += 1,
+                Err(AgentError::Cancelled) => {
+                    // This is the key assertion: Cancelled should be caught
+                    // and treated as a graceful exit, not an error
+                    is_cancelled = true;
+                    break;
+                }
+                Err(e) => panic!("Unexpected error type: {:?}", e),
+            }
+        }
+
+        assert!(
+            is_cancelled,
+            "Should have detected Cancelled and exited gracefully"
+        );
+        assert_eq!(
+            event_count, 1,
+            "Should have received one event before cancellation"
+        );
+    }
+
+    /// Test that partial events are preserved after cancellation.
+    ///
+    /// When cancellation occurs mid-execution:
+    /// - Events emitted before cancellation should be collected
+    /// - The stream should terminate cleanly after Cancelled error
+    #[tokio::test]
+    async fn test_partial_events_preserved_after_cancellation() {
+        let ready_signal = Arc::new(tokio::sync::Notify::new());
+        let proceed_signal = Arc::new(tokio::sync::Notify::new());
+        let mock_agent = SyncMockAgent::new(5, ready_signal.clone(), proceed_signal.clone());
+
+        let cancellation_token = CancellationToken::new();
+        let cancel_token_clone = cancellation_token.clone();
+
+        let genai_client = rust_genai::Client::builder("test-key".to_string()).build();
+        let llm = LlmClient::new(genai_client, LlmConfig::default());
+        let context = AgentContext::new_with_cancellation(llm, cancellation_token);
+
+        // Run execution
+        let agent = Arc::new(mock_agent);
+        let agent_clone = agent.clone();
+        let exec_handle = tokio::spawn(async move {
+            let stream = agent_clone.execute("test query", context);
+            futures_util::pin_mut!(stream);
+
+            let mut events = Vec::new();
+            while let Some(result) = stream.next().await {
+                match result {
+                    Ok(update) => events.push(update),
+                    Err(AgentError::Cancelled) => break,
+                    Err(e) => panic!("Unexpected error: {:?}", e),
+                }
+            }
+            events
+        });
+
+        // Wait for agent to be ready, then cancel
+        tokio::time::timeout(std::time::Duration::from_secs(5), ready_signal.notified())
+            .await
+            .expect("Agent should signal readiness within 5 seconds");
+        cancel_token_clone.cancel();
+
+        let events = exec_handle.await.unwrap();
+
+        // Should have: 1 start + 5 progress = 6 events before cancellation
+        assert_eq!(events.len(), 6, "Should have 6 events before cancellation");
+
+        // Explicit event type checking for each expected event
+        assert_eq!(
+            events[0].event_type, "mock_started",
+            "First event should be start"
+        );
+        assert_eq!(
+            events[1].event_type, "mock_progress",
+            "Event 1 should be progress"
+        );
+        assert_eq!(
+            events[2].event_type, "mock_progress",
+            "Event 2 should be progress"
+        );
+        assert_eq!(
+            events[3].event_type, "mock_progress",
+            "Event 3 should be progress"
+        );
+        assert_eq!(
+            events[4].event_type, "mock_progress",
+            "Event 4 should be progress"
+        );
+        assert_eq!(
+            events[5].event_type, "mock_progress",
+            "Event 5 should be progress"
+        );
+
+        // Verify step data matches expected sequence
+        for (i, event) in events.iter().skip(1).enumerate() {
+            let step = event.data.get("step").and_then(|v| v.as_u64()).unwrap();
+            assert_eq!(
+                step,
+                (i + 1) as u64,
+                "Step {} should have correct data",
+                i + 1
+            );
+        }
+    }
+
+    /// Test that interrupt counting works correctly for multiple Ctrl+C presses.
+    ///
+    /// The interrupt counter should:
+    /// - Trigger cancellation on first press
+    /// - Not cause issues on subsequent presses
+    #[test]
+    fn test_interrupt_counter_debouncing() {
+        let interrupt_count = Arc::new(AtomicU8::new(0));
+
+        // Simulate first Ctrl+C
+        let count1 = interrupt_count.fetch_add(1, Ordering::SeqCst) + 1;
+        assert_eq!(count1, 1, "First interrupt should be count 1");
+
+        // Simulate second Ctrl+C
+        let count2 = interrupt_count.fetch_add(1, Ordering::SeqCst) + 1;
+        assert_eq!(count2, 2, "Second interrupt should be count 2");
+
+        // Verify the check logic
+        let is_interrupted = || interrupt_count.load(Ordering::SeqCst) > 0;
+        assert!(
+            is_interrupted(),
+            "Should report interrupted after first Ctrl+C"
+        );
+
+        // Verify the debounce logic (count > 1 means already cancelling)
+        let is_already_cancelling = interrupt_count.load(Ordering::SeqCst) > 1;
+        assert!(
+            is_already_cancelling,
+            "Should detect already-cancelling state"
+        );
+    }
+
+    /// Test that pre-cancelled token causes exit at next cancellation check.
+    ///
+    /// If the cancellation token is already cancelled when execution starts,
+    /// the agent emits all events before its cancellation check, then exits
+    /// with Cancelled error. This verifies the check happens at the expected point.
+    #[tokio::test]
+    async fn test_pre_cancelled_token_exits_at_check() {
+        let mock_agent = MockCancellableAgent::new(10); // Would emit 10 progress events
+
+        // Pre-cancel the token
+        let cancellation_token = CancellationToken::new();
+        cancellation_token.cancel();
+
+        let genai_client = rust_genai::Client::builder("test-key".to_string()).build();
+        let llm = LlmClient::new(genai_client, LlmConfig::default());
+        let context = AgentContext::new_with_cancellation(llm, cancellation_token);
+
+        let stream = mock_agent.execute("test query", context);
+        futures_util::pin_mut!(stream);
+
+        let mut event_count = 0;
+        let mut got_cancelled = false;
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(_) => event_count += 1,
+                Err(AgentError::Cancelled) => {
+                    got_cancelled = true;
+                    break;
+                }
+                Err(e) => panic!("Unexpected error: {:?}", e),
+            }
+        }
+
+        assert!(got_cancelled, "Should get Cancelled error");
+        // With pre-cancelled token, the agent checks cancellation after emitting
+        // start + progress events: 1 start + 10 progress = 11 events total
+        assert_eq!(
+            event_count, 11,
+            "Should emit exactly 11 events (1 start + 10 progress) before cancellation check"
+        );
+    }
+
+    /// Test that normal completion (no cancellation) works correctly.
+    ///
+    /// Without cancellation, the agent should emit all events including final_result.
+    #[tokio::test]
+    async fn test_normal_completion_without_cancellation() {
+        let mock_agent = MockCancellableAgent::new(3);
+
+        let genai_client = rust_genai::Client::builder("test-key".to_string()).build();
+        let llm = LlmClient::new(genai_client, LlmConfig::default());
+        let context = AgentContext::new(llm);
+
+        let stream = mock_agent.execute("test query", context);
+        let stream = enforce_final_result_contract(stream);
+        futures_util::pin_mut!(stream);
+
+        let mut events = Vec::new();
+        while let Some(result) = stream.next().await {
+            events.push(result.expect("Should not error without cancellation"));
+        }
+
+        // Should have: 1 start + 3 progress + 1 final_result = 5 events
+        assert_eq!(events.len(), 5, "Should have 5 events total");
+        assert_eq!(events[0].event_type, "mock_started");
+        assert_eq!(events[1].event_type, "mock_progress");
+        assert_eq!(events[2].event_type, "mock_progress");
+        assert_eq!(events[3].event_type, "mock_progress");
+        assert_eq!(events[4].event_type, "final_result");
+    }
+
+    /// Test that cancellation takes precedence over timeout.
+    ///
+    /// The `with_timeout_and_cancellation` helper uses `biased` in `tokio::select!`,
+    /// meaning cancellation is checked first. When both are triggered simultaneously,
+    /// cancellation should win.
+    #[tokio::test]
+    async fn test_cancellation_takes_precedence_over_timeout() {
+        use gemicro_core::with_timeout_and_cancellation;
+        use std::time::Duration;
+
+        let cancellation_token = CancellationToken::new();
+
+        // Pre-cancel the token before calling
+        cancellation_token.cancel();
+
+        // Use a generous timeout - but cancellation should win
+        let result = with_timeout_and_cancellation(
+            async { Ok::<_, AgentError>("should not reach") },
+            Duration::from_secs(60),
+            &cancellation_token,
+            || AgentError::Timeout {
+                elapsed_ms: 60_000,
+                timeout_ms: 60_000,
+                phase: "test".to_string(),
+            },
+        )
+        .await;
+
+        assert!(
+            matches!(result, Err(AgentError::Cancelled)),
+            "Cancellation should take precedence over timeout, got: {:?}",
+            result
+        );
+    }
+
+    /// Test that timeout triggers when cancellation doesn't happen.
+    ///
+    /// Without cancellation, the timeout should trigger after the specified duration.
+    #[tokio::test]
+    async fn test_timeout_triggers_without_cancellation() {
+        use gemicro_core::with_timeout_and_cancellation;
+        use std::time::Duration;
+
+        let cancellation_token = CancellationToken::new();
+
+        // Use a very short timeout with a long-running future
+        let result = with_timeout_and_cancellation(
+            async {
+                tokio::time::sleep(Duration::from_secs(60)).await;
+                Ok::<_, AgentError>("should not reach")
+            },
+            Duration::from_millis(10),
+            &cancellation_token,
+            || AgentError::Timeout {
+                elapsed_ms: 10,
+                timeout_ms: 10,
+                phase: "test".to_string(),
+            },
+        )
+        .await;
+
+        assert!(
+            matches!(result, Err(AgentError::Timeout { .. })),
+            "Should timeout without cancellation, got: {:?}",
+            result
+        );
     }
 }

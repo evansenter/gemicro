@@ -122,7 +122,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let mut summary = harness
             .evaluate_with_progress(
-                &*agent,
+                agent.as_ref(),
                 &dataset,
                 None,
                 Scorers::default(),
