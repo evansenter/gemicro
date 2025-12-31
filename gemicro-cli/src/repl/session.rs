@@ -503,7 +503,7 @@ mod tests {
 
                 // Emit final result
                 yield Ok(AgentUpdate::final_result(
-                    "Mock answer".to_string(),
+                    json!("Mock answer"),
                     ResultMetadata::new(100, 0, 50),
                 ));
             })
@@ -591,7 +591,7 @@ mod tests {
 
                 // Emit final result
                 yield Ok(AgentUpdate::final_result(
-                    "Mock answer".to_string(),
+                    json!("Mock answer"),
                     ResultMetadata::new(100, 0, 50),
                 ));
             })
@@ -701,7 +701,7 @@ mod tests {
         let events = vec![
             AgentUpdate::custom("decomposition_started", "Decomposing query", json!({})),
             AgentUpdate::final_result(
-                "The answer".to_string(),
+                json!("The answer"),
                 ResultMetadata::with_extra(
                     1500,
                     0,

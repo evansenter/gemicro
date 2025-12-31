@@ -50,7 +50,7 @@ async fn test_tool_agent_calculator() {
 
                 if update.event_type == "final_result" {
                     if let Some(result) = update.as_final_result() {
-                        final_answer = result.answer.clone();
+                        final_answer = result.result.as_str().unwrap_or("").to_string();
                     }
                 }
             }
@@ -161,7 +161,7 @@ async fn test_tool_agent_complex_math() {
                 println!("[{}] {}", update.event_type, update.message);
                 if update.event_type == "final_result" {
                     if let Some(result) = update.as_final_result() {
-                        final_answer = result.answer.clone();
+                        final_answer = result.result.as_str().unwrap_or("").to_string();
                     }
                 }
             }
@@ -209,7 +209,7 @@ async fn test_tool_agent_current_datetime() {
                 println!("[{}] {}", update.event_type, update.message);
                 if update.event_type == "final_result" {
                     if let Some(result) = update.as_final_result() {
-                        final_answer = result.answer.clone();
+                        final_answer = result.result.as_str().unwrap_or("").to_string();
                     }
                 }
             }
@@ -252,7 +252,7 @@ async fn test_tool_agent_multiple_tools() {
                 println!("[{}] {}", update.event_type, update.message);
                 if update.event_type == "final_result" {
                     if let Some(result) = update.as_final_result() {
-                        final_answer = result.answer.clone();
+                        final_answer = result.result.as_str().unwrap_or("").to_string();
                     }
                 }
             }

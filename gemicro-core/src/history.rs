@@ -44,12 +44,15 @@ impl HistoryEntry {
         }
     }
 
-    /// Get the final result text, if available
+    /// Get the final result text, if available.
+    ///
+    /// Returns the result as a string if the result is a string value.
+    /// For structured or null results, returns `None`.
     pub fn final_result(&self) -> Option<&str> {
         self.events
             .iter()
             .find(|e| e.event_type == crate::agent::EVENT_FINAL_RESULT)
-            .and_then(|e| e.data.get("answer"))
+            .and_then(|e| e.data.get("result"))
             .and_then(|v| v.as_str())
     }
 }
@@ -169,10 +172,7 @@ mod tests {
                 "Decomposed into 2 sub-queries",
                 json!({ "sub_queries": ["Q1", "Q2"] }),
             ),
-            AgentUpdate::final_result(
-                "The answer is 42".to_string(),
-                ResultMetadata::new(100, 0, 1000),
-            ),
+            AgentUpdate::final_result(json!("The answer is 42"), ResultMetadata::new(100, 0, 1000)),
         ]
     }
 

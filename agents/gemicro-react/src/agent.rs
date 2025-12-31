@@ -196,7 +196,7 @@ impl ReactAgent {
                         tokens_unavailable,
                         start_time.elapsed().as_millis() as u64,
                     );
-                    yield AgentUpdate::final_result(step.action.input, metadata);
+                    yield AgentUpdate::final_result(json!(step.action.input), metadata);
                     return;
                 }
 
@@ -275,7 +275,7 @@ impl ReactAgent {
                 "Unable to find answer after {} iterations. Last thought: {}",
                 config.max_iterations, last_thought
             );
-            yield AgentUpdate::final_result(fallback_answer, metadata);
+            yield AgentUpdate::final_result(json!(fallback_answer), metadata);
         }
     }
 

@@ -214,8 +214,11 @@ pub struct TrajectoryMetadata {
     /// Number of steps where token count was unavailable
     pub tokens_unavailable_count: usize,
 
-    /// The final answer (if execution completed successfully)
-    pub final_answer: Option<String>,
+    /// The final result (if execution completed successfully)
+    ///
+    /// Uses `serde_json::Value` for flexibility - can be a string, structured data,
+    /// or null for side-effect-only agents.
+    pub final_result: Option<serde_json::Value>,
 
     /// Model used (from LlmConfig)
     pub model: String,
@@ -251,9 +254,9 @@ impl Trajectory {
         serde_json::from_str(&json).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
     }
 
-    /// Get the final answer from the trajectory, if available
-    pub fn final_answer(&self) -> Option<&str> {
-        self.metadata.final_answer.as_deref()
+    /// Get the final result from the trajectory, if available
+    pub fn final_result(&self) -> Option<&serde_json::Value> {
+        self.metadata.final_result.as_ref()
     }
 
     /// Get the number of LLM calls in this trajectory
@@ -318,7 +321,7 @@ mod tests {
     fn sample_events() -> Vec<AgentUpdate> {
         vec![
             AgentUpdate::custom("test_started", "Starting test", json!({})),
-            AgentUpdate::final_result("Paris".to_string(), ResultMetadata::new(42, 0, 150)),
+            AgentUpdate::final_result(json!("Paris"), ResultMetadata::new(42, 0, 150)),
         ]
     }
 
@@ -361,7 +364,7 @@ mod tests {
                 vec![sample_step()],
                 sample_events(),
                 150,
-                Some("Rust is a programming language.".to_string()),
+                Some(json!("Rust is a programming language.")),
             );
 
         assert_eq!(trajectory.query, "What is Rust?");
@@ -371,8 +374,8 @@ mod tests {
         assert_eq!(trajectory.metadata.total_tokens, 42);
         assert_eq!(trajectory.metadata.tokens_unavailable_count, 0);
         assert_eq!(
-            trajectory.final_answer(),
-            Some("Rust is a programming language.")
+            trajectory.final_result(),
+            Some(&json!("Rust is a programming language."))
         );
     }
 
@@ -555,7 +558,7 @@ mod tests {
                 vec![sample_step()],
                 sample_events(),
                 12345,
-                Some("The final answer is 42.".to_string()),
+                Some(json!("The final answer is 42.")),
             );
 
         // Save to temp file
@@ -591,8 +594,8 @@ mod tests {
             "tokens_unavailable_count mismatch"
         );
         assert_eq!(
-            loaded.metadata.final_answer, trajectory.metadata.final_answer,
-            "final_answer mismatch"
+            loaded.metadata.final_result, trajectory.metadata.final_result,
+            "final_result mismatch"
         );
         assert_eq!(
             loaded.metadata.model, trajectory.metadata.model,

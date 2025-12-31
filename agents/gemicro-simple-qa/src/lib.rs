@@ -262,7 +262,7 @@ impl Agent for SimpleQaAgent {
                 if tokens_used.is_none() { 1 } else { 0 },
                 duration_ms,
             );
-            yield AgentUpdate::final_result(answer, metadata);
+            yield AgentUpdate::final_result(json!(answer), metadata);
         })
     }
 

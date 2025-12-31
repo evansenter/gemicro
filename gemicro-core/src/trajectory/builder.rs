@@ -65,13 +65,13 @@ impl TrajectoryBuilder {
     /// * `steps` - The recorded LLM interaction steps
     /// * `events` - The high-level agent events
     /// * `total_duration_ms` - Total execution time in milliseconds
-    /// * `final_answer` - The final answer, if available
+    /// * `final_result` - The final result, if available (string, structured data, or null)
     pub fn build(
         self,
         steps: Vec<TrajectoryStep>,
         events: Vec<AgentUpdate>,
         total_duration_ms: u64,
-        final_answer: Option<String>,
+        final_result: Option<serde_json::Value>,
     ) -> Trajectory {
         // Warn on missing required fields
         if self.query.is_none() {
@@ -115,7 +115,7 @@ impl TrajectoryBuilder {
                 total_duration_ms,
                 total_tokens,
                 tokens_unavailable_count,
-                final_answer,
+                final_result,
                 model: self
                     .model
                     .unwrap_or_else(|| crate::config::MODEL.to_string()),
@@ -170,14 +170,14 @@ mod tests {
             .agent_name("test_agent")
             .agent_config(json!({"key": "value"}))
             .model("test-model")
-            .build(vec![], vec![], 1000, Some("Answer".to_string()));
+            .build(vec![], vec![], 1000, Some(json!("Answer")));
 
         assert_eq!(trajectory.query, "Test query");
         assert_eq!(trajectory.agent_name, "test_agent");
         assert_eq!(trajectory.agent_config, json!({"key": "value"}));
         assert_eq!(trajectory.metadata.model, "test-model");
         assert_eq!(trajectory.metadata.total_duration_ms, 1000);
-        assert_eq!(trajectory.metadata.final_answer, Some("Answer".to_string()));
+        assert_eq!(trajectory.metadata.final_result, Some(json!("Answer")));
     }
 
     #[test]
@@ -259,7 +259,7 @@ mod tests {
     fn test_builder_preserves_events() {
         let events = vec![
             AgentUpdate::custom("start", "Starting", json!({})),
-            AgentUpdate::final_result("Done".to_string(), ResultMetadata::new(10, 0, 100)),
+            AgentUpdate::final_result(json!("Done"), ResultMetadata::new(10, 0, 100)),
         ];
 
         let trajectory =

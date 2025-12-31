@@ -90,18 +90,39 @@ impl AgentUpdate {
         }
     }
 
-    /// Create a final_result event (required by all agents per event contract)
+    /// Create a final_result event (required by all agents per event contract).
     ///
     /// This is the only dedicated constructor besides `custom()` because
     /// `final_result` is the universal completion signal that ALL agents must emit.
     /// It is cross-agent, not agent-specific.
-    pub fn final_result(answer: String, metadata: ResultMetadata) -> Self {
+    ///
+    /// # Arguments
+    ///
+    /// * `result` - The agent's output as flexible JSON:
+    ///   - Q&A agents: `json!("The answer")` - a string
+    ///   - Structured results: `json!({"summary": "...", "sources": [...]})` - an object
+    ///   - Side-effect agents: `Value::Null` - no result, just completion signal
+    /// * `metadata` - Execution metadata (tokens, duration, agent-specific extras)
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use gemicro_core::{AgentUpdate, ResultMetadata};
+    /// use serde_json::json;
+    ///
+    /// // Q&A agent with string result
+    /// let update = AgentUpdate::final_result(json!("The answer is 42"), ResultMetadata::new(100, 0, 500));
+    ///
+    /// // Side-effect agent with no result
+    /// let update = AgentUpdate::final_result(serde_json::Value::Null, ResultMetadata::new(50, 0, 250));
+    /// ```
+    pub fn final_result(result: serde_json::Value, metadata: ResultMetadata) -> Self {
         Self {
             event_type: EVENT_FINAL_RESULT.into(),
             message: "Query complete".into(),
             timestamp: SystemTime::now(),
             data: json!({
-                "answer": answer,
+                "result": result,
                 "metadata": metadata,
             }),
         }
@@ -123,10 +144,16 @@ impl AgentUpdate {
     }
 }
 
-/// Strongly-typed result struct for final_result events
+/// Strongly-typed result struct for final_result events.
+///
+/// The `result` field is flexible JSON to support various agent types:
+/// - Q&A agents: `json!("The answer")` - a string
+/// - Structured results: `json!({"summary": "...", "sources": [...]})` - an object
+/// - Side-effect agents: `Value::Null` - no result, just completion signal
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FinalResult {
-    pub answer: String,
+    /// The agent's output - can be any JSON value (string, object, array, or null).
+    pub result: serde_json::Value,
     pub metadata: ResultMetadata,
 }
 
@@ -203,16 +230,38 @@ mod tests {
     // are in agent/deep_research.rs where those accessors now live.
 
     #[test]
-    fn test_final_result() {
+    fn test_final_result_with_string() {
         let metadata = ResultMetadata::new(100, 0, 5000);
-        let update = AgentUpdate::final_result("Answer".to_string(), metadata);
+        let update = AgentUpdate::final_result(json!("Answer"), metadata);
 
         assert_eq!(update.event_type, "final_result");
 
         let result = update.as_final_result().unwrap();
-        assert_eq!(result.answer, "Answer");
+        assert_eq!(result.result, json!("Answer"));
         assert_eq!(result.metadata.total_tokens, 100);
         assert_eq!(result.metadata.tokens_unavailable_count, 0);
+    }
+
+    #[test]
+    fn test_final_result_with_structured_data() {
+        let metadata = ResultMetadata::new(100, 0, 5000);
+        let update = AgentUpdate::final_result(
+            json!({"summary": "A summary", "sources": ["src1", "src2"]}),
+            metadata,
+        );
+
+        let result = update.as_final_result().unwrap();
+        assert_eq!(result.result["summary"], "A summary");
+        assert_eq!(result.result["sources"][0], "src1");
+    }
+
+    #[test]
+    fn test_final_result_with_null() {
+        let metadata = ResultMetadata::new(100, 0, 5000);
+        let update = AgentUpdate::final_result(serde_json::Value::Null, metadata);
+
+        let result = update.as_final_result().unwrap();
+        assert!(result.result.is_null());
     }
 
     #[test]
@@ -223,7 +272,7 @@ mod tests {
             5000,
             json!({"steps_succeeded": 3, "steps_failed": 1}),
         );
-        let update = AgentUpdate::final_result("Answer".to_string(), metadata);
+        let update = AgentUpdate::final_result(json!("Answer"), metadata);
 
         let result = update.as_final_result().unwrap();
         assert_eq!(result.metadata.extra["steps_succeeded"], 3);
@@ -233,7 +282,7 @@ mod tests {
     #[test]
     fn test_final_result_with_incomplete_tokens() {
         let metadata = ResultMetadata::new(50, 2, 3000);
-        let update = AgentUpdate::final_result("Partial answer".to_string(), metadata);
+        let update = AgentUpdate::final_result(json!("Partial answer"), metadata);
 
         let result = update.as_final_result().unwrap();
         assert_eq!(result.metadata.tokens_unavailable_count, 2);
@@ -250,11 +299,11 @@ mod tests {
 
     #[test]
     fn test_accessor_malformed_data() {
-        // Test final_result with malformed data
+        // Test final_result with malformed data (missing required fields)
         let update = AgentUpdate::custom(
             "final_result",
             "Test",
-            json!({ "answer": 123 }), // answer should be string
+            json!({ "wrong_field": 123 }), // missing result and metadata
         );
 
         // Should return None and log warning (not panic)
@@ -269,7 +318,7 @@ mod tests {
             5000,
             json!({"steps_succeeded": 2, "steps_failed": 0}),
         );
-        let original = AgentUpdate::final_result("Test answer".to_string(), metadata);
+        let original = AgentUpdate::final_result(json!("Test answer"), metadata);
 
         let json_str = serde_json::to_string(&original).unwrap();
         let deserialized: AgentUpdate = serde_json::from_str(&json_str).unwrap();
@@ -278,7 +327,7 @@ mod tests {
         assert_eq!(deserialized.message, original.message);
 
         let result = deserialized.as_final_result().unwrap();
-        assert_eq!(result.answer, "Test answer");
+        assert_eq!(result.result, json!("Test answer"));
         assert_eq!(result.metadata.total_tokens, 100);
         assert_eq!(result.metadata.extra["steps_succeeded"], 2);
     }

@@ -198,7 +198,7 @@ impl DeepResearchAgent {
                 }),
             );
 
-            yield AgentUpdate::final_result(answer, metadata);
+            yield AgentUpdate::final_result(json!(answer), metadata);
         }
     }
 }

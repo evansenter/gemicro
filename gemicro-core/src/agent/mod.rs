@@ -557,7 +557,7 @@ mod tests {
             Ok(AgentUpdate::custom("step_1", "Step 1", json!({}))),
             Ok(AgentUpdate::custom("step_2", "Step 2", json!({}))),
             Ok(AgentUpdate::final_result(
-                "Answer".to_string(),
+                json!("Answer"),
                 ResultMetadata::new(100, 0, 1000),
             )),
         ];
@@ -583,7 +583,7 @@ mod tests {
         let events = vec![
             Ok(AgentUpdate::custom("step_1", "Step 1", json!({}))),
             Ok(AgentUpdate::final_result(
-                "Answer".to_string(),
+                json!("Answer"),
                 ResultMetadata::new(100, 0, 1000),
             )),
             // This violates the contract - events after final_result
@@ -650,7 +650,7 @@ mod tests {
     #[tokio::test]
     async fn test_contract_only_final_result() {
         let events = vec![Ok(AgentUpdate::final_result(
-            "Direct answer".to_string(),
+            json!("Direct answer"),
             ResultMetadata::new(50, 0, 500),
         ))];
 
@@ -679,17 +679,17 @@ mod tests {
         let events = vec![
             Ok(AgentUpdate::custom("step_1", "Step 1", json!({}))),
             Ok(AgentUpdate::final_result(
-                "First answer".to_string(),
+                json!("First answer"),
                 ResultMetadata::new(100, 0, 1000),
             )),
             // Second final_result - violates contract
             Ok(AgentUpdate::final_result(
-                "Second answer".to_string(),
+                json!("Second answer"),
                 ResultMetadata::new(50, 0, 500),
             )),
             // Third final_result - also violates contract
             Ok(AgentUpdate::final_result(
-                "Third answer".to_string(),
+                json!("Third answer"),
                 ResultMetadata::new(25, 0, 250),
             )),
         ];

@@ -253,6 +253,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "final_result" => {
                     if let Some(result) = update.as_final_result() {
                         let total_duration = overall_start.elapsed();
+                        let answer = result.result.as_str().unwrap_or("");
 
                         println!();
                         println!(
@@ -265,7 +266,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             "╚══════════════════════════════════════════════════════════════╝"
                         );
                         println!();
-                        println!("{}", result.answer);
+                        println!("{}", answer);
                         println!();
                         println!("══════════════════════════════════════════════════════════════");
 

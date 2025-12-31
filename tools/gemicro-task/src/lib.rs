@@ -126,13 +126,18 @@ impl Tool for Task {
             match result {
                 Ok(update) => {
                     if update.event_type == EVENT_FINAL_RESULT {
-                        // Extract the answer from final_result event
-                        if let Some(answer) = update.data.get("answer").and_then(|v| v.as_str()) {
-                            final_answer = Some(answer.to_string());
+                        // Extract the result from final_result event
+                        if let Some(result_val) = update.data.get("result") {
+                            // Convert result to string: strings directly, others as JSON
+                            final_answer = Some(match result_val {
+                                Value::String(s) => s.clone(),
+                                Value::Null => String::new(),
+                                other => serde_json::to_string(other).unwrap_or_default(),
+                            });
                         } else {
-                            // Fallback to message if answer field isn't present
+                            // Fallback to message if result field isn't present
                             log::debug!(
-                                "final_result event for subagent '{}' missing 'answer' field, falling back to message",
+                                "final_result event for subagent '{}' missing 'result' field, falling back to message",
                                 agent_name
                             );
                             final_answer = Some(update.message.clone());
@@ -184,7 +189,7 @@ mod tests {
             Box::pin(try_stream! {
                 yield AgentUpdate::custom("mock_started", "Starting mock", json!({}));
                 yield AgentUpdate::final_result(
-                    answer,
+                    json!(answer),
                     ResultMetadata::new(10, 0, 100),
                 );
             })

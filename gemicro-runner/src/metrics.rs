@@ -119,10 +119,12 @@ impl From<&ExecutionState> for ExecutionMetrics {
 
         let (total_tokens, tokens_unavailable_count, final_answer) =
             if let Some(result) = state.final_result() {
+                // Extract string from result if it's a string, None otherwise
+                let answer = result.result.as_str().map(|s| s.to_string());
                 (
                     result.metadata.total_tokens,
                     result.metadata.tokens_unavailable_count,
-                    Some(result.answer.clone()),
+                    answer,
                 )
             } else {
                 // Calculate from steps if no final result yet
@@ -158,10 +160,12 @@ impl ExecutionMetrics {
     pub fn from_tracker(tracker: &dyn gemicro_core::ExecutionTracking, duration: Duration) -> Self {
         let (total_tokens, tokens_unavailable_count, final_answer, completion_phase, extra) =
             if let Some(result) = tracker.final_result() {
+                // Extract string from result if it's a string, None otherwise
+                let answer = result.result.as_str().map(|s| s.to_string());
                 (
                     result.metadata.total_tokens,
                     result.metadata.tokens_unavailable_count,
-                    Some(result.answer.clone()),
+                    answer,
                     "complete".to_string(),
                     result.metadata.extra.clone(),
                 )
@@ -278,7 +282,7 @@ mod tests {
 
         // Set final result using FinalResult from update.rs
         state.set_final_result(FinalResult {
-            answer: "Final answer".to_string(),
+            result: json!("Final answer"),
             metadata: ResultMetadata::with_extra(
                 150, // total_tokens
                 0,   // tokens_unavailable_count
@@ -381,7 +385,7 @@ mod tests {
             3000,
             json!({ "steps_succeeded": 5, "steps_failed": 2 }),
         );
-        tracker.handle_event(&AgentUpdate::final_result("Answer".to_string(), metadata));
+        tracker.handle_event(&AgentUpdate::final_result(json!("Answer"), metadata));
 
         let metrics = ExecutionMetrics::from_tracker(&tracker, Duration::from_secs(3));
 
@@ -415,12 +419,13 @@ mod tests {
     #[test]
     fn test_metrics_from_tracker_missing_extra_fields() {
         use gemicro_core::{AgentUpdate, DefaultTracker, ExecutionTracking, ResultMetadata};
+        use serde_json::json;
         use std::time::Duration;
 
         let mut tracker = DefaultTracker::default();
         // final_result with null extra (no steps_succeeded/failed)
         let metadata = ResultMetadata::new(100, 0, 2000);
-        tracker.handle_event(&AgentUpdate::final_result("Answer".to_string(), metadata));
+        tracker.handle_event(&AgentUpdate::final_result(json!("Answer"), metadata));
 
         let metrics = ExecutionMetrics::from_tracker(&tracker, Duration::from_secs(2));
 
