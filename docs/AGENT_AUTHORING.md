@@ -243,6 +243,10 @@ impl Agent for SimpleQaAgent {
             );
         })
     }
+
+    fn create_tracker(&self) -> Box<dyn ExecutionTracking> {
+        Box::new(DefaultTracker::default())
+    }
 }
 ```
 
@@ -275,6 +279,7 @@ pub trait ExecutionTracking: Send + Sync {
 For simple agents, use `DefaultTracker` which extracts status from each event's `message` field:
 
 ```rust
+// In your Agent trait implementation:
 fn create_tracker(&self) -> Box<dyn ExecutionTracking> {
     Box::new(DefaultTracker::default())
 }
@@ -292,6 +297,7 @@ This is sufficient for most agents since the event `message` field provides the 
 For agents with complex execution patterns (e.g., tracking step counts, parallel progress), implement a custom tracker:
 
 ```rust
+#[derive(Debug, Default)]
 struct MyAgentTracker {
     current_step: usize,
     total_steps: usize,
