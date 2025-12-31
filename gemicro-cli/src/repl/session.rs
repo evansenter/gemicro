@@ -448,24 +448,20 @@ mod tests {
 
     /// A mock agent that yields events and can be cancelled mid-execution.
     ///
-    /// This agent yields a configurable number of events, then properly waits
-    /// for cancellation using `cancellation_token.cancelled()` before emitting
-    /// the final result. It's designed to test:
+    /// This agent yields a configurable number of events, then checks for
+    /// cancellation before emitting the final result. It's designed to test:
     /// - CancellationToken triggering graceful exit
     /// - AgentError::Cancelled handling
     /// - Partial state preservation after cancellation
     struct MockCancellableAgent {
-        /// Number of events to emit before waiting for cancellation
+        /// Number of events to emit before checking cancellation
         events_before_cancel_check: usize,
-        /// Tracks whether the agent returned AgentError::Cancelled
-        cancelled_flag: Arc<AtomicBool>,
     }
 
     impl MockCancellableAgent {
         fn new(events_before_cancel_check: usize) -> Self {
             Self {
                 events_before_cancel_check,
-                cancelled_flag: Arc::new(AtomicBool::new(false)),
             }
         }
     }
@@ -482,7 +478,6 @@ mod tests {
         fn execute(&self, query: &str, context: AgentContext) -> AgentStream<'_> {
             let query = query.to_string();
             let events_before_check = self.events_before_cancel_check;
-            let cancelled_flag = self.cancelled_flag.clone();
 
             Box::pin(stream! {
                 // Emit start event
@@ -503,7 +498,6 @@ mod tests {
 
                 // Check cancellation - this is a non-blocking check
                 if context.cancellation_token.is_cancelled() {
-                    cancelled_flag.store(true, Ordering::SeqCst);
                     yield Err(AgentError::Cancelled);
                     return;
                 }
@@ -1012,12 +1006,10 @@ mod tests {
 
         assert!(got_cancelled, "Should get Cancelled error");
         // With pre-cancelled token, the agent checks cancellation after emitting
-        // start + progress events, so we expect some events before cancellation
-        // The mock agent emits: 1 start + N progress, then checks cancellation
-        assert!(
-            event_count <= 11,
-            "Should exit relatively quickly (got {} events)",
-            event_count
+        // start + progress events: 1 start + 10 progress = 11 events total
+        assert_eq!(
+            event_count, 11,
+            "Should emit exactly 11 events (1 start + 10 progress) before cancellation check"
         );
     }
 
