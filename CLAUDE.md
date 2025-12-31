@@ -719,12 +719,13 @@ pub trait ToolHook: Send + Sync {
 
 Multiple hooks run in registration order:
 ```
-pre_hook_1 → pre_hook_2 → ... → EXECUTE → ... → post_hook_2 → post_hook_1
+pre_hook_1 → pre_hook_2 → ... → EXECUTE → post_hook_1 → post_hook_2 → ...
 ```
 
 - First `Deny` stops the chain and prevents execution
 - First `AllowWithModifiedInput` modifies input for subsequent hooks
 - If all return `Allow`, execution proceeds with original input
+- Post-hooks run in the same order as pre-hooks (registration order)
 - Post-hooks run even if earlier post-hooks fail (logged, not fatal)
 
 ### Built-in Hook Crates

@@ -2,6 +2,9 @@
 name = "gemicro-deep-research"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
 description = "Deep Research agent: query decomposition, parallel sub-query execution, synthesis"
 
 [dependencies]

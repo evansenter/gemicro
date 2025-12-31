@@ -271,8 +271,13 @@ impl ToolHook for Metrics {
         _input: &Value,
         output: &ToolResult,
     ) -> Result<(), HookError> {
-        // Consider it a failure if there's an "error" key in metadata
-        let is_error = output.metadata.get("error").is_some();
+        // Consider it a failure if there's an "error" key with a non-null value
+        // (null means "no error", matching the documented convention)
+        let is_error = output
+            .metadata
+            .get("error")
+            .map(|v| !v.is_null())
+            .unwrap_or(false);
 
         if is_error {
             self.record_failure(tool_name);
@@ -573,11 +578,15 @@ mod tests {
 
         let snapshot = metrics.snapshot();
 
-        // null counts as "exists" in JSON, so is_some() returns true
+        // null means "no error" per documented convention
         let tool1_stats = snapshot.get("tool1").unwrap();
         assert_eq!(
-            tool1_stats.failures, 1,
-            "null error value should count as failure (key exists)"
+            tool1_stats.failures, 0,
+            "null error value should NOT count as failure (null = no error)"
+        );
+        assert_eq!(
+            tool1_stats.successes, 1,
+            "null error value should count as success"
         );
 
         let tool2_stats = snapshot.get("tool2").unwrap();

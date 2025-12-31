@@ -2,6 +2,9 @@
 name = "gemicro-simple-qa"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
 description = "Simple QA agent: minimal reference implementation for agent authoring"
 
 [dependencies]
