@@ -206,6 +206,35 @@ cargo run -p gemicro-eval --example ab_comparison
 ./examples/repl_demo.sh
 ```
 
+### Evaluation
+
+Run evaluations against HotpotQA, GSM8K, or custom datasets:
+
+```bash
+# Basic evaluation with default scorers
+gemicro-eval --dataset hotpotqa --sample 10
+
+# With specific scorer
+gemicro-eval --dataset gsm8k --scorer contains --sample 50
+
+# Full evaluation with LLM judge
+gemicro-eval --dataset hotpotqa --scorer contains,llm_judge --agent react
+```
+
+**Scorer Cost Considerations**
+
+The `llm_judge` scorer makes an LLM API call for each evaluation:
+
+| Scorer | Cost | Speed | Use Case |
+|--------|------|-------|----------|
+| `contains` | Free | Instant | Quick iterations, substring matching |
+| `llm_judge` | API tokens | ~500ms-2s per call | Semantic accuracy, final evaluation |
+
+For a 100-question dataset with `--scorer llm_judge`:
+- 100 agent executions + 100 judge calls = **200 total LLM calls**
+
+**Recommendation**: Use `--scorer contains` for rapid iteration during development, then add `llm_judge` for final accuracy assessment.
+
 ## Future Exploration Areas
 
 See [GitHub Issues](https://github.com/evansenter/gemicro/issues) for the full roadmap. Key areas include:
