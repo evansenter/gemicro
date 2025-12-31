@@ -9,6 +9,7 @@ use gemicro_core::{
 use gemicro_eval::{
     Dataset, DatasetError, EvalConfig, EvalHarness, EvalProgress, EvalQuestion, Scorers,
 };
+use serde_json::json;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -62,7 +63,7 @@ impl Agent for MockAgent {
                 Err(AgentError::Llm(LlmError::Other("Mock failure".to_string())))?;
             } else {
                 yield AgentUpdate::final_result(
-                    "Mock answer".to_string(),
+                    json!("Mock answer"),
                     ResultMetadata::new(0, 0, 0),
                 );
             }

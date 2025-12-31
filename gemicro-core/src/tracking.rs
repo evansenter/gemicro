@@ -29,7 +29,7 @@
 //!     }
 //!
 //!     if let Some(result) = tracker.final_result() {
-//!         println!("Answer: {}", result.answer);
+//!         println!("Result: {:?}", result.result);
 //!     }
 //! }
 //! ```
@@ -162,12 +162,12 @@ mod tests {
                 "steps_failed": 1,
             }),
         );
-        let event = AgentUpdate::final_result("The answer is 42".to_string(), metadata);
+        let event = AgentUpdate::final_result(json!("The answer is 42"), metadata);
         tracker.handle_event(&event);
 
         assert!(tracker.is_complete());
         let result = tracker.final_result().unwrap();
-        assert_eq!(result.answer, "The answer is 42");
+        assert_eq!(result.result, json!("The answer is 42"));
         assert_eq!(result.metadata.total_tokens, 100);
         assert_eq!(result.metadata.duration_ms, 5000);
         assert_eq!(result.metadata.extra["steps_succeeded"], 3);

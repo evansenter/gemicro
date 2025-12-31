@@ -335,7 +335,7 @@ impl ToolAgent {
                 tokens_unavailable,
                 start_time.elapsed().as_millis() as u64,
             );
-            yield AgentUpdate::final_result(answer, metadata);
+            yield AgentUpdate::final_result(json!(answer), metadata);
         }
     }
 }

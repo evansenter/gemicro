@@ -209,7 +209,7 @@ impl AgentRunner {
                 steps,
                 events,
                 total_duration.as_millis() as u64,
-                metrics.final_answer.clone(),
+                metrics.final_answer.clone().map(serde_json::Value::String),
             );
 
         Ok((metrics, trajectory))
@@ -295,7 +295,7 @@ mod tests {
                 json!({ "id": 0, "result": "Result", "tokens_used": 50 }),
             ),
             AgentUpdate::custom("synthesis_started", "Synthesizing results", json!({})),
-            AgentUpdate::final_result("Final answer".to_string(), metadata),
+            AgentUpdate::final_result(json!("Final answer"), metadata),
         ]
     }
 

@@ -670,11 +670,19 @@ impl Dataset for TrajectoryDataset {
         let questions = trajectories
             .into_iter()
             .filter_map(|t| {
-                // Only include trajectories that have a final answer
-                t.metadata.final_answer.map(|answer| EvalQuestion {
-                    id: t.id,
-                    question: t.query,
-                    ground_truth: answer,
+                // Only include trajectories that have a final result
+                // Extract string representation from Value
+                t.metadata.final_result.and_then(|result| {
+                    let ground_truth = match result {
+                        serde_json::Value::String(s) => s,
+                        serde_json::Value::Null => return None,
+                        other => serde_json::to_string(&other).ok()?,
+                    };
+                    Some(EvalQuestion {
+                        id: t.id,
+                        question: t.query,
+                        ground_truth,
+                    })
                 })
             })
             .collect();
@@ -869,7 +877,7 @@ mod tests {
             .agent_name("test_agent")
             .agent_config(serde_json::json!({}))
             .model("test-model")
-            .build(vec![], vec![], 100, Some("4".to_string()));
+            .build(vec![], vec![], 100, Some(serde_json::json!("4")));
 
         // Save trajectory
         trajectory.save(temp_dir.path().join("test.json")).unwrap();
@@ -894,7 +902,7 @@ mod tests {
             .agent_name("test")
             .agent_config(serde_json::json!({}))
             .model("test")
-            .build(vec![], vec![], 100, Some("Valid answer".to_string()));
+            .build(vec![], vec![], 100, Some(serde_json::json!("Valid answer")));
         trajectory.save(temp_dir.path().join("valid.json")).unwrap();
 
         // Create a non-JSON file (should be ignored)
@@ -918,7 +926,7 @@ mod tests {
             .agent_name("test")
             .agent_config(serde_json::json!({}))
             .model("test")
-            .build(vec![], vec![], 100, Some("A1".to_string()));
+            .build(vec![], vec![], 100, Some(serde_json::json!("A1")));
         with_answer
             .save(temp_dir.path().join("with_answer.json"))
             .unwrap();

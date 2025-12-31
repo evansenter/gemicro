@@ -70,9 +70,10 @@ async fn test_deep_research_agent_full_flow() {
                     }
                     "final_result" => {
                         if let Some(result) = update.as_final_result() {
-                            final_answer = result.answer.clone();
+                            let answer = result.result.as_str().unwrap_or("");
+                            final_answer = answer.to_string();
                             println!("\n=== Final Answer ===");
-                            println!("{}", result.answer);
+                            println!("{}", answer);
                             println!("\n=== Metadata ===");
                             println!("  Total tokens: {}", result.metadata.total_tokens);
                             println!(

@@ -54,10 +54,15 @@ pub fn render_markdown(text: &str) -> String {
 
 /// Print the final result with formatting.
 ///
-/// Uses `FinalResult` from gemicro-core which contains the answer
+/// Uses `FinalResult` from gemicro-core which contains the result
 /// and metadata (token counts, duration, agent-specific data in `extra`).
 ///
-/// If `plain` is false and stdout is a terminal, the answer will be rendered
+/// The `result` field can be:
+/// - A string (Q&A agents): rendered as markdown
+/// - Null (side-effect agents): displays completion message
+/// - Structured data (object/array): displayed as formatted JSON
+///
+/// If `plain` is false and stdout is a terminal, string results will be rendered
 /// as markdown with syntax highlighting and formatting.
 pub fn print_final_result(result: &FinalResult, elapsed: Duration, plain: bool) {
     println!();
@@ -66,11 +71,28 @@ pub fn print_final_result(result: &FinalResult, elapsed: Duration, plain: bool) 
     println!("╚══════════════════════════════════════════════════════════════╝");
     println!();
 
-    // Render as markdown unless plain mode is requested
-    if plain {
-        println!("{}", result.answer);
-    } else {
-        println!("{}", render_markdown(&result.answer));
+    // Handle different result types
+    match &result.result {
+        serde_json::Value::String(s) => {
+            // String result - render as markdown unless plain mode
+            if plain {
+                println!("{}", s);
+            } else {
+                println!("{}", render_markdown(s));
+            }
+        }
+        serde_json::Value::Null => {
+            // No result (side-effect agent) - just show completion
+            println!("✓ Execution completed successfully (no answer produced)");
+        }
+        other => {
+            // Structured result (object/array) - display as formatted JSON
+            if let Ok(formatted) = serde_json::to_string_pretty(other) {
+                println!("{}", formatted);
+            } else {
+                println!("{}", other);
+            }
+        }
     }
     println!();
     println!("══════════════════════════════════════════════════════════════");
