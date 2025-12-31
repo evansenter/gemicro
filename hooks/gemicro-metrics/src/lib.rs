@@ -3,6 +3,23 @@
 //! Tracks tool usage statistics in memory, providing observability
 //! into tool invocation patterns and success rates.
 //!
+//! # Error Detection Convention
+//!
+//! Tools signal errors via [`ToolResult::with_metadata`](gemicro_core::tool::ToolResult::with_metadata)
+//! by including an `"error"` key in the metadata. Any non-null value indicates failure:
+//!
+//! ```ignore
+//! // Success - no error key or error: null
+//! ToolResult::text("ok")
+//!
+//! // Failure - error key present (any value)
+//! ToolResult::text("failed").with_metadata(json!({"error": "details"}))
+//! ToolResult::text("failed").with_metadata(json!({"error": true}))
+//! ```
+//!
+//! This convention allows tools to return useful content to the LLM while
+//! still signaling failure for metrics purposes.
+//!
 //! # Example
 //!
 //! ```no_run
@@ -175,20 +192,18 @@ impl Metrics {
 
     /// Reset all metrics to zero.
     ///
-    /// # Concurrency Note
+    /// Atomically resets all counters to zero without removing entries.
+    /// This approach maintains existing Arc references and avoids the race
+    /// condition where a concurrent `get_or_create_stats` could get an entry
+    /// that's immediately cleared.
     ///
-    /// This method clears the internal HashMap, removing all tool entries.
-    /// If metrics are being recorded concurrently (via `record_invocation` etc.),
-    /// there may be brief inconsistencies where a tool has non-zero stats but
-    /// zero invocations, due to the sequence:
-    /// 1. Thread A: Creates tool entry via `get_or_create_stats`
-    /// 2. Thread B: Calls `reset()`, clearing the HashMap
-    /// 3. Thread A: Increments stats on the now-orphaned ToolStats
+    /// # Concurrency
     ///
-    /// This is acceptable for best-effort metrics. For strict consistency,
-    /// avoid calling `reset()` during active tool execution.
+    /// Uses atomic swap operations on individual counters. Brief inconsistencies
+    /// are possible (e.g., invocations reset before successes), but all counters
+    /// will reach zero within a single lock acquisition.
     pub fn reset(&self) {
-        let mut tools = match self.tools.write() {
+        let tools = match self.tools.read() {
             Ok(guard) => guard,
             Err(poisoned) => {
                 log::warn!(
@@ -198,7 +213,11 @@ impl Metrics {
                 poisoned.into_inner()
             }
         };
-        tools.clear();
+        for stats in tools.values() {
+            stats.invocations.store(0, Ordering::Relaxed);
+            stats.successes.store(0, Ordering::Relaxed);
+            stats.failures.store(0, Ordering::Relaxed);
+        }
     }
 }
 
@@ -473,9 +492,12 @@ mod tests {
         metrics.pre_tool_use("tool", &json!({})).await.unwrap();
 
         // Reset while in "pre" state (before post)
+        // New behavior: counters are zeroed but entry is preserved
         metrics.reset();
 
         // Now call post for a tool that was reset
+        // Since reset() now preserves entries (just zeroes counters),
+        // the post_tool_use still increments the same entry
         metrics
             .post_tool_use("tool", &json!({}), &ToolResult::text("ok"))
             .await
@@ -484,11 +506,10 @@ mod tests {
         let snapshot = metrics.snapshot();
 
         // After reset and post, tool should exist with 0 invocations, 1 success
-        // This is acceptable behavior - metrics are best-effort
-        if let Some(stats) = snapshot.get("tool") {
-            assert_eq!(stats.invocations, 0, "Invocations should be 0 after reset");
-            assert_eq!(stats.successes, 1, "Success recorded after reset");
-        }
+        // The entry was preserved by reset(), so post_tool_use incremented successes
+        let stats = snapshot.get("tool").expect("Tool entry should exist");
+        assert_eq!(stats.invocations, 0, "Invocations were zeroed by reset");
+        assert_eq!(stats.successes, 1, "Success recorded after reset");
     }
 
     #[tokio::test]

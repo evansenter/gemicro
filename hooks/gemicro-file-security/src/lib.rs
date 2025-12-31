@@ -99,6 +99,48 @@ impl FileSecurity {
         Self { blocked_paths }
     }
 
+    /// Create a new file security hook with canonicalized paths.
+    ///
+    /// This constructor resolves symlinks and normalizes paths, providing
+    /// stronger protection against path traversal attacks. However, it
+    /// requires all blocked paths to exist on disk at construction time.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any path cannot be canonicalized (e.g., doesn't exist).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `blocked_paths` is empty after filtering.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use gemicro_file_security::FileSecurity;
+    /// use std::path::PathBuf;
+    ///
+    /// let hook = FileSecurity::new_canonical(vec![
+    ///     PathBuf::from("/etc"),
+    ///     PathBuf::from("/var"),
+    /// ]).expect("Paths must exist");
+    /// ```
+    pub fn new_canonical(blocked_paths: Vec<PathBuf>) -> std::io::Result<Self> {
+        let canonical: Result<Vec<PathBuf>, std::io::Error> = blocked_paths
+            .into_iter()
+            .map(|p| p.canonicalize())
+            .collect();
+
+        let canonical = canonical?;
+
+        if canonical.is_empty() {
+            panic!("FileSecurity requires at least one blocked path");
+        }
+
+        Ok(Self {
+            blocked_paths: canonical,
+        })
+    }
+
     /// Check if a path is blocked.
     fn is_blocked(&self, path: &str) -> bool {
         let path = PathBuf::from(path);
@@ -264,5 +306,24 @@ mod tests {
             HookDecision::Allow,
             "KNOWN BYPASS: Hook allows relative paths (no CWD resolution)"
         );
+    }
+
+    #[test]
+    fn test_new_canonical_with_existing_paths() {
+        // /tmp should exist on most Unix systems
+        let result = FileSecurity::new_canonical(vec![PathBuf::from("/tmp")]);
+        assert!(result.is_ok(), "Should succeed for existing path");
+
+        let hook = result.unwrap();
+        // Canonical path should resolve symlinks if any
+        assert!(!hook.blocked_paths.is_empty());
+    }
+
+    #[test]
+    fn test_new_canonical_with_nonexistent_path() {
+        let result = FileSecurity::new_canonical(vec![PathBuf::from(
+            "/this/path/definitely/does/not/exist/12345",
+        )]);
+        assert!(result.is_err(), "Should fail for non-existent path");
     }
 }
