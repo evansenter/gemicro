@@ -113,7 +113,7 @@ Err(ToolError::InvalidInput("Missing required 'path' field".into()))
 | Non-zero exit code (LLM should see output) | `Ok(ToolResult)` + `metadata["error"]` |
 | Partial success with warnings | `Ok(ToolResult)` + `metadata["error"]` |
 
-**Why this matters:** Hooks like [`Metrics`](../hooks/gemicro-metrics/) detect failures by checking `output.metadata.get("error").is_some()`. Following this convention ensures accurate failure tracking.
+**Why this matters:** Hooks like [`Metrics`](../hooks/gemicro-metrics/) detect failures by checking if `metadata["error"]` exists with a non-null value. Note that `{"error": null}` is treated as success, while `{"error": "message"}` signals failure.
 
 ## Complete Example: FileRead Tool
 

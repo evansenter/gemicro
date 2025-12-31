@@ -189,9 +189,16 @@ impl ConfirmationHandler for AutoDeny {
 ///     .with_metadata(json!({"error": "File not found: config.toml"}));
 /// ```
 ///
-/// The value of `metadata["error"]` can be any JSON value (string, object, etc.)
-/// that provides context about the failure. Hooks detect errors by checking
-/// if the key exists: `output.metadata.get("error").is_some()`.
+/// The value of `metadata["error"]` can be any non-null JSON value (string, object, etc.)
+/// that provides context about the failure. Hooks detect errors by checking if the key
+/// exists with a non-null value:
+///
+/// ```ignore
+/// output.metadata.get("error").map(|v| !v.is_null()).unwrap_or(false)
+/// ```
+///
+/// **Note:** `{"error": null}` is treated as success (no error), while
+/// `{"error": "message"}` signals failure.
 ///
 /// # When to Use Error Metadata vs ToolError
 ///
@@ -200,7 +207,7 @@ impl ConfirmationHandler for AutoDeny {
 /// - **Return `Ok(ToolResult)` with `metadata["error"]`**: For recoverable errors
 ///   where the LLM should receive feedback and may retry or adjust its approach.
 ///
-/// [`Metrics`]: https://docs.rs/gemicro-metrics
+/// [`Metrics`]: ../../../gemicro_metrics/index.html
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct ToolResult {
