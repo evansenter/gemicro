@@ -20,12 +20,13 @@ Gemicro allows you to explore and interact with different AI agent patterns thro
 
 ## Architecture
 
-### 18-Crate Workspace
+### 23-Crate Workspace
 
 ```
-gemicro-core (Agent trait, Tool trait, events, LLM - GENERIC ONLY)
+gemicro-core (Agent trait, Tool trait, ToolHook trait, events, LLM - GENERIC ONLY)
     ↓
 tools/* (9 tool crates - file_read, web_fetch, task, web_search, glob, grep, file_write, file_edit, bash)
+hooks/* (5 hook crates - audit_log, file_security, input_sanitizer, conditional_permission, metrics)
 agents/* (5 agent crates - hermetic isolation)
     ↓
 gemicro-runner (execution state, metrics, runner)
@@ -36,8 +37,9 @@ gemicro-cli (terminal rendering)
 
 | Layer | Crates |
 |-------|--------|
-| **gemicro-core** | Agent/Tool traits, AgentContext, AgentUpdate events, LlmClient. **No implementations.** |
+| **gemicro-core** | Agent/Tool/ToolHook traits, AgentContext, AgentUpdate events, LlmClient. **No implementations.** |
 | **tools/** | file_read, web_fetch, task, web_search, glob, grep, file_write, file_edit, bash |
+| **hooks/** | audit_log, file_security, input_sanitizer, conditional_permission, metrics |
 | **agents/** | deep_research, react, simple_qa, tool_agent, judge |
 | **gemicro-runner** | Headless execution: AgentRunner, AgentRegistry, ExecutionState, metrics |
 | **gemicro-eval** | Evaluation: HotpotQA/custom datasets, scorers (Contains, LLM Judge) |
@@ -255,6 +257,8 @@ See the [Agent Authoring Guide](docs/AGENT_AUTHORING.md#trajectory-recording-and
 ## Documentation
 
 - [Agent Authoring Guide](docs/AGENT_AUTHORING.md) - Complete walkthrough for implementing new agents
+- [Tool Authoring Guide](docs/TOOL_AUTHORING.md) - Complete walkthrough for implementing new tools
+- [Hook Authoring Guide](docs/HOOK_AUTHORING.md) - Complete walkthrough for implementing new hooks
 - [CLAUDE.md](CLAUDE.md) - Project design philosophy and architecture decisions
 
 ## Contributing

@@ -28,7 +28,7 @@ async fn test_generate_simple_prompt() {
             let tokens_used = resp.usage.as_ref().and_then(|u| u.total_tokens);
             println!("Response: {}", text);
             println!("Tokens used: {:?}", tokens_used);
-            println!("Interaction ID: {}", resp.id);
+            println!("Interaction ID: {:?}", resp.id);
 
             // Basic assertions
             assert!(!text.is_empty(), "Response text should not be empty");
@@ -37,7 +37,9 @@ async fn test_generate_simple_prompt() {
                 "Response should contain '4', got: {}",
                 text
             );
-            assert!(!resp.id.is_empty(), "Interaction ID should not be empty");
+            if let Some(id) = &resp.id {
+                assert!(!id.is_empty(), "Interaction ID should not be empty");
+            }
         }
         Err(e) => {
             panic!("Generate failed: {:?}", e);

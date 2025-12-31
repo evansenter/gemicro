@@ -1,7 +1,7 @@
 [package]
 name = "gemicro-glob"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
 description = "Glob tool for finding files by pattern"
 
 [dependencies]

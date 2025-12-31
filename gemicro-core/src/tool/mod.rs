@@ -48,10 +48,12 @@
 //! ```
 
 mod adapter;
+mod hooks;
 mod registry;
 mod service;
 
 pub use adapter::{tools_to_callables, ToolCallableAdapter};
+pub use hooks::{HookDecision, HookError, HookRegistry, ToolHook};
 pub use registry::ToolRegistry;
 pub use service::GemicroToolService;
 
@@ -261,6 +263,14 @@ pub enum ToolError {
     /// User denied confirmation for the operation.
     #[error("Confirmation denied: {0}")]
     ConfirmationDenied(String),
+
+    /// Hook denied tool execution.
+    #[error("Hook denied: {0}")]
+    HookDenied(String),
+
+    /// Hook execution failed.
+    #[error("Hook failed: {0}")]
+    HookFailed(String),
 
     /// Other error.
     #[error("{0}")]

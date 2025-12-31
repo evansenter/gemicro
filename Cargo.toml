@@ -18,6 +18,11 @@ members = [
     "tools/gemicro-file-write",
     "tools/gemicro-file-edit",
     "tools/gemicro-bash",
+    "hooks/gemicro-audit-log",
+    "hooks/gemicro-file-security",
+    "hooks/gemicro-input-sanitizer",
+    "hooks/gemicro-conditional-permission",
+    "hooks/gemicro-metrics",
 ]
 resolver = "2"
 
@@ -45,3 +50,9 @@ glob = "0.3"
 regex = "1.11"
 
 # Workspace-level metadata
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT"
+repository = "https://github.com/evansenter/gemicro"

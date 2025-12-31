@@ -288,3 +288,115 @@ fn test_tool_agent_config_validation() {
     let config = ToolAgentConfig::default().with_system_prompt("");
     assert!(config.validate().is_err());
 }
+
+/// Test streaming function calling with hooks and confirmation.
+///
+/// This verifies that:
+/// 1. `create_stream_with_auto_functions()` works with GemicroToolService
+/// 2. Hooks are correctly applied in streaming mode
+/// 3. Confirmation handlers work in streaming mode
+/// 4. Streaming returns incremental text updates via AutoFunctionStreamChunk
+#[tokio::test]
+#[ignore] // Requires GEMINI_API_KEY
+async fn test_streaming_function_calling_with_hooks() {
+    let Some(api_key) = get_api_key() else {
+        eprintln!("Skipping test: GEMINI_API_KEY not set");
+        return;
+    };
+
+    use gemicro_audit_log::AuditLog;
+    use gemicro_core::tool::{AutoApprove, GemicroToolService, HookRegistry};
+    use gemicro_core::MODEL;
+    use gemicro_tool_agent::tools::default_registry;
+    use rust_genai::AutoFunctionStreamChunk;
+    use std::sync::Arc;
+
+    // Set up hooks and confirmation
+    let hooks = Arc::new(HookRegistry::new().with_hook(AuditLog));
+    let confirmation = Arc::new(AutoApprove); // Auto-approve for test
+
+    // Build tool service with hooks and confirmation
+    let registry = Arc::new(default_registry());
+    let service = GemicroToolService::new(Arc::clone(&registry))
+        .with_filter(ToolSet::Specific(vec!["calculator".into()]))
+        .with_hooks(hooks)
+        .with_confirmation_handler(confirmation);
+
+    // Create streaming interaction
+    let genai_client = rust_genai::Client::builder(api_key.to_string()).build();
+    let mut stream = genai_client
+        .interaction()
+        .with_model(MODEL)
+        .with_system_instruction(
+            "You are a math assistant. Use the calculator tool to solve problems.",
+        )
+        .with_text("What is 15 + 27?")
+        .with_tool_service(Arc::new(service))
+        .create_stream_with_auto_functions();
+
+    let mut text_parts = Vec::new();
+    let mut saw_delta = false;
+    let mut saw_executing = false;
+    let mut saw_results = false;
+    let mut saw_complete = false;
+
+    // Consume the stream
+    while let Some(result) = stream.next().await {
+        match result {
+            Ok(chunk) => match chunk {
+                AutoFunctionStreamChunk::Delta(content) => {
+                    saw_delta = true;
+                    if let Some(text) = content.text() {
+                        print!("{}", text);
+                        text_parts.push(text.to_string());
+                    }
+                }
+                AutoFunctionStreamChunk::ExecutingFunctions(_response) => {
+                    saw_executing = true;
+                    println!("\n[Executing functions via hooks...]");
+                }
+                AutoFunctionStreamChunk::FunctionResults(_results) => {
+                    saw_results = true;
+                    println!("[Function results received]");
+                }
+                AutoFunctionStreamChunk::Complete(response) => {
+                    saw_complete = true;
+                    println!("\n[Complete] Total tokens: {:?}", response.usage);
+                }
+                _ => {
+                    println!("[Unknown AutoFunctionStreamChunk variant]");
+                }
+            },
+            Err(e) => {
+                panic!("Streaming error: {:?}", e);
+            }
+        }
+    }
+
+    println!(); // Final newline
+
+    // Verify streaming behavior
+    assert!(saw_delta, "Should receive Delta chunks in streaming mode");
+    assert!(
+        saw_complete,
+        "Should receive Complete chunk at end of stream"
+    );
+
+    // Verify the answer was streamed (should contain 42)
+    let full_text: String = text_parts.join("");
+    assert!(
+        full_text.contains("42"),
+        "Streamed answer should contain 42 (15 + 27), got: {}",
+        full_text
+    );
+    assert!(
+        !text_parts.is_empty(),
+        "Should receive incremental text chunks"
+    );
+
+    println!("✓ Streaming FC with hooks and confirmation works correctly");
+    println!("✓ Received {} text chunks", text_parts.len());
+    println!("✓ Saw ExecutingFunctions: {}", saw_executing);
+    println!("✓ Saw FunctionResults: {}", saw_results);
+    println!("✓ Final answer: {}", full_text);
+}

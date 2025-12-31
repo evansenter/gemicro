@@ -1,7 +1,10 @@
 [package]
 name = "gemicro-tool-agent"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
 description = "Tool agent: native function calling with calculator/datetime tools"
 
 [dependencies]
@@ -34,3 +37,5 @@ rstest = { workspace = true }
 rust-genai = { workspace = true }
 tokio = { workspace = true, features = ["test-util", "macros"] }
 futures-util = { workspace = true }
+gemicro-audit-log = { path = "../../hooks/gemicro-audit-log" }
+env_logger = "0.11"

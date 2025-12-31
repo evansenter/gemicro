@@ -27,3 +27,8 @@ gemicro-deep-research = { path = "../agents/gemicro-deep-research" }
 gemicro-react = { path = "../agents/gemicro-react" }
 gemicro-simple-qa = { path = "../agents/gemicro-simple-qa" }
 gemicro-tool-agent = { path = "../agents/gemicro-tool-agent" }
+# Hook crates needed for integration tests
+gemicro-audit-log = { path = "../hooks/gemicro-audit-log" }
+gemicro-file-security = { path = "../hooks/gemicro-file-security" }
+gemicro-input-sanitizer = { path = "../hooks/gemicro-input-sanitizer" }
+gemicro-metrics = { path = "../hooks/gemicro-metrics" }

@@ -1,7 +1,7 @@
 [package]
 name = "gemicro-web-search"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
 description = "WebSearch tool for gemicro agents using Gemini Google Search grounding"
 
 [dependencies]
