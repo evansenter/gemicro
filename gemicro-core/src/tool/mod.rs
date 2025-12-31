@@ -193,7 +193,7 @@ impl ConfirmationHandler for AutoDeny {
 /// that provides context about the failure. Hooks detect errors by checking if the key
 /// exists with a non-null value:
 ///
-/// ```ignore
+/// ```text
 /// output.metadata.get("error").map(|v| !v.is_null()).unwrap_or(false)
 /// ```
 ///
