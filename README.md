@@ -23,7 +23,7 @@ Gemicro allows you to explore and interact with different AI agent patterns thro
 ### 23-Crate Workspace
 
 ```
-gemicro-core (Agent trait, Tool trait, ToolHook trait, events, LLM - GENERIC ONLY)
+gemicro-core (Agent trait, Tool trait, Interceptor trait, events, LLM - GENERIC ONLY)
     ↓
 tools/* (9 tool crates - file_read, web_fetch, task, web_search, glob, grep, file_write, file_edit, bash)
 hooks/* (5 hook crates - audit_log, file_security, input_sanitizer, conditional_permission, metrics)
@@ -37,7 +37,7 @@ gemicro-cli (terminal rendering)
 
 | Layer | Crates |
 |-------|--------|
-| **gemicro-core** | Agent/Tool/ToolHook traits, AgentContext, AgentUpdate events, LlmClient. **No implementations.** |
+| **gemicro-core** | Agent/Tool/Interceptor traits, AgentContext, AgentUpdate events, LlmClient. **No implementations.** |
 | **tools/** | file_read, web_fetch, task, web_search, glob, grep, file_write, file_edit, bash |
 | **hooks/** | audit_log, file_security, input_sanitizer, conditional_permission, metrics |
 | **agents/** | deep_research, react, simple_qa, tool_agent, judge |

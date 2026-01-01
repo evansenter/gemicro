@@ -305,21 +305,22 @@ async fn test_streaming_function_calling_with_hooks() {
     };
 
     use gemicro_audit_log::AuditLog;
-    use gemicro_core::tool::{AutoApprove, GemicroToolService, HookRegistry};
+    use gemicro_core::interceptor::InterceptorChain;
+    use gemicro_core::tool::{AutoApprove, GemicroToolService};
     use gemicro_core::MODEL;
     use gemicro_tool_agent::tools::default_registry;
     use rust_genai::AutoFunctionStreamChunk;
     use std::sync::Arc;
 
-    // Set up hooks and confirmation
-    let hooks = Arc::new(HookRegistry::new().with_hook(AuditLog));
+    // Set up interceptors and confirmation
+    let interceptors = Arc::new(InterceptorChain::new().with(AuditLog));
     let confirmation = Arc::new(AutoApprove); // Auto-approve for test
 
-    // Build tool service with hooks and confirmation
+    // Build tool service with interceptors and confirmation
     let registry = Arc::new(default_registry());
     let service = GemicroToolService::new(Arc::clone(&registry))
         .with_filter(ToolSet::Specific(vec!["calculator".into()]))
-        .with_hooks(hooks)
+        .with_interceptors(interceptors)
         .with_confirmation_handler(confirmation);
 
     // Create streaming interaction

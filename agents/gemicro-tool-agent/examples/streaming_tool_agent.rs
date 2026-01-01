@@ -3,7 +3,7 @@
 //! Demonstrates using create_stream_with_auto_functions() with:
 //! - Real-time incremental text updates via AutoFunctionStreamChunk
 //! - Automatic function execution (via ToolService)
-//! - Hooks for logging/validation
+//! - Interceptors for logging/validation
 //! - Confirmation handlers for dangerous operations
 //!
 //! Run with:
@@ -13,7 +13,8 @@
 
 use futures_util::StreamExt;
 use gemicro_audit_log::AuditLog;
-use gemicro_core::tool::{AutoApprove, GemicroToolService, HookRegistry};
+use gemicro_core::interceptor::InterceptorChain;
+use gemicro_core::tool::{AutoApprove, GemicroToolService};
 use gemicro_core::{ToolSet, MODEL};
 use gemicro_tool_agent::tools::default_registry;
 use rust_genai::AutoFunctionStreamChunk;
@@ -27,21 +28,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::env::var("GEMINI_API_KEY").expect("GEMINI_API_KEY environment variable must be set");
 
     println!("╭─────────────────────────────────────────────╮");
-    println!("│     Streaming Tool Agent with Hooks        │");
+    println!("│   Streaming Tool Agent with Interceptors   │");
     println!("╰─────────────────────────────────────────────╯\n");
 
-    // Set up hooks for audit logging
-    let hooks = Arc::new(HookRegistry::new().with_hook(AuditLog));
+    // Set up interceptors for audit logging
+    let interceptors = Arc::new(InterceptorChain::new().with(AuditLog));
 
     // Create tool registry and service
     let registry = Arc::new(default_registry());
     let service = GemicroToolService::new(Arc::clone(&registry))
         .with_filter(ToolSet::Specific(vec!["calculator".into()]))
-        .with_hooks(hooks)
+        .with_interceptors(interceptors)
         .with_confirmation_handler(Arc::new(AutoApprove)); // Auto-approve for demo
 
     println!("🔧 Tools available: calculator");
-    println!("🔐 Hooks enabled: AuditLog");
+    println!("🔐 Interceptors enabled: AuditLog");
     println!("✓ Confirmation: AutoApprove\n");
 
     // Create streaming interaction using rust-genai's streaming auto-functions
@@ -79,7 +80,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 AutoFunctionStreamChunk::ExecutingFunctions(_) => {
-                    println!("\n🔄 [Executing functions with hooks...]");
+                    println!("\n🔄 [Executing functions with interceptors...]");
                     function_execution_count += 1;
                 }
                 AutoFunctionStreamChunk::FunctionResults(_) => {
@@ -114,7 +115,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("   • Real-time incremental text updates (streaming)");
     println!("   • Automatic function execution via ToolService");
     println!(
-        "   • AuditLog hook intercepted {} tool call(s)",
+        "   • AuditLog interceptor processed {} tool call(s)",
         function_execution_count
     );
     println!("   • Confirmation handler approved operations");
