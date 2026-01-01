@@ -3,7 +3,8 @@
 //! Provides [`GemicroToolService`] which implements rust-genai's `ToolService` trait,
 //! enabling gemicro tools to work with `create_with_auto_functions()`.
 
-use super::{ConfirmationHandler, HookRegistry, ToolCallableAdapter, ToolRegistry, ToolSet};
+use super::{ConfirmationHandler, ToolCallableAdapter, ToolRegistry, ToolResult, ToolSet};
+use crate::interceptor::{InterceptorChain, ToolCall};
 use rust_genai::{CallableFunction, ToolService};
 use std::sync::Arc;
 
@@ -44,7 +45,7 @@ pub struct GemicroToolService {
     registry: Arc<ToolRegistry>,
     filter: ToolSet,
     confirmation_handler: Option<Arc<dyn ConfirmationHandler>>,
-    hooks: Option<Arc<HookRegistry>>,
+    interceptors: Option<Arc<InterceptorChain<ToolCall, ToolResult>>>,
 }
 
 impl GemicroToolService {
@@ -61,7 +62,7 @@ impl GemicroToolService {
             registry,
             filter: ToolSet::All,
             confirmation_handler: None,
-            hooks: None,
+            interceptors: None,
         }
     }
 
@@ -110,24 +111,28 @@ impl GemicroToolService {
         self
     }
 
-    /// Set the hook registry for tool interception.
+    /// Set the interceptor chain for tool interception.
     ///
-    /// Hooks are called before and after tool execution for validation,
+    /// Interceptors are called before and after tool execution for validation,
     /// logging, and security controls.
     ///
     /// # Example
     ///
     /// ```
-    /// use gemicro_core::tool::{GemicroToolService, ToolRegistry, HookRegistry};
+    /// use gemicro_core::tool::{GemicroToolService, ToolRegistry, ToolResult};
+    /// use gemicro_core::interceptor::{InterceptorChain, ToolCall};
     /// use std::sync::Arc;
     ///
     /// let registry = ToolRegistry::new();
-    /// let hooks = HookRegistry::new();
+    /// let interceptors: InterceptorChain<ToolCall, ToolResult> = InterceptorChain::new();
     /// let service = GemicroToolService::new(Arc::new(registry))
-    ///     .with_hooks(Arc::new(hooks));
+    ///     .with_interceptors(Arc::new(interceptors));
     /// ```
-    pub fn with_hooks(mut self, hooks: Arc<HookRegistry>) -> Self {
-        self.hooks = Some(hooks);
+    pub fn with_interceptors(
+        mut self,
+        interceptors: Arc<InterceptorChain<ToolCall, ToolResult>>,
+    ) -> Self {
+        self.interceptors = Some(interceptors);
         self
     }
 
@@ -157,8 +162,8 @@ impl ToolService for GemicroToolService {
                 if let Some(h) = &self.confirmation_handler {
                     adapter = adapter.with_confirmation_handler(Arc::clone(h));
                 }
-                if let Some(h) = &self.hooks {
-                    adapter = adapter.with_hooks(Arc::clone(h));
+                if let Some(i) = &self.interceptors {
+                    adapter = adapter.with_interceptors(Arc::clone(i));
                 }
                 Arc::new(adapter) as Arc<dyn CallableFunction>
             })

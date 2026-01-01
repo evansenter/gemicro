@@ -48,12 +48,10 @@
 //! ```
 
 mod adapter;
-mod hooks;
 mod registry;
 mod service;
 
 pub use adapter::{tools_to_callables, ToolCallableAdapter};
-pub use hooks::{HookDecision, HookError, HookRegistry, ToolHook};
 pub use registry::ToolRegistry;
 pub use service::GemicroToolService;
 
@@ -313,13 +311,13 @@ pub enum ToolError {
     #[error("Confirmation denied: {0}")]
     ConfirmationDenied(String),
 
-    /// Hook denied tool execution.
-    #[error("Hook denied: {0}")]
-    HookDenied(String),
+    /// Interceptor denied tool execution.
+    #[error("Interceptor denied: {0}")]
+    InterceptorDenied(String),
 
-    /// Hook execution failed.
-    #[error("Hook failed: {0}")]
-    HookFailed(String),
+    /// Interceptor execution failed.
+    #[error("Interceptor failed: {0}")]
+    InterceptorFailed(String),
 
     /// Other error.
     #[error("{0}")]

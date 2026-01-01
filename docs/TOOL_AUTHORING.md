@@ -80,14 +80,14 @@ impl ToolResult {
 
 ```rust
 pub enum ToolError {
-    InvalidInput(String),      // Bad input from LLM
-    ExecutionFailed(String),   // Tool logic failed
-    NotFound(String),          // Resource not found
-    Timeout(u64),              // Operation timed out
-    ConfirmationDenied(String), // User declined
-    HookDenied(String),        // Hook blocked execution
-    HookFailed(String),        // Hook execution failed
-    Other(String),             // Catch-all
+    InvalidInput(String),         // Bad input from LLM
+    ExecutionFailed(String),      // Tool logic failed
+    NotFound(String),             // Resource not found
+    Timeout(u64),                 // Operation timed out
+    ConfirmationDenied(String),   // User declined
+    InterceptorDenied(String),    // Interceptor blocked execution
+    InterceptorFailed(String),    // Interceptor execution failed
+    Other(String),                // Catch-all
 }
 ```
 

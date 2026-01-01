@@ -1,4 +1,4 @@
-//! Conditional permission hook for gemicro tool execution.
+//! Conditional permission interceptor for gemicro tool execution.
 //!
 //! Dynamically requests user permission based on detecting dangerous
 //! patterns in tool inputs, providing a flexible safety layer.
@@ -6,32 +6,34 @@
 //! # Example
 //!
 //! ```no_run
-//! use gemicro_core::tool::HookRegistry;
+//! use gemicro_core::interceptor::{InterceptorChain, ToolCall};
+//! use gemicro_core::tool::ToolResult;
 //! use gemicro_conditional_permission::ConditionalPermission;
 //!
 //! // Request permission for shell commands containing "rm" or "delete"
-//! let hook = ConditionalPermission::new(vec![
+//! let interceptor = ConditionalPermission::new(vec![
 //!     "rm".to_string(),
 //!     "delete".to_string(),
 //!     "DROP TABLE".to_string(),
 //! ]);
 //!
-//! let hooks = HookRegistry::new()
-//!     .with_hook(hook);
+//! let interceptors: InterceptorChain<ToolCall, ToolResult> = InterceptorChain::new()
+//!     .with(interceptor);
 //! ```
 
 use async_trait::async_trait;
-use gemicro_core::tool::{HookDecision, HookError, ToolHook, ToolResult};
+use gemicro_core::interceptor::{InterceptDecision, InterceptError, Interceptor, ToolCall};
+use gemicro_core::tool::ToolResult;
 use serde_json::Value;
 
-/// Conditional permission hook that requests permission for specific operations.
+/// Conditional permission interceptor that requests permission for specific operations.
 ///
-/// Unlike tools that always or never require confirmation, this hook dynamically
+/// Unlike tools that always or never require confirmation, this interceptor dynamically
 /// requests permission based on detecting dangerous patterns in the input.
 ///
 /// # Pattern Matching Strategy
 ///
-/// The hook searches for patterns in two ways:
+/// The interceptor searches for patterns in two ways:
 /// 1. **Field values**: Checks string values in specific JSON fields (configurable)
 /// 2. **Full serialization**: Falls back to checking the entire JSON string
 ///
@@ -57,7 +59,7 @@ use serde_json::Value;
 /// - **Character substitution**: Unicode lookalikes like `rм` (Cyrillic 'м')
 /// - **Encoding**: Base64 or hex-encoded dangerous commands in nested JSON
 ///
-/// For critical security, combine with other hooks, semantic analysis, or
+/// For critical security, combine with other interceptors, semantic analysis, or
 /// tool-level confirmation mechanisms.
 ///
 /// # Example
@@ -65,7 +67,7 @@ use serde_json::Value;
 /// ```
 /// use gemicro_conditional_permission::ConditionalPermission;
 ///
-/// let hook = ConditionalPermission::builder()
+/// let interceptor = ConditionalPermission::builder()
 ///     .add_pattern("rm")
 ///     .add_pattern("delete")
 ///     .check_field("command")  // Check these specific fields
@@ -82,7 +84,7 @@ pub struct ConditionalPermission {
 }
 
 impl ConditionalPermission {
-    /// Create a new conditional permission hook with default configuration.
+    /// Create a new conditional permission interceptor with default configuration.
     ///
     /// By default, checks common fields: "command", "query", "code", "script".
     ///
@@ -96,7 +98,7 @@ impl ConditionalPermission {
     /// ```
     /// use gemicro_conditional_permission::ConditionalPermission;
     ///
-    /// let hook = ConditionalPermission::new(vec![
+    /// let interceptor = ConditionalPermission::new(vec![
     ///     "rm".to_string(),
     ///     "delete".to_string(),
     /// ]);
@@ -178,7 +180,7 @@ impl ConditionalPermissionBuilder {
         self
     }
 
-    /// Build the ConditionalPermission hook.
+    /// Build the ConditionalPermission interceptor.
     ///
     /// If no fields specified, uses default fields:
     /// "command", "query", "code", "script"
@@ -217,35 +219,25 @@ impl ConditionalPermissionBuilder {
 }
 
 #[async_trait]
-impl ToolHook for ConditionalPermission {
-    async fn pre_tool_use(
+impl Interceptor<ToolCall, ToolResult> for ConditionalPermission {
+    async fn intercept(
         &self,
-        tool_name: &str,
-        input: &Value,
-    ) -> Result<HookDecision, HookError> {
-        if let Some(pattern) = self.is_dangerous(input) {
+        input: &ToolCall,
+    ) -> Result<InterceptDecision<ToolCall>, InterceptError> {
+        if let Some(pattern) = self.is_dangerous(&input.arguments) {
             log::info!(
                 "ConditionalPermission: Requesting permission for tool '{}' (matched pattern: '{}')",
-                tool_name,
+                input.name,
                 pattern
             );
-            return Ok(HookDecision::RequestPermission {
+            return Ok(InterceptDecision::Confirm {
                 message: format!(
                     "Tool '{}' wants to perform operation containing '{}'. Allow?",
-                    tool_name, pattern
+                    input.name, pattern
                 ),
             });
         }
-        Ok(HookDecision::Allow)
-    }
-
-    async fn post_tool_use(
-        &self,
-        _tool_name: &str,
-        _input: &Value,
-        _output: &ToolResult,
-    ) -> Result<(), HookError> {
-        Ok(())
+        Ok(InterceptDecision::Allow)
     }
 }
 
@@ -256,76 +248,79 @@ mod tests {
 
     #[tokio::test]
     async fn test_allows_safe_command() {
-        let hook = ConditionalPermission::new(vec!["rm".to_string(), "delete".to_string()]);
-        let input = json!({"command": "ls -la"});
-        let decision = hook.pre_tool_use("bash", &input).await.unwrap();
-        assert_eq!(decision, HookDecision::Allow);
+        let interceptor = ConditionalPermission::new(vec!["rm".to_string(), "delete".to_string()]);
+        let input = ToolCall::new("bash", json!({"command": "ls -la"}));
+        let decision = interceptor.intercept(&input).await.unwrap();
+        assert_eq!(decision, InterceptDecision::Allow);
     }
 
     #[tokio::test]
     async fn test_requests_permission_for_dangerous() {
-        let hook = ConditionalPermission::new(vec!["rm".to_string(), "delete".to_string()]);
-        let input = json!({"command": "rm -rf /"});
-        let decision = hook.pre_tool_use("bash", &input).await.unwrap();
+        let interceptor = ConditionalPermission::new(vec!["rm".to_string(), "delete".to_string()]);
+        let input = ToolCall::new("bash", json!({"command": "rm -rf /"}));
+        let decision = interceptor.intercept(&input).await.unwrap();
         match decision {
-            HookDecision::RequestPermission { message } => {
+            InterceptDecision::Confirm { message } => {
                 assert!(message.contains("rm"));
             }
-            _ => panic!("Expected RequestPermission"),
+            _ => panic!("Expected Confirm"),
         }
     }
 
     #[tokio::test]
     async fn test_case_insensitive() {
-        let hook = ConditionalPermission::new(vec!["DELETE".to_string()]);
-        let input = json!({"query": "delete from users"});
-        let decision = hook.pre_tool_use("sql", &input).await.unwrap();
+        let interceptor = ConditionalPermission::new(vec!["DELETE".to_string()]);
+        let input = ToolCall::new("sql", json!({"query": "delete from users"}));
+        let decision = interceptor.intercept(&input).await.unwrap();
         match decision {
-            HookDecision::RequestPermission { .. } => {}
-            _ => panic!("Expected RequestPermission"),
+            InterceptDecision::Confirm { .. } => {}
+            _ => panic!("Expected Confirm"),
         }
     }
 
     #[tokio::test]
     async fn test_builder() {
-        let hook = ConditionalPermission::builder()
+        let interceptor = ConditionalPermission::builder()
             .add_pattern("rm")
             .add_pattern("delete")
             .check_field("cmd")
             .build();
 
-        let input = json!({"cmd": "rm file.txt"});
-        let decision = hook.pre_tool_use("bash", &input).await.unwrap();
+        let input = ToolCall::new("bash", json!({"cmd": "rm file.txt"}));
+        let decision = interceptor.intercept(&input).await.unwrap();
         match decision {
-            HookDecision::RequestPermission { .. } => {}
-            _ => panic!("Expected RequestPermission"),
+            InterceptDecision::Confirm { .. } => {}
+            _ => panic!("Expected Confirm"),
         }
     }
 
     #[tokio::test]
     async fn test_checks_multiple_fields() {
-        let hook = ConditionalPermission::builder()
+        let interceptor = ConditionalPermission::builder()
             .add_pattern("danger")
             .check_field("field1")
             .check_field("field2")
             .build();
 
-        let input = json!({"field1": "safe", "field2": "dangerous"});
-        let decision = hook.pre_tool_use("test", &input).await.unwrap();
+        let input = ToolCall::new("test", json!({"field1": "safe", "field2": "dangerous"}));
+        let decision = interceptor.intercept(&input).await.unwrap();
         match decision {
-            HookDecision::RequestPermission { .. } => {}
-            _ => panic!("Expected RequestPermission"),
+            InterceptDecision::Confirm { .. } => {}
+            _ => panic!("Expected Confirm"),
         }
     }
 
     #[tokio::test]
     async fn test_fallback_to_full_json() {
-        let hook = ConditionalPermission::new(vec!["hidden".to_string()]);
-        let input = json!({"nested": {"deep": {"value": "hidden danger"}}});
-        let decision = hook.pre_tool_use("test", &input).await.unwrap();
+        let interceptor = ConditionalPermission::new(vec!["hidden".to_string()]);
+        let input = ToolCall::new(
+            "test",
+            json!({"nested": {"deep": {"value": "hidden danger"}}}),
+        );
+        let decision = interceptor.intercept(&input).await.unwrap();
         match decision {
-            HookDecision::RequestPermission { .. } => {}
-            _ => panic!("Expected RequestPermission"),
+            InterceptDecision::Confirm { .. } => {}
+            _ => panic!("Expected Confirm"),
         }
     }
 
@@ -346,14 +341,14 @@ mod tests {
     #[tokio::test]
     async fn test_whitespace_obfuscation_bypass() {
         // KNOWN BYPASS: Whitespace can split patterns
-        let hook = ConditionalPermission::new(vec!["rm".to_string()]);
-        let input = json!({"command": "r m -rf /"});
-        let decision = hook.pre_tool_use("bash", &input).await.unwrap();
+        let interceptor = ConditionalPermission::new(vec!["rm".to_string()]);
+        let input = ToolCall::new("bash", json!({"command": "r m -rf /"}));
+        let decision = interceptor.intercept(&input).await.unwrap();
 
         // Currently ALLOWS (no "rm" substring due to space)
         assert_eq!(
             decision,
-            HookDecision::Allow,
+            InterceptDecision::Allow,
             "KNOWN BYPASS: Whitespace obfuscation not detected"
         );
     }
@@ -361,14 +356,14 @@ mod tests {
     #[tokio::test]
     async fn test_false_positive_json_field_name() {
         // KNOWN FALSE POSITIVE: Fallback JSON matching triggers on field names
-        let hook = ConditionalPermission::new(vec!["delete".to_string()]);
+        let interceptor = ConditionalPermission::new(vec!["delete".to_string()]);
         // Field name contains "delete" but value is benign
-        let input = json!({"delete_flag": false, "action": "read"});
-        let decision = hook.pre_tool_use("test", &input).await.unwrap();
+        let input = ToolCall::new("test", json!({"delete_flag": false, "action": "read"}));
+        let decision = interceptor.intercept(&input).await.unwrap();
 
         // Currently triggers permission request (field name matched in full JSON)
         assert!(
-            matches!(decision, HookDecision::RequestPermission { .. }),
+            matches!(decision, InterceptDecision::Confirm { .. }),
             "KNOWN FALSE POSITIVE: Field names trigger fallback matching"
         );
     }
@@ -376,13 +371,13 @@ mod tests {
     #[tokio::test]
     async fn test_false_positive_numeric_pattern() {
         // KNOWN FALSE POSITIVE: Numeric patterns match any number
-        let hook = ConditionalPermission::new(vec!["1".to_string()]);
-        let input = json!({"timestamp": 1234567890});
-        let decision = hook.pre_tool_use("test", &input).await.unwrap();
+        let interceptor = ConditionalPermission::new(vec!["1".to_string()]);
+        let input = ToolCall::new("test", json!({"timestamp": 1234567890}));
+        let decision = interceptor.intercept(&input).await.unwrap();
 
         // Currently triggers (fallback JSON contains "1")
         assert!(
-            matches!(decision, HookDecision::RequestPermission { .. }),
+            matches!(decision, InterceptDecision::Confirm { .. }),
             "KNOWN FALSE POSITIVE: Numeric patterns match all numbers"
         );
     }
@@ -390,13 +385,13 @@ mod tests {
     #[tokio::test]
     async fn test_empty_pattern_after_trimming_bypasses_builder() {
         // Patterns are trimmed and filtered - empty after trim should be removed
-        let hook = ConditionalPermission::builder()
+        let interceptor = ConditionalPermission::builder()
             .add_pattern("  ")
             .add_pattern("valid")
             .build();
 
-        let input = json!({"command": "safe"});
-        let decision = hook.pre_tool_use("test", &input).await.unwrap();
-        assert_eq!(decision, HookDecision::Allow);
+        let input = ToolCall::new("test", json!({"command": "safe"}));
+        let decision = interceptor.intercept(&input).await.unwrap();
+        assert_eq!(decision, InterceptDecision::Allow);
     }
 }
