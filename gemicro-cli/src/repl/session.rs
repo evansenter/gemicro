@@ -297,6 +297,7 @@ impl Session {
             tools: None,
             confirmation_handler: Some(Arc::clone(&self.confirmation_handler)),
             execution: gemicro_core::ExecutionContext::root(),
+            orchestration: None,
         }
     }
 

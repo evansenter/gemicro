@@ -12,7 +12,10 @@
 
 use async_trait::async_trait;
 use futures_util::StreamExt;
-use gemicro_core::agent::{AgentSpec, ExecutionContext, PromptAgentDef, SubagentConfig};
+use gemicro_core::agent::{
+    AgentSpec, ExecutionContext, OrchestrationGuard, OrchestrationState, PromptAgentDef,
+    SubagentConfig,
+};
 use gemicro_core::tool::{Tool, ToolError, ToolResult};
 use gemicro_core::{Agent, AgentContext, LlmClient, ToolSet, EVENT_FINAL_RESULT};
 use gemicro_runner::AgentRegistry;
@@ -67,8 +70,10 @@ pub struct Task {
     llm: Arc<LlmClient>,
     /// Parent execution context for tracking (if available)
     parent_context: Option<ExecutionContext>,
-    /// Maximum subagent nesting depth
+    /// Maximum subagent nesting depth (fallback if no orchestration)
     max_depth: usize,
+    /// Orchestration state for concurrency control (if available)
+    orchestration: Option<Arc<OrchestrationState>>,
 }
 
 impl std::fmt::Debug for Task {
@@ -92,6 +97,7 @@ impl Task {
             llm,
             parent_context: None,
             max_depth: DEFAULT_MAX_DEPTH,
+            orchestration: None,
         }
     }
 
@@ -103,9 +109,24 @@ impl Task {
     }
 
     /// Set the maximum nesting depth for subagents.
+    ///
+    /// Note: If orchestration is set, the orchestration's max_depth takes precedence.
+    /// This is a fallback for when orchestration is not configured.
     #[must_use]
     pub fn with_max_depth(mut self, max_depth: usize) -> Self {
         self.max_depth = max_depth;
+        self
+    }
+
+    /// Set orchestration state for concurrency control.
+    ///
+    /// When orchestration is set, the Task tool will:
+    /// - Use orchestration's max_depth instead of the local max_depth
+    /// - Acquire permits before spawning subagents
+    /// - Respect the total timeout budget
+    #[must_use]
+    pub fn with_orchestration(mut self, orchestration: Arc<OrchestrationState>) -> Self {
+        self.orchestration = Some(orchestration);
         self
     }
 
@@ -338,11 +359,17 @@ impl Tool for Task {
             .unwrap_or_else(ExecutionContext::root);
         let child_context = parent_context.child(agent_spec.name());
 
-        // Check depth limit
-        if child_context.depth > self.max_depth {
+        // Check depth limit - use orchestration's limit if available, else fallback
+        let max_depth = self
+            .orchestration
+            .as_ref()
+            .map(|o| o.config().max_depth)
+            .unwrap_or(self.max_depth);
+
+        if child_context.depth >= max_depth {
             return Err(ToolError::ExecutionFailed(format!(
                 "Max subagent depth ({}) exceeded at depth {}. Path: {}",
-                self.max_depth,
+                max_depth,
                 child_context.depth,
                 child_context.path_string()
             )));
@@ -358,6 +385,27 @@ impl Tool for Task {
             ));
         }
 
+        // Acquire orchestration permits if orchestration is configured
+        // We use the child's execution_id as the "parent" from the semaphore's perspective
+        // because we're tracking how many children THIS execution can spawn
+        let _guard: Option<OrchestrationGuard> = if let Some(ref orch) = self.orchestration {
+            // Use parent_id for per-parent semaphore (how many siblings can run)
+            let parent_for_permit = child_context
+                .parent_id
+                .as_ref()
+                .unwrap_or(&child_context.execution_id);
+            Some(orch.acquire_permits(parent_for_permit).await.map_err(|e| {
+                ToolError::ExecutionFailed(format!(
+                    "Failed to acquire orchestration permits for subagent '{}': {}",
+                    agent_spec.name(),
+                    e
+                ))
+            })?)
+        } else {
+            None
+        };
+        // Guard is held until end of function, releasing permits on drop
+
         // Capture metadata before consuming the context
         let execution_metadata = json!({
             "execution_id": child_context.execution_id.as_str(),
@@ -365,14 +413,30 @@ impl Tool for Task {
             "depth": child_context.depth,
         });
 
+        // Determine timeout: use orchestration's remaining time if available,
+        // otherwise fall back to config timeout
+        let timeout = if let Some(ref orch) = self.orchestration {
+            match orch.remaining_time() {
+                Some(remaining) => remaining.min(config.timeout),
+                None => {
+                    return Err(ToolError::ExecutionFailed(format!(
+                        "Orchestration total timeout already exceeded before spawning subagent '{}'",
+                        agent_spec.name()
+                    )));
+                }
+            }
+        } else {
+            config.timeout
+        };
+
         // Execute based on agent type
         let final_answer = match &agent_spec {
             AgentSpec::Named(name) => {
-                self.execute_named_agent(name, query, child_context, &config)
+                self.execute_named_agent(name, query, child_context, &config, timeout)
                     .await?
             }
             AgentSpec::Prompt(def) => {
-                self.execute_prompt_agent(def, query, child_context, &config)
+                self.execute_prompt_agent(def, query, child_context, &config, timeout)
                     .await?
             }
             // Forward compatibility: handle unknown AgentSpec variants.
@@ -397,7 +461,8 @@ impl Task {
         name: &str,
         query: &str,
         execution: ExecutionContext,
-        config: &SubagentConfig,
+        _config: &SubagentConfig,
+        timeout: Duration,
     ) -> Result<String, ToolError> {
         // Get the agent from registry
         let agent = self.registry.get(name).ok_or_else(|| {
@@ -408,11 +473,13 @@ impl Task {
             ))
         })?;
 
-        // Create context for the subagent with execution tracking
-        let context = AgentContext::from_arc(Arc::clone(&self.llm)).with_execution(execution);
+        // Create context for the subagent with execution tracking and orchestration
+        let mut context = AgentContext::from_arc(Arc::clone(&self.llm)).with_execution(execution);
+        if let Some(ref orch) = self.orchestration {
+            context = context.with_orchestration(Arc::clone(orch));
+        }
 
         // Execute the agent with timeout enforcement
-        let timeout = config.timeout;
         tokio::time::timeout(
             timeout,
             self.collect_final_result(agent.execute(query, context), name),
@@ -429,7 +496,8 @@ impl Task {
         def: &PromptAgentDef,
         query: &str,
         execution: ExecutionContext,
-        config: &SubagentConfig,
+        _config: &SubagentConfig,
+        timeout: Duration,
     ) -> Result<String, ToolError> {
         // Validate the definition
         def.validate().map_err(|e| {
@@ -442,11 +510,13 @@ impl Task {
         let agent = gemicro_simple_qa::SimpleQaAgent::with_system_prompt(&def.system_prompt)
             .map_err(|e| ToolError::ExecutionFailed(format!("Failed to create agent: {}", e)))?;
 
-        // Create context for the subagent with execution tracking
-        let context = AgentContext::from_arc(Arc::clone(&self.llm)).with_execution(execution);
+        // Create context for the subagent with execution tracking and orchestration
+        let mut context = AgentContext::from_arc(Arc::clone(&self.llm)).with_execution(execution);
+        if let Some(ref orch) = self.orchestration {
+            context = context.with_orchestration(Arc::clone(orch));
+        }
 
         // Execute the agent with timeout enforcement
-        let timeout = config.timeout;
         tokio::time::timeout(
             timeout,
             self.collect_final_result(agent.execute(query, context), &def.description),

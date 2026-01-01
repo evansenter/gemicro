@@ -53,10 +53,16 @@
 
 mod ephemeral;
 mod execution;
+mod orchestration;
 mod subagent;
 
 pub use ephemeral::{AgentSpec, PromptAgentDef};
 pub use execution::{ExecutionContext, ExecutionId};
+pub use orchestration::{
+    OrchestrationConfig, OrchestrationError, OrchestrationGuard, OrchestrationState,
+    DEFAULT_GLOBAL_MAX_CONCURRENT, DEFAULT_MAX_DEPTH, DEFAULT_PER_PARENT_MAX_CONCURRENT,
+    DEFAULT_TOTAL_TIMEOUT_SECS,
+};
 pub use subagent::{SubagentConfig, DEFAULT_SUBAGENT_TIMEOUT_SECS};
 
 use crate::error::AgentError;
@@ -196,6 +202,15 @@ pub struct AgentContext {
     /// Used for observability, debugging, and depth limiting. Defaults to
     /// a root context; use [`Self::child_context()`] when spawning subagents.
     pub execution: ExecutionContext,
+
+    /// Optional orchestration state for concurrency control.
+    ///
+    /// When set, subagent spawning respects global/per-parent concurrency limits,
+    /// depth limits, and total timeout budgets. Shared across the entire
+    /// execution tree via `Arc`.
+    ///
+    /// If not set, orchestration limits are not enforced (default behavior).
+    pub orchestration: Option<Arc<OrchestrationState>>,
 }
 
 impl AgentContext {
@@ -211,6 +226,7 @@ impl AgentContext {
             tools: None,
             confirmation_handler: None,
             execution: ExecutionContext::root(),
+            orchestration: None,
         }
     }
 
@@ -224,6 +240,7 @@ impl AgentContext {
             tools: None,
             confirmation_handler: None,
             execution: ExecutionContext::root(),
+            orchestration: None,
         }
     }
 
@@ -237,6 +254,7 @@ impl AgentContext {
             tools: None,
             confirmation_handler: None,
             execution: ExecutionContext::root(),
+            orchestration: None,
         }
     }
 
@@ -276,12 +294,37 @@ impl AgentContext {
         self
     }
 
+    /// Add orchestration state for concurrency control.
+    ///
+    /// When set, subagent spawning respects global/per-parent concurrency limits,
+    /// depth limits, and total timeout budgets. The state is shared across
+    /// the entire execution tree.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use gemicro_core::{AgentContext, OrchestrationConfig, OrchestrationState};
+    /// use std::sync::Arc;
+    ///
+    /// let config = OrchestrationConfig::default()
+    ///     .with_global_max_concurrent(5)
+    ///     .with_max_depth(2);
+    ///
+    /// let orchestration = Arc::new(OrchestrationState::new(config));
+    /// let context = AgentContext::new(llm).with_orchestration(orchestration);
+    /// ```
+    pub fn with_orchestration(mut self, orchestration: Arc<OrchestrationState>) -> Self {
+        self.orchestration = Some(orchestration);
+        self
+    }
+
     /// Create a child context for spawning a subagent.
     ///
     /// The child context:
     /// - Shares the same LLM client
     /// - Inherits the cancellation token (so cancelling parent cancels child)
     /// - Inherits tools and confirmation handler
+    /// - Inherits orchestration state (for shared concurrency limits)
     /// - Creates a new execution context with this agent as parent
     ///
     /// # Example
@@ -300,6 +343,7 @@ impl AgentContext {
             tools: self.tools.clone(),
             confirmation_handler: self.confirmation_handler.clone(),
             execution: self.execution.child(agent_name),
+            orchestration: self.orchestration.clone(),
         }
     }
 
