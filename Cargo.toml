@@ -18,6 +18,7 @@ members = [
     "tools/gemicro-file-write",
     "tools/gemicro-file-edit",
     "tools/gemicro-bash",
+    "tools/gemicro-event-bus",
     "hooks/gemicro-audit-log",
     "hooks/gemicro-file-security",
     "hooks/gemicro-input-sanitizer",
