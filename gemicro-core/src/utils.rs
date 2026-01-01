@@ -7,9 +7,8 @@ use rust_genai::InteractionResponse;
 
 /// Extract total token count from an LLM response.
 ///
-/// Safely converts from `i32` to `u32`, returning `None` on negative values
-/// or if usage metadata is unavailable. This centralizes the token extraction
-/// pattern used across all agents.
+/// This is a convenience wrapper around [`InteractionResponse::total_tokens()`]
+/// that converts `i32` to `u32`, returning `None` on negative values.
 ///
 /// # Example
 ///
@@ -28,11 +27,8 @@ use rust_genai::InteractionResponse;
 /// # }
 /// ```
 pub fn extract_total_tokens(response: &InteractionResponse) -> Option<u32> {
-    response
-        .usage
-        .as_ref()
-        .and_then(|u| u.total_tokens)
-        .and_then(|t| u32::try_from(t).ok())
+    // Delegate to rust-genai's native method, converting i32 -> u32
+    response.total_tokens().and_then(|t| u32::try_from(t).ok())
 }
 
 /// Truncate text to a maximum character count, adding ellipsis if needed.
