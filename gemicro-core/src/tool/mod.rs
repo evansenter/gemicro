@@ -459,6 +459,10 @@ pub trait Tool: Send + Sync + fmt::Debug {
 ///
 /// // Use all except these
 /// let except = ToolSet::Except(vec!["bash".into()]);
+///
+/// // Inherit from parent (for subagents)
+/// let inherit = ToolSet::Inherit;
+/// let inherit_except = ToolSet::InheritExcept(vec!["bash".into()]);
 /// ```
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum ToolSet {
@@ -474,16 +478,116 @@ pub enum ToolSet {
 
     /// Use all tools except the specified ones.
     Except(Vec<String>),
+
+    /// Inherit parent's tool set (for subagents).
+    ///
+    /// When resolved against a parent ToolSet, becomes identical to the parent.
+    /// Use [`Self::resolve()`] to get a concrete ToolSet.
+    Inherit,
+
+    /// Inherit parent's tools except the specified ones.
+    ///
+    /// When resolved against a parent ToolSet, filters out the specified tools.
+    /// Use [`Self::resolve()`] to get a concrete ToolSet.
+    InheritExcept(Vec<String>),
 }
 
 impl ToolSet {
     /// Check if a tool name matches this filter.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called on `Inherit` or `InheritExcept` - these must be
+    /// resolved first using [`Self::resolve()`].
     pub fn matches(&self, tool_name: &str) -> bool {
         match self {
             ToolSet::All => true,
             ToolSet::None => false,
             ToolSet::Specific(names) => names.iter().any(|n| n == tool_name),
             ToolSet::Except(names) => !names.iter().any(|n| n == tool_name),
+            ToolSet::Inherit | ToolSet::InheritExcept(_) => {
+                panic!("Cannot call matches() on {:?} - call resolve() first", self)
+            }
+        }
+    }
+
+    /// Check if this ToolSet requires resolution against a parent.
+    pub fn needs_resolution(&self) -> bool {
+        matches!(self, ToolSet::Inherit | ToolSet::InheritExcept(_))
+    }
+
+    /// Resolve an inheriting ToolSet against a parent.
+    ///
+    /// - `Inherit` → clones the parent
+    /// - `InheritExcept(names)` → parent with additional exclusions
+    /// - Other variants → returns self unchanged
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use gemicro_core::ToolSet;
+    ///
+    /// let parent = ToolSet::Except(vec!["file_write".into()]);
+    ///
+    /// // Inherit becomes the parent
+    /// let child = ToolSet::Inherit.resolve(&parent);
+    /// assert_eq!(child, parent);
+    ///
+    /// // InheritExcept adds more exclusions
+    /// let child = ToolSet::InheritExcept(vec!["bash".into()]).resolve(&parent);
+    /// assert!(!child.matches("file_write")); // From parent
+    /// assert!(!child.matches("bash"));       // From child
+    /// assert!(child.matches("file_read"));   // Allowed
+    /// ```
+    pub fn resolve(&self, parent: &ToolSet) -> ToolSet {
+        match self {
+            ToolSet::Inherit => parent.clone(),
+            ToolSet::InheritExcept(additional_exclusions) => {
+                match parent {
+                    // Parent allows all: just exclude our list
+                    ToolSet::All => ToolSet::Except(additional_exclusions.clone()),
+
+                    // Parent allows none: stay as none
+                    ToolSet::None => ToolSet::None,
+
+                    // Parent has specific list: remove our exclusions from it
+                    ToolSet::Specific(parent_names) => {
+                        let filtered: Vec<String> = parent_names
+                            .iter()
+                            .filter(|name| !additional_exclusions.contains(name))
+                            .cloned()
+                            .collect();
+                        if filtered.is_empty() {
+                            ToolSet::None
+                        } else {
+                            ToolSet::Specific(filtered)
+                        }
+                    }
+
+                    // Parent has exclusions: combine exclusions
+                    ToolSet::Except(parent_exclusions) => {
+                        let mut combined = parent_exclusions.clone();
+                        for name in additional_exclusions {
+                            if !combined.contains(name) {
+                                combined.push(name.clone());
+                            }
+                        }
+                        ToolSet::Except(combined)
+                    }
+
+                    // Parent is also inheriting - resolve parent first
+                    // This shouldn't happen in practice (infinite loop prevention)
+                    ToolSet::Inherit | ToolSet::InheritExcept(_) => {
+                        log::warn!(
+                            "Parent ToolSet is {:?}, cannot resolve InheritExcept",
+                            parent
+                        );
+                        ToolSet::None // Fail safe
+                    }
+                }
+            }
+            // Already resolved variants return themselves
+            other => other.clone(),
         }
     }
 }
@@ -602,5 +706,137 @@ mod tests {
     fn test_auto_deny_debug() {
         let handler = AutoDeny;
         assert!(format!("{:?}", handler).contains("AutoDeny"));
+    }
+
+    // ToolSet inheritance tests
+
+    #[test]
+    fn test_toolset_needs_resolution() {
+        assert!(!ToolSet::All.needs_resolution());
+        assert!(!ToolSet::None.needs_resolution());
+        assert!(!ToolSet::Specific(vec!["a".into()]).needs_resolution());
+        assert!(!ToolSet::Except(vec!["a".into()]).needs_resolution());
+        assert!(ToolSet::Inherit.needs_resolution());
+        assert!(ToolSet::InheritExcept(vec!["a".into()]).needs_resolution());
+    }
+
+    #[test]
+    fn test_toolset_resolve_inherit_from_all() {
+        let child = ToolSet::Inherit;
+        let parent = ToolSet::All;
+        let resolved = child.resolve(&parent);
+        assert_eq!(resolved, ToolSet::All);
+    }
+
+    #[test]
+    fn test_toolset_resolve_inherit_from_none() {
+        let child = ToolSet::Inherit;
+        let parent = ToolSet::None;
+        let resolved = child.resolve(&parent);
+        assert_eq!(resolved, ToolSet::None);
+    }
+
+    #[test]
+    fn test_toolset_resolve_inherit_from_specific() {
+        let child = ToolSet::Inherit;
+        let parent = ToolSet::Specific(vec!["a".into(), "b".into()]);
+        let resolved = child.resolve(&parent);
+        assert_eq!(resolved, ToolSet::Specific(vec!["a".into(), "b".into()]));
+    }
+
+    #[test]
+    fn test_toolset_resolve_inherit_from_except() {
+        let child = ToolSet::Inherit;
+        let parent = ToolSet::Except(vec!["bash".into()]);
+        let resolved = child.resolve(&parent);
+        assert_eq!(resolved, ToolSet::Except(vec!["bash".into()]));
+    }
+
+    #[test]
+    fn test_toolset_resolve_inherit_except_from_all() {
+        let child = ToolSet::InheritExcept(vec!["bash".into()]);
+        let parent = ToolSet::All;
+        let resolved = child.resolve(&parent);
+        assert_eq!(resolved, ToolSet::Except(vec!["bash".into()]));
+    }
+
+    #[test]
+    fn test_toolset_resolve_inherit_except_from_none() {
+        // Excluding from nothing = nothing
+        let child = ToolSet::InheritExcept(vec!["bash".into()]);
+        let parent = ToolSet::None;
+        let resolved = child.resolve(&parent);
+        assert_eq!(resolved, ToolSet::None);
+    }
+
+    #[test]
+    fn test_toolset_resolve_inherit_except_from_specific() {
+        // Parent: [a, b, c], Child excludes [b] -> [a, c]
+        let child = ToolSet::InheritExcept(vec!["b".into()]);
+        let parent = ToolSet::Specific(vec!["a".into(), "b".into(), "c".into()]);
+        let resolved = child.resolve(&parent);
+        if let ToolSet::Specific(tools) = resolved {
+            assert_eq!(tools.len(), 2);
+            assert!(tools.contains(&"a".to_string()));
+            assert!(tools.contains(&"c".to_string()));
+            assert!(!tools.contains(&"b".to_string()));
+        } else {
+            panic!("Expected ToolSet::Specific");
+        }
+    }
+
+    #[test]
+    fn test_toolset_resolve_inherit_except_from_except() {
+        // Parent excludes [a], Child excludes [b] -> excludes [a, b]
+        let child = ToolSet::InheritExcept(vec!["b".into()]);
+        let parent = ToolSet::Except(vec!["a".into()]);
+        let resolved = child.resolve(&parent);
+        if let ToolSet::Except(tools) = resolved {
+            assert_eq!(tools.len(), 2);
+            assert!(tools.contains(&"a".to_string()));
+            assert!(tools.contains(&"b".to_string()));
+        } else {
+            panic!("Expected ToolSet::Except");
+        }
+    }
+
+    #[test]
+    fn test_toolset_resolve_already_resolved() {
+        // Non-inherit variants return themselves
+        let parent = ToolSet::All;
+        assert_eq!(ToolSet::All.resolve(&parent), ToolSet::All);
+        assert_eq!(ToolSet::None.resolve(&parent), ToolSet::None);
+        assert_eq!(
+            ToolSet::Specific(vec!["a".into()]).resolve(&parent),
+            ToolSet::Specific(vec!["a".into()])
+        );
+        assert_eq!(
+            ToolSet::Except(vec!["a".into()]).resolve(&parent),
+            ToolSet::Except(vec!["a".into()])
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "call resolve() first")]
+    fn test_toolset_matches_panics_on_inherit() {
+        let set = ToolSet::Inherit;
+        let _ = set.matches("anything");
+    }
+
+    #[test]
+    #[should_panic(expected = "call resolve() first")]
+    fn test_toolset_matches_panics_on_inherit_except() {
+        let set = ToolSet::InheritExcept(vec!["bash".into()]);
+        let _ = set.matches("anything");
+    }
+
+    #[test]
+    fn test_toolset_resolved_inherit_can_match() {
+        let child = ToolSet::Inherit;
+        let parent = ToolSet::Specific(vec!["a".into(), "b".into()]);
+        let resolved = child.resolve(&parent);
+        assert!(resolved.matches("a"));
+        assert!(resolved.matches("b"));
+        assert!(!resolved.matches("c"));
     }
 }

@@ -195,6 +195,62 @@ impl SimpleQaAgent {
         config.validate()?;
         Ok(Self { config })
     }
+
+    /// Create a SimpleQA agent with a custom system prompt.
+    ///
+    /// This is a convenience constructor for creating ephemeral prompt-based agents,
+    /// typically used by the Task tool when executing [`PromptAgentDef`].
+    ///
+    /// Uses default configuration with the specified system prompt.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AgentError::InvalidConfig` if the system prompt is empty.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use gemicro_simple_qa::SimpleQaAgent;
+    ///
+    /// let agent = SimpleQaAgent::with_system_prompt(
+    ///     "You are a Python security auditor. Review code for vulnerabilities."
+    /// ).unwrap();
+    /// ```
+    ///
+    /// [`PromptAgentDef`]: gemicro_core::agent::PromptAgentDef
+    pub fn with_system_prompt(system_prompt: impl Into<String>) -> Result<Self, AgentError> {
+        let config = SimpleQaConfig::default().with_system_prompt(system_prompt);
+        Self::new(config)
+    }
+
+    /// Create a SimpleQA agent with a custom system prompt and timeout.
+    ///
+    /// For creating ephemeral agents with custom timeout constraints.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AgentError::InvalidConfig` if the system prompt is empty or timeout is zero.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use gemicro_simple_qa::SimpleQaAgent;
+    /// use std::time::Duration;
+    ///
+    /// let agent = SimpleQaAgent::with_system_prompt_and_timeout(
+    ///     "You are a code reviewer.",
+    ///     Duration::from_secs(60),
+    /// ).unwrap();
+    /// ```
+    pub fn with_system_prompt_and_timeout(
+        system_prompt: impl Into<String>,
+        timeout: Duration,
+    ) -> Result<Self, AgentError> {
+        let config = SimpleQaConfig::default()
+            .with_system_prompt(system_prompt)
+            .with_timeout(timeout);
+        Self::new(config)
+    }
 }
 
 impl Agent for SimpleQaAgent {
@@ -340,5 +396,33 @@ mod tests {
     #[test]
     fn test_event_constants_are_unique() {
         assert_ne!(EVENT_SIMPLE_QA_STARTED, EVENT_SIMPLE_QA_RESULT);
+    }
+
+    #[test]
+    fn test_with_system_prompt_constructor() {
+        let agent = SimpleQaAgent::with_system_prompt("You are a helpful bot.").unwrap();
+        assert_eq!(agent.name(), "simple_qa");
+    }
+
+    #[test]
+    fn test_with_system_prompt_rejects_empty() {
+        let result = SimpleQaAgent::with_system_prompt("   ");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_with_system_prompt_and_timeout_constructor() {
+        let agent = SimpleQaAgent::with_system_prompt_and_timeout(
+            "You are a code reviewer.",
+            Duration::from_secs(60),
+        )
+        .unwrap();
+        assert_eq!(agent.name(), "simple_qa");
+    }
+
+    #[test]
+    fn test_with_system_prompt_and_timeout_rejects_zero() {
+        let result = SimpleQaAgent::with_system_prompt_and_timeout("Valid prompt", Duration::ZERO);
+        assert!(result.is_err());
     }
 }
