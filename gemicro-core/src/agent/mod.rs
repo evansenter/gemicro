@@ -160,7 +160,7 @@ pub trait Agent: Send + Sync {
 /// When spawning subagents, use [`Self::child_context()`] to create a derived context
 /// that tracks parent-child relationships:
 ///
-/// ```ignore
+/// ```text
 /// let child_ctx = context.child_context("simple_qa");
 /// let stream = subagent.execute(query, child_ctx);
 /// ```
@@ -286,7 +286,7 @@ impl AgentContext {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```text
     /// fn spawn_subagent(&self, agent: &dyn Agent, query: &str, context: &AgentContext) {
     ///     let child_ctx = context.child_context(agent.name());
     ///     let stream = agent.execute(query, child_ctx);
