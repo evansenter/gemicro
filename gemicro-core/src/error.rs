@@ -68,7 +68,7 @@ pub enum AgentError {
 pub enum LlmError {
     /// Error from the underlying rust-genai library
     #[error("GenAI error: {0}")]
-    GenAi(#[from] rust_genai::GenaiError),
+    GenAi(rust_genai::GenaiError),
 
     /// Request timed out
     #[error("Request timed out after {0}ms")]
@@ -97,6 +97,16 @@ pub enum LlmError {
     /// Other LLM error
     #[error("{0}")]
     Other(String),
+}
+
+impl From<rust_genai::GenaiError> for LlmError {
+    fn from(error: rust_genai::GenaiError) -> Self {
+        // Map GenaiError::Timeout to LlmError::Timeout for consistent API
+        if let rust_genai::GenaiError::Timeout(duration) = &error {
+            return LlmError::Timeout(duration.as_millis() as u64);
+        }
+        LlmError::GenAi(error)
+    }
 }
 
 #[cfg(test)]
@@ -156,5 +166,33 @@ mod tests {
 
         let gemicro_err: GemicroError = agent_err.into();
         assert!(matches!(gemicro_err, GemicroError::Agent(_)));
+    }
+
+    #[test]
+    fn test_genai_timeout_maps_to_llm_timeout() {
+        use std::time::Duration;
+
+        // GenaiError::Timeout should be mapped to LlmError::Timeout, not GenAi
+        let genai_err = rust_genai::GenaiError::Timeout(Duration::from_secs(5));
+        let llm_err: LlmError = genai_err.into();
+
+        assert!(
+            matches!(llm_err, LlmError::Timeout(ms) if ms == 5000),
+            "Expected LlmError::Timeout(5000), got {:?}",
+            llm_err
+        );
+    }
+
+    #[test]
+    fn test_genai_other_error_maps_to_genai() {
+        // Other GenaiError variants should map to LlmError::GenAi
+        let genai_err = rust_genai::GenaiError::Internal("test".to_string());
+        let llm_err: LlmError = genai_err.into();
+
+        assert!(
+            matches!(llm_err, LlmError::GenAi(_)),
+            "Expected LlmError::GenAi, got {:?}",
+            llm_err
+        );
     }
 }

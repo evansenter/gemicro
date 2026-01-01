@@ -357,11 +357,11 @@ impl LlmClient {
         let started_at = SystemTime::now();
         let start_instant = Instant::now();
 
-        // Execute with timeout
-        let timeout_duration = self.config.timeout;
-        let response = tokio::time::timeout(timeout_duration, interaction.create())
+        // Execute with timeout (rust-genai handles timeout natively)
+        let response = interaction
+            .with_timeout(self.config.timeout)
+            .create()
             .await
-            .map_err(|_| LlmError::Timeout(timeout_duration.as_millis() as u64))?
             .map_err(LlmError::from)?;
 
         // Validate response has content
