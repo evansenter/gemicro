@@ -302,7 +302,7 @@ impl AgentContext {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```text
     /// use gemicro_core::{AgentContext, OrchestrationConfig, OrchestrationState};
     /// use std::sync::Arc;
     ///
