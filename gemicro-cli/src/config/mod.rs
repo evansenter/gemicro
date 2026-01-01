@@ -9,6 +9,15 @@
 //! 1. `~/.gemicro/config.toml` - User-global defaults
 //! 2. `./gemicro.toml` - Project-local overrides
 //!
+//! # CLI Override Behavior
+//!
+//! When running interactively, CLI arguments (including their defaults) take
+//! precedence over file config. This means file config for `deep_research`
+//! settings is only used when no CLI arguments are passed for those settings.
+//!
+//! In practice, to use file config values, omit the corresponding CLI flags.
+//! Future versions may implement finer-grained CLI/file merging.
+//!
 //! # Example Config File
 //!
 //! ```toml
