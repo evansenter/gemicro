@@ -349,6 +349,9 @@ impl Tool for Task {
         }
 
         // Check if nesting is allowed
+        // Note: We check depth > 1 because allow_nested controls whether THIS subagent
+        // (at depth 1) can spawn further subagents (depth 2+). A root agent (depth 0)
+        // can always spawn its first level of subagents regardless of this setting.
         if !config.can_spawn_subagents() && child_context.depth > 1 {
             return Err(ToolError::ExecutionFailed(
                 "Subagent nesting is disabled by configuration".into(),
@@ -372,7 +375,9 @@ impl Tool for Task {
                 self.execute_prompt_agent(def, query, child_context, &config)
                     .await?
             }
-            // Forward compatibility: handle unknown AgentSpec variants
+            // Forward compatibility: handle unknown AgentSpec variants.
+            // AgentSpec is #[non_exhaustive], so new variants may be added.
+            #[allow(unreachable_patterns)]
             _ => {
                 return Err(ToolError::InvalidInput(format!(
                     "Unsupported agent specification type for agent '{}'",

@@ -53,6 +53,17 @@ use crate::ToolSet;
 ///     .with_tools(ToolSet::Specific(vec!["calculator".into()]));
 /// // model defaults to None (use default model)
 /// ```
+/// # Construction
+///
+/// Due to `#[non_exhaustive]`, struct literal syntax is not available.
+/// Use [`Self::new()`] with builder methods:
+///
+/// ```
+/// use gemicro_core::agent::PromptAgentDef;
+///
+/// let def = PromptAgentDef::new("Code reviewer")
+///     .with_system_prompt("You review code for quality issues.");
+/// ```
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub struct PromptAgentDef {
