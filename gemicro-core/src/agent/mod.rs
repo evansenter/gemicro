@@ -303,6 +303,7 @@ impl AgentContext {
     /// # Example
     ///
     /// ```text
+    /// // Note: Uses `text` because AgentContext::new() requires LlmClient setup
     /// use gemicro_core::{AgentContext, OrchestrationConfig, OrchestrationState};
     /// use std::sync::Arc;
     ///

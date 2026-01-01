@@ -385,11 +385,11 @@ impl Tool for Task {
             ));
         }
 
-        // Acquire orchestration permits if orchestration is configured
-        // We use the child's execution_id as the "parent" from the semaphore's perspective
-        // because we're tracking how many children THIS execution can spawn
+        // Acquire orchestration permits if orchestration is configured.
+        // We use the parent's execution_id to key the per-parent semaphore, which controls
+        // how many siblings can run concurrently under the same parent. Falls back to
+        // child's own ID at root level (no parent).
         let _guard: Option<OrchestrationGuard> = if let Some(ref orch) = self.orchestration {
-            // Use parent_id for per-parent semaphore (how many siblings can run)
             let parent_for_permit = child_context
                 .parent_id
                 .as_ref()
