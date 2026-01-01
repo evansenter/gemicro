@@ -70,10 +70,61 @@ Contains **only** cross-agent resources:
 pub struct AgentContext {
     pub llm: Arc<LlmClient>,              // Shared LLM client
     pub cancellation_token: CancellationToken,  // For cooperative shutdown
+    pub tools: Option<Arc<ToolRegistry>>,       // Shared tool registry
+    pub confirmation_handler: Option<Arc<dyn ConfirmationHandler>>,  // Tool confirmation
+    pub execution: ExecutionContext,      // Execution tracking for subagents
 }
 ```
 
 **Important:** Do NOT add agent-specific config here. Config belongs in the agent constructor.
+
+### ExecutionContext (Subagent Tracking)
+
+Location: `gemicro-core/src/agent/execution.rs`
+
+Tracks parent-child relationships for observability and debugging:
+
+```rust
+#[derive(Clone, Debug)]
+pub struct ExecutionContext {
+    /// This execution's unique ID
+    pub execution_id: ExecutionId,
+
+    /// Parent execution ID (None for root)
+    pub parent_id: Option<ExecutionId>,
+
+    /// Depth in execution tree (0 for root)
+    pub depth: usize,
+
+    /// Path from root (for logging): ["deep_research", "simple_qa"]
+    pub path: Vec<String>,
+}
+
+impl ExecutionContext {
+    /// Create a root execution context (no parent)
+    pub fn root() -> Self;
+
+    /// Create a child context for spawning subagents
+    pub fn child(&self, agent_name: &str) -> Self;
+
+    /// Format path as string for logging: "deep_research → simple_qa"
+    pub fn path_string(&self) -> String;
+}
+```
+
+**Usage in subagent spawning:**
+
+```rust
+// When spawning a subagent via Task tool:
+let parent_context = context.execution.clone();
+let child_context = parent_context.child("simple_qa");
+
+// child_context now has:
+// - New unique execution_id
+// - parent_id = parent_context.execution_id
+// - depth = parent_context.depth + 1
+// - path = [...parent_path, "simple_qa"]
+```
 
 ### AgentUpdate
 
@@ -948,11 +999,242 @@ impl Agent for ToolAgent {
 
 See `agents/gemicro-tool-agent/` for a complete implementation.
 
+## Subagent Orchestration
+
+Agents can spawn subagents via the Task tool. This section covers the types that enable subagent orchestration.
+
+### SubagentConfig
+
+Location: `gemicro-core/src/agent/subagent.rs`
+
+Controls what resources subagents can access:
+
+```rust
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub struct SubagentConfig {
+    /// Which tools the subagent can access
+    pub tools: ToolSet,
+
+    /// Whether subagent inherits parent's hooks
+    pub inherit_hooks: bool,
+
+    /// Whether subagent can spawn its own subagents
+    pub allow_nested: bool,
+
+    /// Timeout for subagent execution
+    pub timeout: Duration,
+}
+```
+
+**Presets:**
+
+```rust
+// Inherit everything from parent (default)
+SubagentConfig::default()
+
+// Minimal permissions
+SubagentConfig::restrictive()
+    // tools: ToolSet::None
+    // inherit_hooks: false
+    // allow_nested: false
+
+// Maximum permissions
+SubagentConfig::permissive()
+    // tools: ToolSet::All
+    // inherit_hooks: true
+    // allow_nested: true
+```
+
+**Builder pattern:**
+
+```rust
+let config = SubagentConfig::default()
+    .with_tools(ToolSet::Specific(vec!["file_read".into(), "grep".into()]))
+    .with_timeout(Duration::from_secs(30))
+    .without_nested_subagents();
+```
+
+### ToolSet Inheritance
+
+Location: `gemicro-core/src/tool/mod.rs`
+
+When spawning subagents, tools can inherit from the parent:
+
+```rust
+pub enum ToolSet {
+    All,                        // All registered tools
+    None,                       // No tools
+    Specific(Vec<String>),      // Only named tools
+    Except(Vec<String>),        // All except named tools
+    Inherit,                    // Inherit parent's tool set
+    InheritExcept(Vec<String>), // Inherit parent's tools, minus these
+}
+```
+
+**Resolution:**
+
+```rust
+// Parent has: ToolSet::Except(["bash"])
+let parent_tools = ToolSet::Except(vec!["bash".into()]);
+
+// Child wants to inherit but also exclude "file_write"
+let child_tools = ToolSet::InheritExcept(vec!["file_write".into()]);
+
+// Resolve to concrete set
+let resolved = child_tools.resolve(&parent_tools);
+// Result: ToolSet::Except(["bash", "file_write"])
+```
+
+**Important:** `Inherit` and `InheritExcept` must be resolved before use:
+
+```rust
+let tools = ToolSet::Inherit;
+assert!(tools.needs_resolution());  // true
+
+// Panics if used without resolution:
+// tools.matches("grep")  // PANIC!
+
+// Must resolve first:
+let resolved = tools.resolve(&parent_tools);
+resolved.matches("grep")  // OK
+```
+
+### Ephemeral Agents (PromptAgentDef)
+
+Location: `gemicro-core/src/agent/ephemeral.rs`
+
+Define agents inline without pre-registration:
+
+```rust
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub struct PromptAgentDef {
+    /// Human-readable description
+    pub description: String,
+
+    /// System prompt for the agent
+    pub system_prompt: String,
+
+    /// Which tools this agent can use
+    pub tools: ToolSet,
+
+    /// Optional model override (e.g., use cheaper model)
+    pub model: Option<String>,
+}
+```
+
+**Builder pattern:**
+
+```rust
+use gemicro_core::agent::{PromptAgentDef, AgentSpec};
+
+let def = PromptAgentDef::new("Python security reviewer")
+    .with_system_prompt("You are an expert Python security auditor...")
+    .with_tools(ToolSet::Specific(vec!["file_read".into(), "grep".into()]))
+    .with_model("gemini-1.5-flash");
+```
+
+### AgentSpec
+
+Unified type for referencing agents (named or ephemeral):
+
+```rust
+pub enum AgentSpec {
+    /// Reference a pre-registered agent
+    Named(String),
+
+    /// Define a prompt-based agent inline
+    Prompt(PromptAgentDef),
+}
+```
+
+**Usage:**
+
+```rust
+// Reference a registered agent
+let spec = AgentSpec::Named("deep_research".into());
+
+// Define inline using builder
+let spec = AgentSpec::Prompt(
+    PromptAgentDef::new("Code reviewer")
+        .with_system_prompt("Review code for quality...")
+);
+
+// Convenience method
+let def = AgentSpec::prompt("Code reviewer")
+    .with_system_prompt("Review code for quality...");
+```
+
+### Task Tool Integration
+
+The Task tool (in `tools/gemicro-task/`) uses these types to spawn subagents:
+
+```rust
+// JSON input from LLM:
+{
+    "agent": "simple_qa",  // Named agent reference
+    "query": "What is Rust?",
+    "config": {
+        "timeout_secs": 30,
+        "allow_nested": false
+    }
+}
+
+// Or with ephemeral agent:
+{
+    "agent": {
+        "type": "prompt",
+        "description": "Python security reviewer",
+        "system_prompt": "You are an expert Python security auditor...",
+        "tools": ["file_read", "grep"],
+        "model": "gemini-1.5-flash"
+    },
+    "query": "Review src/auth.py for security issues"
+}
+```
+
+**Depth limiting:**
+
+The Task tool enforces a maximum subagent depth to prevent infinite recursion:
+
+```rust
+let task = Task::new(registry)
+    .with_max_depth(3)  // Default is 3
+    .with_parent_context(parent_execution);
+```
+
+### Convenience Constructors
+
+`SimpleQaAgent` provides constructors for use as an ephemeral agent backend:
+
+```rust
+// Create with custom system prompt (uses default timeout)
+let agent = SimpleQaAgent::with_system_prompt(
+    "You are a Python security auditor. Review code for vulnerabilities."
+)?;
+
+// Create with custom prompt and timeout
+let agent = SimpleQaAgent::with_system_prompt_and_timeout(
+    "You are a code reviewer.",
+    Duration::from_secs(60),
+)?;
+```
+
+These are used by the Task tool when executing `PromptAgentDef`:
+
+```rust
+// Task tool internally does:
+let agent = SimpleQaAgent::with_system_prompt(&prompt_def.system_prompt)?;
+let stream = agent.execute(&query, child_context);
+```
+
 ## See Also
 
 - `agents/gemicro-simple-qa/src/lib.rs` - Full reference implementation
 - `agents/gemicro-deep-research/src/` - Complex multi-phase example
 - `agents/gemicro-tool-agent/src/` - Tool-using agent example
+- `tools/gemicro-task/src/lib.rs` - Task tool for spawning subagents
 - `agents/gemicro-simple-qa/tests/integration.rs` - Integration test examples
 - `agents/gemicro-simple-qa/examples/trajectory_recording.rs` - Trajectory recording example
 - `docs/TOOL_AUTHORING.md` - Creating new tools

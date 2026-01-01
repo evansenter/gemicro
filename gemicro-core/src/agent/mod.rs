@@ -12,6 +12,13 @@
 //! - **Minimal shared context**: [`AgentContext`] contains only cross-agent resources (LLM client)
 //! - **Streaming-first**: Real-time observability via async streams
 //!
+//! ## Subagent Orchestration
+//!
+//! For agents that spawn subagents:
+//! - [`ExecutionContext`]: Tracks parent-child relationships and execution depth
+//! - [`SubagentConfig`]: Controls resource isolation for subagents
+//! - [`PromptAgentDef`]: Defines ephemeral prompt-based agents inline
+//!
 //! ## Agent Implementations
 //!
 //! Agents are in separate crates for hermetic isolation:
@@ -43,6 +50,14 @@
 //!     }
 //! }
 //! ```
+
+mod ephemeral;
+mod execution;
+mod subagent;
+
+pub use ephemeral::{AgentSpec, PromptAgentDef};
+pub use execution::{ExecutionContext, ExecutionId};
+pub use subagent::{SubagentConfig, DEFAULT_SUBAGENT_TIMEOUT_SECS};
 
 use crate::error::AgentError;
 use crate::llm::LlmClient;
@@ -139,6 +154,16 @@ pub trait Agent: Send + Sync {
 /// Following [Evergreen spec](https://github.com/google-deepmind/evergreen-spec) philosophy,
 /// this struct intentionally contains only resources that ALL agents need.
 /// Do not add agent-specific config here.
+///
+/// # Subagent Orchestration
+///
+/// When spawning subagents, use [`child_context()`] to create a derived context
+/// that tracks parent-child relationships:
+///
+/// ```ignore
+/// let child_ctx = context.child_context("simple_qa");
+/// let stream = subagent.execute(query, child_ctx);
+/// ```
 #[derive(Clone)]
 pub struct AgentContext {
     /// Shared LLM client for making API calls.
@@ -165,6 +190,12 @@ pub struct AgentContext {
     ///
     /// If not set, tools requiring confirmation will be denied by default.
     pub confirmation_handler: Option<Arc<dyn ConfirmationHandler>>,
+
+    /// Execution context for tracking parent-child agent relationships.
+    ///
+    /// Used for observability, debugging, and depth limiting. Defaults to
+    /// a root context; use [`child_context()`] when spawning subagents.
+    pub execution: ExecutionContext,
 }
 
 impl AgentContext {
@@ -172,13 +203,14 @@ impl AgentContext {
     ///
     /// The client will be wrapped in an Arc for sharing across tasks.
     /// Uses a new cancellation token (never cancelled unless explicitly triggered).
-    /// No tools are registered by default.
+    /// No tools are registered by default. Creates a root execution context.
     pub fn new(llm: LlmClient) -> Self {
         Self {
             llm: Arc::new(llm),
             cancellation_token: CancellationToken::new(),
             tools: None,
             confirmation_handler: None,
+            execution: ExecutionContext::root(),
         }
     }
 
@@ -191,6 +223,7 @@ impl AgentContext {
             cancellation_token,
             tools: None,
             confirmation_handler: None,
+            execution: ExecutionContext::root(),
         }
     }
 
@@ -203,6 +236,7 @@ impl AgentContext {
             cancellation_token: CancellationToken::new(),
             tools: None,
             confirmation_handler: None,
+            execution: ExecutionContext::root(),
         }
     }
 
@@ -229,6 +263,44 @@ impl AgentContext {
     pub fn with_confirmation_handler(mut self, handler: Arc<dyn ConfirmationHandler>) -> Self {
         self.confirmation_handler = Some(handler);
         self
+    }
+
+    /// Set a specific execution context.
+    ///
+    /// Use this to create a context with a non-root execution context,
+    /// typically when manually constructing contexts for testing or
+    /// specialized use cases. For normal subagent spawning, use
+    /// [`child_context()`] instead.
+    pub fn with_execution(mut self, execution: ExecutionContext) -> Self {
+        self.execution = execution;
+        self
+    }
+
+    /// Create a child context for spawning a subagent.
+    ///
+    /// The child context:
+    /// - Shares the same LLM client
+    /// - Inherits the cancellation token (so cancelling parent cancels child)
+    /// - Inherits tools and confirmation handler
+    /// - Creates a new execution context with this agent as parent
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// fn spawn_subagent(&self, agent: &dyn Agent, query: &str, context: &AgentContext) {
+    ///     let child_ctx = context.child_context(agent.name());
+    ///     let stream = agent.execute(query, child_ctx);
+    ///     // Process stream...
+    /// }
+    /// ```
+    pub fn child_context(&self, agent_name: &str) -> Self {
+        Self {
+            llm: Arc::clone(&self.llm),
+            cancellation_token: self.cancellation_token.clone(),
+            tools: self.tools.clone(),
+            confirmation_handler: self.confirmation_handler.clone(),
+            execution: self.execution.child(agent_name),
+        }
     }
 
     /// Get a tool by name from the registry.

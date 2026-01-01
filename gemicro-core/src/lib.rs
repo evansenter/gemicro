@@ -59,7 +59,7 @@ pub mod utils;
 // Re-export public API - core infrastructure only
 pub use agent::{
     enforce_final_result_contract, remaining_time, timeout_error, with_timeout_and_cancellation,
-    Agent, AgentContext, AgentStream, EVENT_FINAL_RESULT,
+    Agent, AgentContext, AgentStream, ExecutionContext, ExecutionId, EVENT_FINAL_RESULT,
 };
 pub use config::{GemicroConfig, LlmConfig, MODEL};
 pub use error::{AgentError, GemicroError, LlmError};
