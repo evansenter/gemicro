@@ -1,4 +1,4 @@
-//! Metrics collection hook for gemicro tool execution.
+//! Metrics collection interceptor for gemicro tool execution.
 //!
 //! Tracks tool usage statistics in memory, providing observability
 //! into tool invocation patterns and success rates.
@@ -23,14 +23,15 @@
 //! # Example
 //!
 //! ```no_run
-//! use gemicro_core::tool::HookRegistry;
+//! use gemicro_core::interceptor::{InterceptorChain, ToolCall};
+//! use gemicro_core::tool::ToolResult;
 //! use gemicro_metrics::Metrics;
 //!
 //! let metrics = Metrics::new();
 //!
-//! // Clone to share with hook registry (shallow clone, shares data)
-//! let hooks = HookRegistry::new()
-//!     .with_hook(metrics.clone());
+//! // Clone to share with interceptor chain (shallow clone, shares data)
+//! let interceptors: InterceptorChain<ToolCall, ToolResult> = InterceptorChain::new()
+//!     .with(metrics.clone());
 //!
 //! // Later, extract metrics from the original:
 //! let snapshot = metrics.snapshot();
@@ -38,16 +39,16 @@
 //! ```
 
 use async_trait::async_trait;
-use gemicro_core::tool::{HookDecision, HookError, ToolHook, ToolResult};
-use serde_json::Value;
+use gemicro_core::interceptor::{InterceptDecision, InterceptError, Interceptor, ToolCall};
+use gemicro_core::tool::ToolResult;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
-/// Metrics collection hook for tracking tool usage.
+/// Metrics collection interceptor for tracking tool usage.
 ///
 /// Collects per-tool invocation counts and success/failure rates in memory.
-/// Thread-safe and can be shared across multiple hook registries.
+/// Thread-safe and can be shared across multiple interceptor chains.
 ///
 /// # Usage
 ///
@@ -56,7 +57,7 @@ use std::sync::{Arc, RwLock};
 ///
 /// let metrics = Metrics::new();
 ///
-/// // Clone and use in hook registry...
+/// // Clone and use in interceptor chain...
 /// // Later:
 /// let snapshot = metrics.snapshot();
 /// for (tool, stats) in snapshot.by_tool() {
@@ -255,22 +256,16 @@ impl MetricsSnapshot {
 }
 
 #[async_trait]
-impl ToolHook for Metrics {
-    async fn pre_tool_use(
+impl Interceptor<ToolCall, ToolResult> for Metrics {
+    async fn intercept(
         &self,
-        tool_name: &str,
-        _input: &Value,
-    ) -> Result<HookDecision, HookError> {
-        self.record_invocation(tool_name);
-        Ok(HookDecision::Allow)
+        input: &ToolCall,
+    ) -> Result<InterceptDecision<ToolCall>, InterceptError> {
+        self.record_invocation(&input.name);
+        Ok(InterceptDecision::Allow)
     }
 
-    async fn post_tool_use(
-        &self,
-        tool_name: &str,
-        _input: &Value,
-        output: &ToolResult,
-    ) -> Result<(), HookError> {
+    async fn observe(&self, input: &ToolCall, output: &ToolResult) -> Result<(), InterceptError> {
         // Consider it a failure if there's an "error" key with a non-null value
         // (null means "no error", matching the documented convention)
         let is_error = output
@@ -280,9 +275,9 @@ impl ToolHook for Metrics {
             .unwrap_or(false);
 
         if is_error {
-            self.record_failure(tool_name);
+            self.record_failure(&input.name);
         } else {
-            self.record_success(tool_name);
+            self.record_success(&input.name);
         }
 
         Ok(())
@@ -297,7 +292,8 @@ mod tests {
     #[tokio::test]
     async fn test_metrics_records_invocation() {
         let metrics = Metrics::new();
-        let _ = metrics.pre_tool_use("test", &json!({})).await.unwrap();
+        let input = ToolCall::new("test", json!({}));
+        let _ = metrics.intercept(&input).await.unwrap();
 
         let snapshot = metrics.snapshot();
         assert_eq!(snapshot.total_invocations(), 1);
@@ -306,13 +302,11 @@ mod tests {
     #[tokio::test]
     async fn test_metrics_records_success() {
         let metrics = Metrics::new();
+        let input = ToolCall::new("test", json!({}));
         let result = ToolResult::text("success");
 
-        metrics.pre_tool_use("test", &json!({})).await.unwrap();
-        metrics
-            .post_tool_use("test", &json!({}), &result)
-            .await
-            .unwrap();
+        metrics.intercept(&input).await.unwrap();
+        metrics.observe(&input, &result).await.unwrap();
 
         let snapshot = metrics.snapshot();
         assert_eq!(snapshot.total_successes(), 1);
@@ -322,14 +316,12 @@ mod tests {
     #[tokio::test]
     async fn test_metrics_records_failure() {
         let metrics = Metrics::new();
+        let input = ToolCall::new("test", json!({}));
         let result =
             ToolResult::text("error").with_metadata(json!({"error": "something went wrong"}));
 
-        metrics.pre_tool_use("test", &json!({})).await.unwrap();
-        metrics
-            .post_tool_use("test", &json!({}), &result)
-            .await
-            .unwrap();
+        metrics.intercept(&input).await.unwrap();
+        metrics.observe(&input, &result).await.unwrap();
 
         let snapshot = metrics.snapshot();
         assert_eq!(snapshot.total_successes(), 0);
@@ -341,24 +333,25 @@ mod tests {
         let metrics = Arc::new(Metrics::new());
 
         // Tool A: 2 calls, both success
-        metrics.pre_tool_use("tool_a", &json!({})).await.unwrap();
+        let input_a = ToolCall::new("tool_a", json!({}));
+        metrics.intercept(&input_a).await.unwrap();
         metrics
-            .post_tool_use("tool_a", &json!({}), &ToolResult::text("ok"))
+            .observe(&input_a, &ToolResult::text("ok"))
             .await
             .unwrap();
 
-        metrics.pre_tool_use("tool_a", &json!({})).await.unwrap();
+        metrics.intercept(&input_a).await.unwrap();
         metrics
-            .post_tool_use("tool_a", &json!({}), &ToolResult::text("ok"))
+            .observe(&input_a, &ToolResult::text("ok"))
             .await
             .unwrap();
 
         // Tool B: 1 call, failed
-        metrics.pre_tool_use("tool_b", &json!({})).await.unwrap();
+        let input_b = ToolCall::new("tool_b", json!({}));
+        metrics.intercept(&input_b).await.unwrap();
         metrics
-            .post_tool_use(
-                "tool_b",
-                &json!({}),
+            .observe(
+                &input_b,
                 &ToolResult::text("err").with_metadata(json!({"error": "fail"})),
             )
             .await
@@ -379,7 +372,8 @@ mod tests {
     #[tokio::test]
     async fn test_metrics_reset() {
         let metrics = Metrics::new();
-        metrics.pre_tool_use("test", &json!({})).await.unwrap();
+        let input = ToolCall::new("test", json!({}));
+        metrics.intercept(&input).await.unwrap();
 
         assert_eq!(metrics.snapshot().total_invocations(), 1);
 
@@ -426,10 +420,9 @@ mod tests {
             let m = Arc::clone(&metrics);
             handles.push(tokio::spawn(async move {
                 for _ in 0..100 {
-                    m.pre_tool_use("concurrent_tool", &json!({})).await.unwrap();
-                    m.post_tool_use("concurrent_tool", &json!({}), &ToolResult::text("ok"))
-                        .await
-                        .unwrap();
+                    let input = ToolCall::new("concurrent_tool", json!({}));
+                    m.intercept(&input).await.unwrap();
+                    m.observe(&input, &ToolResult::text("ok")).await.unwrap();
                 }
             }));
         }
@@ -465,10 +458,9 @@ mod tests {
         let m = Arc::clone(&metrics);
         let updater = tokio::spawn(async move {
             for _ in 0..1000 {
-                m.pre_tool_use("tool", &json!({})).await.unwrap();
-                m.post_tool_use("tool", &json!({}), &ToolResult::text("ok"))
-                    .await
-                    .unwrap();
+                let input = ToolCall::new("tool", json!({}));
+                m.intercept(&input).await.unwrap();
+                m.observe(&input, &ToolResult::text("ok")).await.unwrap();
             }
         });
 
@@ -494,24 +486,25 @@ mod tests {
         let metrics = Metrics::new();
 
         // Start recording
-        metrics.pre_tool_use("tool", &json!({})).await.unwrap();
+        let input = ToolCall::new("tool", json!({}));
+        metrics.intercept(&input).await.unwrap();
 
         // Reset while in "pre" state (before post)
         // New behavior: counters are zeroed but entry is preserved
         metrics.reset();
 
-        // Now call post for a tool that was reset
+        // Now call observe for a tool that was reset
         // Since reset() now preserves entries (just zeroes counters),
-        // the post_tool_use still increments the same entry
+        // the observe still increments the same entry
         metrics
-            .post_tool_use("tool", &json!({}), &ToolResult::text("ok"))
+            .observe(&input, &ToolResult::text("ok"))
             .await
             .unwrap();
 
         let snapshot = metrics.snapshot();
 
-        // After reset and post, tool should exist with 0 invocations, 1 success
-        // The entry was preserved by reset(), so post_tool_use incremented successes
+        // After reset and observe, tool should exist with 0 invocations, 1 success
+        // The entry was preserved by reset(), so observe incremented successes
         let stats = snapshot.get("tool").expect("Tool entry should exist");
         assert_eq!(stats.invocations, 0, "Invocations were zeroed by reset");
         assert_eq!(stats.successes, 1, "Success recorded after reset");
@@ -519,12 +512,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_incomplete_tool_execution() {
-        // Documents behavior when pre_tool_use is called but post_tool_use never is
-        // (e.g., tool execution crashes between hooks)
+        // Documents behavior when intercept is called but observe never is
+        // (e.g., tool execution crashes between interceptors)
         let metrics = Metrics::new();
 
-        // Call pre_tool_use but never call post_tool_use
-        metrics.pre_tool_use("tool", &json!({})).await.unwrap();
+        // Call intercept but never call observe
+        let input = ToolCall::new("tool", json!({}));
+        metrics.intercept(&input).await.unwrap();
 
         let snapshot = metrics.snapshot();
         let stats = snapshot.get("tool").unwrap();
@@ -535,7 +529,7 @@ mod tests {
         assert_eq!(
             stats.successes + stats.failures,
             0,
-            "Expected invariant gap when post_tool_use never called"
+            "Expected invariant gap when observe never called"
         );
     }
 
@@ -544,33 +538,33 @@ mod tests {
         let metrics = Metrics::new();
 
         // Test 1: null value in error field - should NOT count as failure
-        metrics.pre_tool_use("tool1", &json!({})).await.unwrap();
+        let input1 = ToolCall::new("tool1", json!({}));
+        metrics.intercept(&input1).await.unwrap();
         metrics
-            .post_tool_use(
-                "tool1",
-                &json!({}),
+            .observe(
+                &input1,
                 &ToolResult::text("ok").with_metadata(json!({"error": null})),
             )
             .await
             .unwrap();
 
         // Test 2: empty object in error field - should count as failure (key exists)
-        metrics.pre_tool_use("tool2", &json!({})).await.unwrap();
+        let input2 = ToolCall::new("tool2", json!({}));
+        metrics.intercept(&input2).await.unwrap();
         metrics
-            .post_tool_use(
-                "tool2",
-                &json!({}),
+            .observe(
+                &input2,
                 &ToolResult::text("ok").with_metadata(json!({"error": {}})),
             )
             .await
             .unwrap();
 
         // Test 3: false in error field - should count as failure (key exists)
-        metrics.pre_tool_use("tool3", &json!({})).await.unwrap();
+        let input3 = ToolCall::new("tool3", json!({}));
+        metrics.intercept(&input3).await.unwrap();
         metrics
-            .post_tool_use(
-                "tool3",
-                &json!({}),
+            .observe(
+                &input3,
                 &ToolResult::text("ok").with_metadata(json!({"error": false})),
             )
             .await
@@ -621,20 +615,21 @@ mod tests {
                 rt.block_on(async {
                     // Record successes
                     for _ in 0..num_success {
-                        metrics.pre_tool_use("tool", &json!({})).await.unwrap();
+                        let input = ToolCall::new("tool", json!({}));
+                        metrics.intercept(&input).await.unwrap();
                         metrics
-                            .post_tool_use("tool", &json!({}), &ToolResult::text("ok"))
+                            .observe(&input, &ToolResult::text("ok"))
                             .await
                             .unwrap();
                     }
 
                     // Record failures
                     for _ in 0..num_failure {
-                        metrics.pre_tool_use("tool", &json!({})).await.unwrap();
+                        let input = ToolCall::new("tool", json!({}));
+                        metrics.intercept(&input).await.unwrap();
                         metrics
-                            .post_tool_use(
-                                "tool",
-                                &json!({}),
+                            .observe(
+                                &input,
                                 &ToolResult::text("err").with_metadata(json!({"error": "fail"})),
                             )
                             .await
@@ -667,9 +662,10 @@ mod tests {
                 rt.block_on(async {
                     // Record some invocations
                     for _ in 0..num_invocations {
-                        metrics.pre_tool_use("tool", &json!({})).await.unwrap();
+                        let input = ToolCall::new("tool", json!({}));
+                        metrics.intercept(&input).await.unwrap();
                         metrics
-                            .post_tool_use("tool", &json!({}), &ToolResult::text("ok"))
+                            .observe(&input, &ToolResult::text("ok"))
                             .await
                             .unwrap();
                     }
@@ -699,18 +695,20 @@ mod tests {
                 rt.block_on(async {
                     // Record tool1 calls
                     for _ in 0..tool1_calls {
-                        metrics.pre_tool_use("tool1", &json!({})).await.unwrap();
+                        let input = ToolCall::new("tool1", json!({}));
+                        metrics.intercept(&input).await.unwrap();
                         metrics
-                            .post_tool_use("tool1", &json!({}), &ToolResult::text("ok"))
+                            .observe(&input, &ToolResult::text("ok"))
                             .await
                             .unwrap();
                     }
 
                     // Record tool2 calls
                     for _ in 0..tool2_calls {
-                        metrics.pre_tool_use("tool2", &json!({})).await.unwrap();
+                        let input = ToolCall::new("tool2", json!({}));
+                        metrics.intercept(&input).await.unwrap();
                         metrics
-                            .post_tool_use("tool2", &json!({}), &ToolResult::text("ok"))
+                            .observe(&input, &ToolResult::text("ok"))
                             .await
                             .unwrap();
                     }

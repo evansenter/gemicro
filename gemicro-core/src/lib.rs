@@ -47,6 +47,7 @@ pub mod agent;
 pub mod config;
 pub mod error;
 pub mod history;
+pub mod interceptor;
 pub mod llm;
 pub mod mock_llm;
 pub mod tool;

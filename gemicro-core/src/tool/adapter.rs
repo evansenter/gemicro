@@ -3,7 +3,7 @@
 //! This module provides [`ToolCallableAdapter`] which bridges the gap between
 //! our async [`Tool`] trait and rust-genai's async `CallableFunction` trait.
 //!
-//! # Architecture: Why Hooks Live Here
+//! # Architecture: Why Interceptors Live Here
 //!
 //! The adapter is the **critical interception point** for tool execution:
 //!
@@ -13,10 +13,10 @@
 //! CallableFunction::call()  ← ONLY INTERCEPTION POINT
 //!     ↓ implemented by
 //! ToolCallableAdapter
-//!     ├─ Pre-hooks (validation, security)
+//!     ├─ Pre-interceptors (validation, security)
 //!     ├─ Confirmation (user approval)
 //!     ├─ Tool::execute()
-//!     └─ Post-hooks (logging, metrics)
+//!     └─ Post-interceptors (logging, metrics)
 //! ```
 //!
 //! When using rust-genai's automatic function calling, the LLM invokes
@@ -24,17 +24,18 @@
 //! at the `Tool` or `ToolRegistry` level - those abstractions are bypassed.
 //!
 //! **Alternative designs considered:**
-//! - Hooks in `ToolRegistry::execute()` ❌ Bypassed by rust-genai
-//! - Hooks in `Tool::execute()` ❌ Couples all tools to hook logic
-//! - Hooks in `ToolCallableAdapter::call()` ✅ Single enforcement point
+//! - Interceptors in `ToolRegistry::execute()` ❌ Bypassed by rust-genai
+//! - Interceptors in `Tool::execute()` ❌ Couples all tools to interceptor logic
+//! - Interceptors in `ToolCallableAdapter::call()` ✅ Single enforcement point
 //!
 //! **Trade-off:**
-//! Direct calls to `tool.execute()` bypass hooks. This is acceptable because:
+//! Direct calls to `tool.execute()` bypass interceptors. This is acceptable because:
 //! - Direct calls are for testing or manual tool invocation
 //! - LLM function calling (the primary use case) goes through the adapter
-//! - Hooks are opt-in via `with_hooks()` builder method
+//! - Interceptors are opt-in via `with_interceptors()` builder method
 
-use super::{ConfirmationHandler, HookDecision, HookRegistry, Tool, ToolError};
+use super::{ConfirmationHandler, Tool, ToolError, ToolResult};
+use crate::interceptor::{InterceptDecision, InterceptorChain, ToolCall};
 use async_trait::async_trait;
 use rust_genai::{CallableFunction, FunctionDeclaration, FunctionError};
 use serde_json::Value;
@@ -80,7 +81,7 @@ use std::sync::Arc;
 pub struct ToolCallableAdapter {
     tool: Arc<dyn Tool>,
     confirmation_handler: Option<Arc<dyn ConfirmationHandler>>,
-    hooks: Option<Arc<HookRegistry>>,
+    interceptors: Option<Arc<InterceptorChain<ToolCall, ToolResult>>>,
 }
 
 impl ToolCallableAdapter {
@@ -93,7 +94,7 @@ impl ToolCallableAdapter {
         Self {
             tool,
             confirmation_handler: None,
-            hooks: None,
+            interceptors: None,
         }
     }
 
@@ -118,25 +119,32 @@ impl ToolCallableAdapter {
         self
     }
 
-    /// Set a hook registry for this adapter.
+    /// Set an interceptor chain for this adapter.
     ///
-    /// Hooks are called before and after tool execution for validation,
+    /// Interceptors are called before and after tool execution for validation,
     /// logging, and security controls.
     ///
     /// # Example
     ///
     /// ```no_run
-    /// use gemicro_core::tool::{ToolCallableAdapter, HookRegistry};
+    /// use gemicro_core::tool::ToolCallableAdapter;
+    /// use gemicro_core::interceptor::InterceptorChain;
     /// use std::sync::Arc;
     ///
     /// # fn example(tool: Arc<dyn gemicro_core::tool::Tool>) {
-    /// let hooks = HookRegistry::new();
+    /// use gemicro_core::interceptor::ToolCall;
+    /// use gemicro_core::tool::ToolResult;
+    ///
+    /// let interceptors: InterceptorChain<ToolCall, ToolResult> = InterceptorChain::new();
     /// let adapter = ToolCallableAdapter::new(tool)
-    ///     .with_hooks(Arc::new(hooks));
+    ///     .with_interceptors(Arc::new(interceptors));
     /// # }
     /// ```
-    pub fn with_hooks(mut self, hooks: Arc<HookRegistry>) -> Self {
-        self.hooks = Some(hooks);
+    pub fn with_interceptors(
+        mut self,
+        interceptors: Arc<InterceptorChain<ToolCall, ToolResult>>,
+    ) -> Self {
+        self.interceptors = Some(interceptors);
         self
     }
 
@@ -152,10 +160,7 @@ impl ToolCallableAdapter {
     ///
     /// Note: This method bypasses the confirmation check. For full confirmation
     /// support, use the [`CallableFunction::call`] method instead.
-    pub async fn execute(
-        &self,
-        input: serde_json::Value,
-    ) -> Result<super::ToolResult, super::ToolError> {
+    pub async fn execute(&self, input: serde_json::Value) -> Result<ToolResult, ToolError> {
         self.tool.execute(input).await
     }
 }
@@ -167,61 +172,66 @@ impl CallableFunction for ToolCallableAdapter {
     }
 
     async fn call(&self, args: Value) -> Result<Value, FunctionError> {
-        // 1. PRE-HOOKS: Validate and potentially modify input
-        let mut final_args = args.clone();
-        if let Some(hooks) = &self.hooks {
-            match hooks.pre_tool_use(self.tool.name(), &args).await {
-                Ok(HookDecision::Allow) => {
+        // Create ToolCall for interceptors
+        let mut tool_call = ToolCall::new(self.tool.name(), args);
+
+        // 1. PRE-INTERCEPTORS: Validate and potentially modify input
+        if let Some(interceptors) = &self.interceptors {
+            match interceptors.intercept(&tool_call).await {
+                Ok(InterceptDecision::Allow) => {
                     // Continue with original args
                 }
-                Ok(HookDecision::AllowWithModifiedInput(modified)) => {
-                    // Use modified args for execution
-                    final_args = modified;
+                Ok(InterceptDecision::Transform(modified)) => {
+                    // Use modified ToolCall for execution
+                    tool_call = modified;
                 }
-                Ok(HookDecision::RequestPermission { message }) => {
-                    // Hook requests permission - use confirmation handler
+                Ok(InterceptDecision::Confirm { message }) => {
+                    // Interceptor requests permission - use confirmation handler
                     match &self.confirmation_handler {
                         Some(handler) => {
-                            if !handler.confirm(self.tool.name(), &message, &args).await {
+                            if !handler
+                                .confirm(self.tool.name(), &message, &tool_call.arguments)
+                                .await
+                            {
                                 return Err(FunctionError::ExecutionError(Box::new(
                                     ToolError::ConfirmationDenied(message),
                                 )));
                             }
-                            // Permission granted - continue with original args
+                            // Permission granted - continue
                         }
                         None => {
                             // No handler = deny by default for safety
                             return Err(FunctionError::ExecutionError(Box::new(
                                 ToolError::ConfirmationDenied(format!(
-                                    "Hook requested permission but no confirmation handler configured: {}",
+                                    "Interceptor requested permission but no confirmation handler configured: {}",
                                     message
                                 )),
                             )));
                         }
                     }
                 }
-                Ok(HookDecision::Deny { reason }) => {
+                Ok(InterceptDecision::Deny { reason }) => {
                     return Err(FunctionError::ExecutionError(Box::new(
-                        ToolError::HookDenied(reason),
+                        ToolError::InterceptorDenied(reason),
                     )));
                 }
                 Err(e) => {
-                    // Hook failure = deny for safety
+                    // Interceptor failure = deny for safety
                     return Err(FunctionError::ExecutionError(Box::new(
-                        ToolError::HookFailed(format!("Pre-hook failed: {}", e)),
+                        ToolError::InterceptorFailed(format!("Pre-interceptor failed: {}", e)),
                     )));
                 }
             }
         }
 
         // 2. CONFIRMATION: Check if user approval is needed
-        if self.tool.requires_confirmation(&final_args) {
-            let message = self.tool.confirmation_message(&final_args);
+        if self.tool.requires_confirmation(&tool_call.arguments) {
+            let message = self.tool.confirmation_message(&tool_call.arguments);
 
             match &self.confirmation_handler {
                 Some(handler) => {
                     if !handler
-                        .confirm(self.tool.name(), &message, &final_args)
+                        .confirm(self.tool.name(), &message, &tool_call.arguments)
                         .await
                     {
                         return Err(FunctionError::ExecutionError(Box::new(
@@ -243,20 +253,14 @@ impl CallableFunction for ToolCallableAdapter {
         }
 
         // 3. EXECUTE: Run the tool
-        let result = match self.tool.execute(final_args.clone()).await {
+        let result = match self.tool.execute(tool_call.arguments.clone()).await {
             Ok(result) => result,
             Err(e) => return Err(FunctionError::ExecutionError(Box::new(e))),
         };
 
-        // 4. POST-HOOKS: Observability (errors logged, don't fail execution)
-        if let Some(hooks) = &self.hooks {
-            if let Err(e) = hooks
-                .post_tool_use(self.tool.name(), &final_args, &result)
-                .await
-            {
-                log::warn!("Post-hook failed for tool '{}': {}", self.tool.name(), e);
-                // Continue - post-hooks don't block results
-            }
+        // 4. POST-INTERCEPTORS: Observability (errors logged, don't fail execution)
+        if let Some(interceptors) = &self.interceptors {
+            interceptors.observe(&tool_call, &result).await;
         }
 
         // Return content directly - it's already a Value.

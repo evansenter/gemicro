@@ -1,18 +1,19 @@
-# Hook Authoring Guide
+# Interceptor Authoring Guide
 
-This guide walks you through implementing a new hook in Gemicro, following the [Evergreen spec](https://github.com/google-deepmind/evergreen-spec) philosophy of extensible design.
+This guide walks you through implementing a new interceptor in Gemicro, following the [Evergreen spec](https://github.com/google-deepmind/evergreen-spec) philosophy of extensible design.
 
 ## Overview
 
-### What is a Hook?
+### What is an Interceptor?
 
-A hook in Gemicro intercepts tool execution for cross-cutting concerns:
+An interceptor in Gemicro intercepts execution for cross-cutting concerns:
 - **Validation**: Block dangerous operations before execution
-- **Logging**: Record tool invocations for audit trails
+- **Transformation**: Sanitize or modify input before execution
+- **Logging**: Record invocations for audit trails
 - **Metrics**: Collect usage statistics
 - **Security**: Enforce access controls
 
-Hooks run at the adapter layer, intercepting `CallableFunction::call()` in rust-genai's automatic function calling flow.
+Interceptors are generic over input/output types, enabling reuse across tool calls, user messages, and external events.
 
 ### Design Philosophy
 
@@ -20,16 +21,16 @@ Following Evergreen principles:
 
 | Principle | Description |
 |-----------|-------------|
-| **One hook per crate** | Each hook is an independent crate in `hooks/` |
-| **Pre/Post execution** | Pre-hooks can deny or modify, post-hooks are observability-only |
-| **Chain composition** | Multiple hooks run in registration order |
-| **Graceful degradation** | Hook failures should not crash the system |
+| **One interceptor per crate** | Each interceptor is an independent crate in `hooks/` |
+| **intercept/observe lifecycle** | `intercept()` can deny or transform, `observe()` is observability-only |
+| **Chain composition** | Multiple interceptors run in registration order |
+| **Graceful degradation** | Interceptor failures should not crash the system |
 
 ## Quick Start Checklist
 
-- [ ] Create new hook crate: `hooks/gemicro-{hook-name}/`
+- [ ] Create new interceptor crate: `hooks/gemicro-{interceptor-name}/`
 - [ ] Add crate to workspace `Cargo.toml` members
-- [ ] Implement `ToolHook` trait (`pre_tool_use`, `post_tool_use`)
+- [ ] Implement `Interceptor<ToolCall, ToolResult>` trait (`intercept`, optionally `observe`)
 - [ ] Choose appropriate struct pattern (unit, config, stateful)
 - [ ] Implement `Clone` and `Debug` traits
 - [ ] Add `#[non_exhaustive]` to public structs
@@ -38,70 +39,88 @@ Following Evergreen principles:
 
 ## Core Types
 
-### ToolHook Trait
+### Interceptor Trait
 
-Location: `gemicro-core/src/tool/hooks.rs`
+Location: `gemicro-core/src/interceptor/mod.rs`
 
 ```rust
 #[async_trait]
-pub trait ToolHook: Send + Sync + fmt::Debug {
-    /// Called before tool execution.
-    /// Returns: Allow | AllowWithModifiedInput(Value) | Deny { reason } | RequestPermission { message }
-    async fn pre_tool_use(
-        &self,
-        tool_name: &str,
-        input: &Value,
-    ) -> Result<HookDecision, HookError>;
+pub trait Interceptor<In, Out>: Send + Sync + fmt::Debug
+where
+    In: Send + Sync,
+    Out: Send + Sync,
+{
+    /// Called before execution. Returns decision on how to proceed.
+    async fn intercept(&self, input: &In) -> Result<InterceptDecision<In>, InterceptError>;
 
-    /// Called after tool execution (observability only).
-    async fn post_tool_use(
-        &self,
-        tool_name: &str,
-        input: &Value,
-        output: &ToolResult,
-    ) -> Result<(), HookError>;
+    /// Called after execution (observability only). Default: no-op.
+    async fn observe(&self, input: &In, output: &Out) -> Result<(), InterceptError> {
+        let _ = (input, output);
+        Ok(())
+    }
 }
 ```
 
-**Note:** While `Clone` is not required by the trait, all built-in hooks implement it for sharing across registries. It is strongly recommended that custom hooks also implement `Clone`.
+**Note:** While `Clone` is not required by the trait, all built-in interceptors implement it for sharing across chains. It is strongly recommended that custom interceptors also implement `Clone`.
 
-### HookDecision
+### InterceptDecision
 
 ```rust
-pub enum HookDecision {
+pub enum InterceptDecision<T> {
     /// Allow execution with original input
     Allow,
 
-    /// Allow but modify the input first
-    AllowWithModifiedInput(Value),
+    /// Allow but transform the input first
+    Transform(T),
+
+    /// Request user confirmation before proceeding
+    Confirm { message: String },
 
     /// Deny execution with a reason
     Deny { reason: String },
-
-    /// Request user permission before proceeding
-    RequestPermission { message: String },
 }
 ```
 
-### HookError
+### InterceptError
 
 ```rust
-pub enum HookError {
-    /// Hook logic failed
+pub enum InterceptError {
+    /// Interceptor logic failed
     ExecutionFailed(String),
 
+    /// Input modification failed
+    InvalidModification(String),
+
     /// Other error
-    Other(String),
+    Other(Box<dyn std::error::Error + Send + Sync>),
 }
 ```
 
-## Hook Struct Patterns
+### ToolCall
 
-Choose the pattern that fits your hook's needs:
+The input type for tool interceptors:
+
+```rust
+pub struct ToolCall {
+    /// The name of the tool being called
+    pub name: String,
+
+    /// The arguments passed to the tool
+    pub arguments: Value,
+}
+
+impl ToolCall {
+    pub fn new(name: impl Into<String>, arguments: Value) -> Self { ... }
+}
+```
+
+## Interceptor Struct Patterns
+
+Choose the pattern that fits your interceptor's needs:
 
 ### 1. Unit Struct (Stateless, No Config)
 
-Use when the hook has no configuration or state.
+Use when the interceptor has no configuration or state.
 
 ```rust
 // hooks/gemicro-audit-log/src/lib.rs
@@ -111,18 +130,18 @@ Use when the hook has no configuration or state.
 pub struct AuditLog;
 
 #[async_trait]
-impl ToolHook for AuditLog {
-    async fn pre_tool_use(&self, tool_name: &str, input: &Value)
-        -> Result<HookDecision, HookError>
+impl Interceptor<ToolCall, ToolResult> for AuditLog {
+    async fn intercept(&self, input: &ToolCall)
+        -> Result<InterceptDecision<ToolCall>, InterceptError>
     {
-        log::info!("Tool '{}' invoked with input: {:?}", tool_name, input);
-        Ok(HookDecision::Allow)
+        log::info!("Tool '{}' invoked with input: {:?}", input.name, input.arguments);
+        Ok(InterceptDecision::Allow)
     }
 
-    async fn post_tool_use(&self, tool_name: &str, _input: &Value, output: &ToolResult)
-        -> Result<(), HookError>
+    async fn observe(&self, input: &ToolCall, output: &ToolResult)
+        -> Result<(), InterceptError>
     {
-        log::info!("Tool '{}' completed: {:?}", tool_name, output.content);
+        log::info!("Tool '{}' completed: {:?}", input.name, output.content);
         Ok(())
     }
 }
@@ -130,7 +149,7 @@ impl ToolHook for AuditLog {
 
 ### 2. Config Struct (Configuration, No State)
 
-Use when the hook needs configuration but no runtime state.
+Use when the interceptor needs configuration but no runtime state.
 
 ```rust
 // hooks/gemicro-file-security/src/lib.rs
@@ -162,43 +181,39 @@ impl FileSecurity {
 }
 
 #[async_trait]
-impl ToolHook for FileSecurity {
-    async fn pre_tool_use(&self, tool_name: &str, input: &Value)
-        -> Result<HookDecision, HookError>
+impl Interceptor<ToolCall, ToolResult> for FileSecurity {
+    async fn intercept(&self, input: &ToolCall)
+        -> Result<InterceptDecision<ToolCall>, InterceptError>
     {
-        if !matches!(tool_name, "file_write" | "file_edit") {
-            return Ok(HookDecision::Allow);
+        if !matches!(input.name.as_str(), "file_write" | "file_edit") {
+            return Ok(InterceptDecision::Allow);
         }
 
-        let path = match input.get("path").and_then(|p| p.as_str()) {
+        let path = match input.arguments.get("path").and_then(|p| p.as_str()) {
             Some(p) => p,
             None => {
-                log::warn!("FileSecurity: {} missing 'path' parameter", tool_name);
-                return Ok(HookDecision::Allow);
+                log::error!("FileSecurity: {} missing 'path' parameter - DENYING", input.name);
+                return Ok(InterceptDecision::Deny {
+                    reason: format!("Tool '{}' missing required 'path' parameter", input.name),
+                });
             }
         };
 
         if self.is_blocked(path) {
             log::warn!("FileSecurity: BLOCKED write to '{}'", path);
-            return Ok(HookDecision::Deny {
+            return Ok(InterceptDecision::Deny {
                 reason: format!("Writing to '{}' is blocked by security policy", path),
             });
         }
 
-        Ok(HookDecision::Allow)
-    }
-
-    async fn post_tool_use(&self, _: &str, _: &Value, _: &ToolResult)
-        -> Result<(), HookError>
-    {
-        Ok(())
+        Ok(InterceptDecision::Allow)
     }
 }
 ```
 
 ### 3. Builder Pattern (Complex Config)
 
-Use when the hook has multiple optional configuration fields.
+Use when the interceptor has multiple optional configuration fields.
 
 ```rust
 // hooks/gemicro-conditional-permission/src/lib.rs
@@ -251,7 +266,7 @@ impl ConditionalPermissionBuilder {
 
 ### 4. Stateful Struct (Runtime State)
 
-Use when the hook tracks state across invocations.
+Use when the interceptor tracks state across invocations.
 
 ```rust
 // hooks/gemicro-metrics/src/lib.rs
@@ -283,59 +298,50 @@ impl Metrics {
         };
         // ... build snapshot ...
     }
-
-    /// Reset all metrics.
-    pub fn reset(&self) {
-        let mut tools = match self.tools.write() {
-            Ok(guard) => guard,
-            Err(poisoned) => poisoned.into_inner(),
-        };
-        tools.clear();
-    }
 }
 
 #[async_trait]
-impl ToolHook for Metrics {
-    async fn pre_tool_use(&self, tool_name: &str, _input: &Value)
-        -> Result<HookDecision, HookError>
+impl Interceptor<ToolCall, ToolResult> for Metrics {
+    async fn intercept(&self, input: &ToolCall)
+        -> Result<InterceptDecision<ToolCall>, InterceptError>
     {
-        self.record_invocation(tool_name);
-        Ok(HookDecision::Allow)
+        self.record_invocation(&input.name);
+        Ok(InterceptDecision::Allow)
     }
 
-    async fn post_tool_use(&self, tool_name: &str, _input: &Value, output: &ToolResult)
-        -> Result<(), HookError>
+    async fn observe(&self, input: &ToolCall, output: &ToolResult)
+        -> Result<(), InterceptError>
     {
         let is_error = output.metadata.get("error").is_some();
         if is_error {
-            self.record_failure(tool_name);
+            self.record_failure(&input.name);
         } else {
-            self.record_success(tool_name);
+            self.record_success(&input.name);
         }
         Ok(())
     }
 }
 ```
 
-## Hook Execution Order
+## Interceptor Execution Order
 
-Multiple hooks run in registration order:
+Multiple interceptors run in registration order:
 
 ```
-pre_hook_1 → pre_hook_2 → ... → EXECUTE → post_hook_1 → post_hook_2 → ...
+intercept_1 → intercept_2 → ... → EXECUTE → observe_1 → observe_2 → ...
 ```
 
-- First `Deny` stops the chain and prevents execution
-- First `AllowWithModifiedInput` modifies input for subsequent hooks
-- Post-hooks run in the same order as pre-hooks (registration order)
-- Post-hooks run even if earlier post-hooks fail
+- First `Deny` or `Confirm` stops the chain
+- `Transform` modifies input for subsequent interceptors
+- `observe()` runs in the same order as `intercept()` (registration order)
+- `observe()` runs even if earlier observers fail
 
 ## Registration and Usage
 
-### Creating a HookRegistry
+### Creating an InterceptorChain
 
 ```rust
-use gemicro_core::tool::HookRegistry;
+use gemicro_core::interceptor::InterceptorChain;
 use gemicro_audit_log::AuditLog;
 use gemicro_file_security::FileSecurity;
 use gemicro_metrics::Metrics;
@@ -344,11 +350,11 @@ use std::sync::Arc;
 
 let metrics = Metrics::new();
 
-let hooks = Arc::new(
-    HookRegistry::new()
-        .with_hook(AuditLog)
-        .with_hook(FileSecurity::new(vec![PathBuf::from("/etc")]))
-        .with_hook(metrics.clone())
+let interceptors = Arc::new(
+    InterceptorChain::new()
+        .with(AuditLog)
+        .with(FileSecurity::new(vec![PathBuf::from("/etc")]))
+        .with(metrics.clone())
 );
 
 // Later: get metrics
@@ -358,14 +364,15 @@ let snapshot = metrics.snapshot();
 ### Integration with GemicroToolService
 
 ```rust
+use gemicro_core::interceptor::InterceptorChain;
 use gemicro_core::tool::{GemicroToolService, ToolRegistry, AutoApprove};
 use std::sync::Arc;
 
 let registry = Arc::new(ToolRegistry::new());
-let hooks = Arc::new(HookRegistry::new().with_hook(AuditLog));
+let interceptors = Arc::new(InterceptorChain::new().with(AuditLog));
 
 let service = GemicroToolService::new(registry)
-    .with_hooks(hooks)
+    .with_interceptors(interceptors)
     .with_confirmation_handler(Arc::new(AutoApprove));
 
 // Use with rust-genai
@@ -383,33 +390,34 @@ client.interaction()
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gemicro_core::interceptor::ToolCall;
     use serde_json::json;
 
     #[tokio::test]
     async fn test_allows_safe_path() {
-        let hook = FileSecurity::new(vec![PathBuf::from("/etc")]);
-        let input = json!({"path": "/home/user/safe.txt"});
+        let interceptor = FileSecurity::new(vec![PathBuf::from("/etc")]);
+        let input = ToolCall::new("file_write", json!({"path": "/home/user/safe.txt"}));
 
-        let decision = hook.pre_tool_use("file_write", &input).await.unwrap();
-        assert_eq!(decision, HookDecision::Allow);
+        let decision = interceptor.intercept(&input).await.unwrap();
+        assert_eq!(decision, InterceptDecision::Allow);
     }
 
     #[tokio::test]
     async fn test_blocks_dangerous_path() {
-        let hook = FileSecurity::new(vec![PathBuf::from("/etc")]);
-        let input = json!({"path": "/etc/passwd"});
+        let interceptor = FileSecurity::new(vec![PathBuf::from("/etc")]);
+        let input = ToolCall::new("file_write", json!({"path": "/etc/passwd"}));
 
-        let decision = hook.pre_tool_use("file_write", &input).await.unwrap();
-        assert!(matches!(decision, HookDecision::Deny { .. }));
+        let decision = interceptor.intercept(&input).await.unwrap();
+        assert!(matches!(decision, InterceptDecision::Deny { .. }));
     }
 
     #[tokio::test]
     async fn test_ignores_non_write_tools() {
-        let hook = FileSecurity::new(vec![PathBuf::from("/etc")]);
-        let input = json!({"path": "/etc/passwd"});
+        let interceptor = FileSecurity::new(vec![PathBuf::from("/etc")]);
+        let input = ToolCall::new("file_read", json!({"path": "/etc/passwd"}));
 
-        let decision = hook.pre_tool_use("file_read", &input).await.unwrap();
-        assert_eq!(decision, HookDecision::Allow);
+        let decision = interceptor.intercept(&input).await.unwrap();
+        assert_eq!(decision, InterceptDecision::Allow);
     }
 
     #[test]
@@ -420,14 +428,15 @@ mod tests {
 }
 ```
 
-### Testing Stateful Hooks
+### Testing Stateful Interceptors
 
 ```rust
 #[tokio::test]
 async fn test_metrics_records_invocation() {
     let metrics = Metrics::new();
+    let input = ToolCall::new("test", json!({}));
 
-    metrics.pre_tool_use("test", &json!({})).await.unwrap();
+    metrics.intercept(&input).await.unwrap();
 
     let snapshot = metrics.snapshot();
     assert_eq!(snapshot.total_invocations(), 1);
@@ -436,15 +445,15 @@ async fn test_metrics_records_invocation() {
 #[tokio::test]
 async fn test_metrics_tracks_success_and_failure() {
     let metrics = Metrics::new();
+    let input = ToolCall::new("tool", json!({}));
 
     // Success
-    metrics.pre_tool_use("tool", &json!({})).await.unwrap();
-    metrics.post_tool_use("tool", &json!({}), &ToolResult::text("ok"))
-        .await.unwrap();
+    metrics.intercept(&input).await.unwrap();
+    metrics.observe(&input, &ToolResult::text("ok")).await.unwrap();
 
     // Failure
-    metrics.pre_tool_use("tool", &json!({})).await.unwrap();
-    metrics.post_tool_use("tool", &json!({}),
+    metrics.intercept(&input).await.unwrap();
+    metrics.observe(&input,
         &ToolResult::text("err").with_metadata(json!({"error": true})))
         .await.unwrap();
 
@@ -456,13 +465,13 @@ async fn test_metrics_tracks_success_and_failure() {
 
 ## Common Pitfalls
 
-### 1. Panicking in hooks
+### 1. Panicking in interceptors
 
 ```rust
-// ❌ DON'T - panics crash the whole system
+// DON'T - panics crash the whole system
 .unwrap()
 
-// ✅ DO - handle errors gracefully
+// DO - handle errors gracefully
 match self.tools.read() {
     Ok(guard) => guard,
     Err(poisoned) => {
@@ -475,16 +484,18 @@ match self.tools.read() {
 ### 2. Silent fallbacks
 
 ```rust
-// ❌ DON'T - silently allow when path missing
-let path = input.get("path").and_then(|p| p.as_str());
-if path.is_none() { return Ok(HookDecision::Allow); }
+// DON'T - silently allow when path missing
+let path = input.arguments.get("path").and_then(|p| p.as_str());
+if path.is_none() { return Ok(InterceptDecision::Allow); }
 
-// ✅ DO - log when falling back
-let path = match input.get("path").and_then(|p| p.as_str()) {
+// DO - log when falling back, or deny for security-critical checks
+let path = match input.arguments.get("path").and_then(|p| p.as_str()) {
     Some(p) => p,
     None => {
-        log::warn!("Missing 'path' parameter, allowing");
-        return Ok(HookDecision::Allow);
+        log::error!("Missing 'path' parameter, denying for safety");
+        return Ok(InterceptDecision::Deny {
+            reason: "Missing required 'path' parameter".into(),
+        });
     }
 };
 ```
@@ -492,12 +503,12 @@ let path = match input.get("path").and_then(|p| p.as_str()) {
 ### 3. Missing audit logging for security decisions
 
 ```rust
-// ❌ DON'T - no record of blocked operations
-return Ok(HookDecision::Deny { reason: "blocked" });
+// DON'T - no record of blocked operations
+return Ok(InterceptDecision::Deny { reason: "blocked".into() });
 
-// ✅ DO - log security-relevant decisions
-log::warn!("BLOCKED: write to '{}' by tool '{}'", path, tool_name);
-return Ok(HookDecision::Deny {
+// DO - log security-relevant decisions
+log::warn!("BLOCKED: write to '{}' by tool '{}'", path, input.name);
+return Ok(InterceptDecision::Deny {
     reason: format!("Writing to '{}' is blocked", path),
 });
 ```
@@ -505,47 +516,47 @@ return Ok(HookDecision::Deny {
 ### 4. Not implementing Clone
 
 ```rust
-// ❌ DON'T - hooks must be cloneable for sharing
-pub struct MyHook {
+// DON'T - interceptors must be cloneable for sharing
+pub struct MyInterceptor {
     data: Mutex<Data>,  // Mutex is !Clone
 }
 
-// ✅ DO - wrap in Arc for shared state
-pub struct MyHook {
+// DO - wrap in Arc for shared state
+pub struct MyInterceptor {
     data: Arc<RwLock<Data>>,  // Arc is Clone
 }
 
-impl Clone for MyHook {
+impl Clone for MyInterceptor {
     fn clone(&self) -> Self {
         Self { data: Arc::clone(&self.data) }
     }
 }
 ```
 
-## File Structure for New Hooks
+## File Structure for New Interceptors
 
-Each hook gets its own crate in the `hooks/` subdirectory:
+Each interceptor gets its own crate in the `hooks/` subdirectory:
 
 ```
 hooks/
-└── gemicro-my-hook/
+└── gemicro-my-interceptor/
     ├── Cargo.toml           # Depends on gemicro-core only
     └── src/
-        └── lib.rs           # Hook implementation
+        └── lib.rs           # Interceptor implementation
 ```
 
 **Cargo.toml template:**
 
 ```toml
 [package]
-name = "gemicro-my-hook"
+name = "gemicro-my-interceptor"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
-description = "Brief description of what the hook does"
+description = "Brief description of what the interceptor does"
 
 [dependencies]
 gemicro-core = { path = "../../gemicro-core" }
@@ -563,11 +574,11 @@ tokio = { workspace = true, features = ["rt", "macros"] }
 [workspace]
 members = [
     # ... existing members
-    "hooks/gemicro-my-hook",
+    "hooks/gemicro-my-interceptor",
 ]
 ```
 
-## Built-in Hook Crates
+## Built-in Interceptor Crates
 
 | Crate | Purpose | Pattern |
 |-------|---------|---------|
@@ -579,12 +590,12 @@ members = [
 
 ## Security Documentation
 
-When creating security-related hooks, document limitations explicitly:
+When creating security-related interceptors, document limitations explicitly:
 
 ```rust
 /// # Security Warnings
 ///
-/// **This hook has known bypass vulnerabilities:**
+/// **This interceptor has known bypass vulnerabilities:**
 ///
 /// ## Known Bypass Methods
 ///
@@ -605,6 +616,6 @@ When creating security-related hooks, document limitations explicitly:
 - `hooks/gemicro-file-security/src/lib.rs` - Config struct example
 - `hooks/gemicro-metrics/src/lib.rs` - Stateful struct example
 - `hooks/gemicro-conditional-permission/src/lib.rs` - Builder pattern example
-- `gemicro-core/src/tool/hooks.rs` - Core trait definitions
-- `docs/TOOL_AUTHORING.md` - Creating tools that hooks intercept
+- `gemicro-core/src/interceptor/mod.rs` - Core trait definitions
+- `docs/TOOL_AUTHORING.md` - Creating tools that interceptors intercept
 - `CLAUDE.md` - Project design philosophy

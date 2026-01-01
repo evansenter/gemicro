@@ -78,7 +78,7 @@ REPL commands: `/help`, `/agent [name]`, `/history`, `/clear`, `/reload`, `/quit
 ## Crate Layers
 
 ```text
-gemicro-core (Agent trait, Tool trait, ToolHook trait, events, LLM - GENERIC ONLY)
+gemicro-core (Agent trait, Tool trait, Interceptor trait, events, LLM - GENERIC ONLY)
     ↓
 tools/* (one crate per tool - file_read, web_fetch, task, web_search, glob, grep, file_write, file_edit, bash)
 hooks/* (one crate per hook - audit_log, file_security, input_sanitizer, conditional_permission, metrics)
@@ -96,7 +96,7 @@ Each crate has a specific purpose. Before adding code, verify it belongs in that
 
 | Crate | Contains | Does NOT Contain |
 |-------|----------|------------------|
-| **gemicro-core** | Agent trait, Tool trait, ToolHook trait, HookRegistry, AgentContext, AgentUpdate, ToolRegistry, ToolSet, LlmClient, LlmConfig, errors | Agent/tool/hook implementations, agent-specific configs |
+| **gemicro-core** | Agent trait, Tool trait, Interceptor trait, InterceptorChain, AgentContext, AgentUpdate, ToolRegistry, ToolSet, LlmClient, LlmConfig, errors | Agent/tool/interceptor implementations, agent-specific configs |
 | **tools/*** | One tool per crate (FileRead, WebFetch, Bash, etc.) | Other tools, agent logic, hook logic |
 | **hooks/*** | One hook per crate (AuditLog, FileSecurity, Metrics, etc.) | Other hooks, agent logic, tool logic |
 | **agents/*** | One agent per crate with its config and events | Other agents, core infrastructure |
@@ -132,7 +132,8 @@ Each agent crate:
 | `Agent`, `AgentContext`, `AgentUpdate`, `AgentError` | `gemicro_core` |
 | `FinalResult`, `ResultMetadata` | `gemicro_core` |
 | `Tool`, `ToolRegistry`, `ToolSet`, `ToolResult`, `ToolError` | `gemicro_core::tool` |
-| `ToolHook`, `HookRegistry`, `HookDecision`, `HookError` | `gemicro_core::tool` |
+| `Interceptor`, `InterceptorChain`, `InterceptDecision`, `InterceptError` | `gemicro_core::interceptor` |
+| `ToolCall`, `UserMessage`, `ExternalEvent` | `gemicro_core::interceptor` |
 | `ConfirmationHandler`, `AutoApprove`, `AutoDeny`, `GemicroToolService` | `gemicro_core::tool` |
 | `Calculator`, `CurrentDatetime` | `gemicro_tool_agent::tools` |
 | `FileRead` | `gemicro_file_read` |
@@ -336,14 +337,14 @@ Use strong typing for:
 | `Cargo.toml` | Workspace manifest with all crate members |
 | `docs/AGENT_AUTHORING.md` | Complete guide for implementing new agents |
 | `docs/TOOL_AUTHORING.md` | Complete guide for implementing new tools |
-| `docs/HOOK_AUTHORING.md` | Complete guide for implementing new hooks |
+| `docs/INTERCEPTOR_AUTHORING.md` | Complete guide for implementing new interceptors |
 | `agents/gemicro-simple-qa/` | Reference implementation for new agents |
 | `tools/gemicro-file-read/` | Reference implementation for new tools |
-| `hooks/gemicro-audit-log/` | Reference implementation for new hooks |
+| `hooks/gemicro-audit-log/` | Reference implementation for new interceptors |
 | `gemicro-core/src/agent.rs` | Agent trait, AgentContext, timeout helpers |
 | `gemicro-core/src/update.rs` | Soft-typed AgentUpdate |
 | `gemicro-core/src/tool/mod.rs` | Tool trait, ToolRegistry, GemicroToolService |
-| `gemicro-core/src/tool/hooks.rs` | ToolHook trait, HookRegistry |
+| `gemicro-core/src/interceptor/mod.rs` | Interceptor trait, InterceptorChain, InterceptDecision |
 
 ## Key Architectural Decisions
 
@@ -390,15 +391,15 @@ Quick checklist:
 5. Add unit tests for all code paths
 6. **NO CHANGES TO CORE TYPES REQUIRED** ✅
 
-### Adding a New Hook
+### Adding a New Interceptor
 
-See [`docs/HOOK_AUTHORING.md`](docs/HOOK_AUTHORING.md) for a complete walkthrough. Reference implementation: `AuditLog` in `hooks/gemicro-audit-log/src/lib.rs`.
+See [`docs/INTERCEPTOR_AUTHORING.md`](docs/INTERCEPTOR_AUTHORING.md) for a complete walkthrough. Reference implementation: `AuditLog` in `hooks/gemicro-audit-log/src/lib.rs`.
 
 Quick checklist:
-1. Create new crate: `hooks/gemicro-{hook-name}/`
+1. Create new crate: `hooks/gemicro-{interceptor-name}/`
 2. Add to workspace `Cargo.toml` members
 3. Choose struct pattern (unit, config, builder, or stateful)
-4. Implement `ToolHook` trait (`pre_tool_use`, `post_tool_use`)
+4. Implement `Interceptor<ToolCall, ToolResult>` trait (`intercept`, optionally `observe`)
 5. Implement `Clone` and `Debug` traits
 6. Add `#[non_exhaustive]` to public structs
 7. Add unit tests for all decision paths
@@ -540,54 +541,55 @@ Tools implement `requires_confirmation()` and `confirmation_message()`. When con
 
 See [`docs/TOOL_AUTHORING.md`](docs/TOOL_AUTHORING.md) for implementation details.
 
-## Hook System
+## Interceptor System
 
-Hooks intercept tool execution for validation, logging, and security without modifying tools.
+Interceptors intercept tool execution for validation, logging, and security without modifying tools.
 
 ### Architecture
 
 ```
-ToolCallableAdapter (enforces hooks)
-    ├─ Pre-hooks → Validate/modify/deny execution
+ToolCallableAdapter (enforces interceptors)
+    ├─ intercept() → Validate/transform/deny execution
     ├─ Confirmation → User approval for dangerous operations
     ├─ Tool::execute() → Actual tool logic
-    └─ Post-hooks → Logging, metrics (observability only)
+    └─ observe() → Logging, metrics (observability only)
 ```
 
-Hooks are enforced in `ToolCallableAdapter::call()` - the only interception point for rust-genai's automatic function calling. See `gemicro-core/src/tool/adapter.rs` for rationale.
+Interceptors are enforced in `ToolCallableAdapter::call()` - the only interception point for rust-genai's automatic function calling. See `gemicro-core/src/tool/adapter.rs` for rationale.
 
 ### Execution Order
 
 ```
-pre_hook_1 → pre_hook_2 → ... → EXECUTE → post_hook_1 → post_hook_2 → ...
+intercept_1 → intercept_2 → ... → EXECUTE → observe_1 → observe_2 → ...
 ```
 
-- First `Deny` stops chain and prevents execution
-- Post-hooks run even if earlier post-hooks fail (logged, not fatal)
+- First `Deny` or `Confirm` stops chain and prevents/gates execution
+- `Transform` modifies input for subsequent interceptors
+- `observe()` runs for all interceptors even if earlier ones fail (logged, not fatal)
 
-### Built-in Hook Crates
+### Built-in Interceptor Crates
 
-| Hook Crate | Purpose |
-|------------|---------|
+| Interceptor Crate | Purpose |
+|-------------------|---------|
 | `gemicro-audit-log` | Log all tool invocations |
 | `gemicro-file-security` | Block writes to sensitive paths |
 | `gemicro-input-sanitizer` | Enforce input size limits |
 | `gemicro-conditional-permission` | Request permission for dangerous operations |
 | `gemicro-metrics` | Track tool usage metrics |
 
-### Hook Compatibility
+### Interceptor Compatibility
 
-Hooks **only work** with automatic function calling:
+Interceptors **only work** with automatic function calling:
 
-| Pattern | Method | Hooks? |
-|---------|--------|--------|
+| Pattern | Method | Interceptors? |
+|---------|--------|---------------|
 | Automatic | `create_with_auto_functions()` | ✅ Yes |
 | Automatic streaming | `create_stream_with_auto_functions()` | ✅ Yes |
 | Manual | `create()` + loop | ❌ No |
 
-Manual FC bypasses hooks because you handle execution yourself. Use automatic FC for hook enforcement.
+Manual FC bypasses interceptors because you handle execution yourself. Use automatic FC for interceptor enforcement.
 
-See [`docs/HOOK_AUTHORING.md`](docs/HOOK_AUTHORING.md) for implementation details, design guidelines, and examples.
+See [`docs/INTERCEPTOR_AUTHORING.md`](docs/INTERCEPTOR_AUTHORING.md) for implementation details, design guidelines, and examples.
 
 ## Troubleshooting
 

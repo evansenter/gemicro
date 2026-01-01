@@ -1,23 +1,25 @@
-//! Audit logging hook for gemicro tool execution.
+//! Audit logging interceptor for gemicro tool execution.
 //!
-//! This hook logs all tool invocations before and after execution,
+//! This interceptor logs all tool invocations before and after execution,
 //! providing a complete audit trail for compliance and debugging.
 //!
 //! # Example
 //!
 //! ```no_run
-//! use gemicro_core::tool::HookRegistry;
+//! use gemicro_core::interceptor::{InterceptorChain, ToolCall};
+//! use gemicro_core::tool::ToolResult;
 //! use gemicro_audit_log::AuditLog;
 //!
-//! let hooks = HookRegistry::new()
-//!     .with_hook(AuditLog);
+//! let interceptors: InterceptorChain<ToolCall, ToolResult> = InterceptorChain::new()
+//!     .with(AuditLog);
 //! ```
 
 use async_trait::async_trait;
-use gemicro_core::tool::{HookDecision, HookError, ToolHook, ToolResult};
+use gemicro_core::interceptor::{InterceptDecision, InterceptError, Interceptor, ToolCall};
+use gemicro_core::tool::ToolResult;
 use serde_json::Value;
 
-/// Audit log hook that logs all tool invocations.
+/// Audit log interceptor that logs all tool invocations.
 ///
 /// Logs both pre and post execution for complete audit trail.
 /// Uses the `log` crate, so configure a logger to see output.
@@ -40,22 +42,20 @@ use serde_json::Value;
 pub struct AuditLog;
 
 #[async_trait]
-impl ToolHook for AuditLog {
-    async fn pre_tool_use(
+impl Interceptor<ToolCall, ToolResult> for AuditLog {
+    async fn intercept(
         &self,
-        tool_name: &str,
-        input: &Value,
-    ) -> Result<HookDecision, HookError> {
-        log::info!("Tool invoked: {} with input: {}", tool_name, input);
-        Ok(HookDecision::Allow)
+        input: &ToolCall,
+    ) -> Result<InterceptDecision<ToolCall>, InterceptError> {
+        log::info!(
+            "Tool invoked: {} with input: {}",
+            input.name,
+            input.arguments
+        );
+        Ok(InterceptDecision::Allow)
     }
 
-    async fn post_tool_use(
-        &self,
-        tool_name: &str,
-        _input: &Value,
-        output: &ToolResult,
-    ) -> Result<(), HookError> {
+    async fn observe(&self, input: &ToolCall, output: &ToolResult) -> Result<(), InterceptError> {
         let content_preview = match &output.content {
             Value::String(s) => {
                 // Use char-aware truncation to avoid panicking on UTF-8 boundaries
@@ -76,7 +76,7 @@ impl ToolHook for AuditLog {
                 }
             }
         };
-        log::info!("Tool completed: {} -> {}", tool_name, content_preview);
+        log::info!("Tool completed: {} -> {}", input.name, content_preview);
         Ok(())
     }
 }
@@ -88,16 +88,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_audit_log_allows_execution() {
-        let hook = AuditLog;
-        let decision = hook.pre_tool_use("test", &json!({})).await.unwrap();
-        assert_eq!(decision, HookDecision::Allow);
+        let interceptor = AuditLog;
+        let input = ToolCall::new("test", json!({}));
+        let decision = interceptor.intercept(&input).await.unwrap();
+        assert_eq!(decision, InterceptDecision::Allow);
     }
 
     #[tokio::test]
     async fn test_audit_log_post_execution() {
-        let hook = AuditLog;
+        let interceptor = AuditLog;
+        let input = ToolCall::new("test", json!({}));
         let result = ToolResult::text("test output");
-        let res = hook.post_tool_use("test", &json!({}), &result).await;
+        let res = interceptor.observe(&input, &result).await;
         assert!(res.is_ok());
     }
 }
