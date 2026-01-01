@@ -178,15 +178,18 @@ impl EventBusClient {
         limit: i32,
         session_id: Option<&str>,
     ) -> Result<Vec<Event>, EventBusError> {
-        let mut url = format!(
-            "{}/events?since_id={}&limit={}",
-            self.base_url, since_id, limit
-        );
+        let url = format!("{}/events", self.base_url);
+        let mut request = self
+            .client
+            .get(&url)
+            .query(&[("since_id", since_id.to_string())])
+            .query(&[("limit", limit.to_string())]);
+
         if let Some(sid) = session_id {
-            url.push_str(&format!("&session_id={}", sid));
+            request = request.query(&[("session_id", sid)]);
         }
 
-        let resp = self.client.get(&url).send().await?;
+        let resp = request.send().await?;
         self.handle_response(resp).await
     }
 

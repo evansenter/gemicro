@@ -111,7 +111,13 @@ impl EventBus {
 
     /// Get the current session ID, if registered.
     pub fn session_id(&self) -> Option<String> {
-        self.session_id.read().ok().and_then(|g| g.clone())
+        match self.session_id.read() {
+            Ok(guard) => guard.clone(),
+            Err(_) => {
+                log::warn!("EventBus session_id lock poisoned, returning None");
+                None
+            }
+        }
     }
 
     /// Handle the register action.

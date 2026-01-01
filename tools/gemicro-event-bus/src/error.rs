@@ -17,12 +17,4 @@ pub enum EventBusError {
     /// Event bus returned an error response.
     #[error("Event bus error: {status} - {message}")]
     Api { status: u16, message: String },
-
-    /// Not registered with the event bus.
-    #[error("Not registered with event bus")]
-    NotRegistered,
-
-    /// Invalid action requested.
-    #[error("Invalid action: {0}")]
-    InvalidAction(String),
 }

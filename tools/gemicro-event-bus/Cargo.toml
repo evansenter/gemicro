@@ -2,6 +2,9 @@
 name = "gemicro-event-bus"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
 description = "EventBus tool for agent coordination via claude-event-bus"
 
 [dependencies]
