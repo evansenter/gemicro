@@ -306,7 +306,7 @@ async fn test_streaming_function_calling_with_hooks() {
 
     use gemicro_audit_log::AuditLog;
     use gemicro_core::interceptor::InterceptorChain;
-    use gemicro_core::tool::{AutoApprove, GemicroToolService, ToolResult};
+    use gemicro_core::tool::{AutoApprove, GemicroToolService};
     use gemicro_core::MODEL;
     use gemicro_tool_agent::tools::default_registry;
     use rust_genai::AutoFunctionStreamChunk;
