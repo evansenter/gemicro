@@ -157,7 +157,7 @@ pub trait Agent: Send + Sync {
 ///
 /// # Subagent Orchestration
 ///
-/// When spawning subagents, use [`child_context()`] to create a derived context
+/// When spawning subagents, use [`Self::child_context()`] to create a derived context
 /// that tracks parent-child relationships:
 ///
 /// ```ignore
@@ -194,7 +194,7 @@ pub struct AgentContext {
     /// Execution context for tracking parent-child agent relationships.
     ///
     /// Used for observability, debugging, and depth limiting. Defaults to
-    /// a root context; use [`child_context()`] when spawning subagents.
+    /// a root context; use [`Self::child_context()`] when spawning subagents.
     pub execution: ExecutionContext,
 }
 
@@ -270,7 +270,7 @@ impl AgentContext {
     /// Use this to create a context with a non-root execution context,
     /// typically when manually constructing contexts for testing or
     /// specialized use cases. For normal subagent spawning, use
-    /// [`child_context()`] instead.
+    /// [`Self::child_context()`] instead.
     pub fn with_execution(mut self, execution: ExecutionContext) -> Self {
         self.execution = execution;
         self

@@ -482,13 +482,13 @@ pub enum ToolSet {
     /// Inherit parent's tool set (for subagents).
     ///
     /// When resolved against a parent ToolSet, becomes identical to the parent.
-    /// Use [`resolve()`] to get a concrete ToolSet.
+    /// Use [`Self::resolve()`] to get a concrete ToolSet.
     Inherit,
 
     /// Inherit parent's tools except the specified ones.
     ///
     /// When resolved against a parent ToolSet, filters out the specified tools.
-    /// Use [`resolve()`] to get a concrete ToolSet.
+    /// Use [`Self::resolve()`] to get a concrete ToolSet.
     InheritExcept(Vec<String>),
 }
 
@@ -498,7 +498,7 @@ impl ToolSet {
     /// # Panics
     ///
     /// Panics if called on `Inherit` or `InheritExcept` - these must be
-    /// resolved first using [`resolve()`].
+    /// resolved first using [`Self::resolve()`].
     pub fn matches(&self, tool_name: &str) -> bool {
         match self {
             ToolSet::All => true,

@@ -8,7 +8,7 @@
 //! Following [Evergreen spec](https://github.com/google-deepmind/evergreen-spec) principles:
 //!
 //! - **Opaque IDs**: [`ExecutionId`] values are opaque; never encode semantics in them
-//! - **Soft-typed data**: Execution IDs are included in [`AgentUpdate`] data fields, not structure
+//! - **Soft-typed data**: Execution IDs are included in [`crate::AgentUpdate`] data fields, not structure
 //! - **Backward compatible**: Root context is the default; existing code works unchanged
 //!
 //! ## Example
@@ -52,7 +52,7 @@ impl ExecutionId {
 
     /// Create an ExecutionId from an existing string.
     ///
-    /// Use this for deserialization or testing. For new executions, use [`new()`].
+    /// Use this for deserialization or testing. For new executions, use [`Self::new()`].
     pub fn from_string(id: impl Into<String>) -> Self {
         Self(id.into())
     }
@@ -89,8 +89,8 @@ impl AsRef<str> for ExecutionId {
 ///
 /// # Usage
 ///
-/// Root agents create their context automatically via [`AgentContext::new()`].
-/// When spawning subagents, use [`child()`] to create a derived context:
+/// Root agents create their context automatically via [`super::AgentContext::new()`].
+/// When spawning subagents, use [`Self::child()`] to create a derived context:
 ///
 /// ```
 /// use gemicro_core::agent::ExecutionContext;
@@ -104,7 +104,7 @@ impl AsRef<str> for ExecutionId {
 ///
 /// # Path Tracking
 ///
-/// The [`path`] field tracks the agent hierarchy from root to current:
+/// The `path` field tracks the agent hierarchy from root to current:
 ///
 /// ```
 /// use gemicro_core::agent::ExecutionContext;
@@ -146,7 +146,7 @@ impl ExecutionContext {
     /// Create a root execution context.
     ///
     /// Use this for top-level agent executions that aren't subagents.
-    /// This is called automatically by [`AgentContext::new()`].
+    /// This is called automatically by [`super::AgentContext::new()`].
     pub fn root() -> Self {
         Self {
             execution_id: ExecutionId::new(),
