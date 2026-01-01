@@ -7,4 +7,4 @@ mod commands;
 mod session;
 
 // Re-exports for internal use
-pub(crate) use session::Session;
+pub(crate) use session::{CliOverrides, Session};

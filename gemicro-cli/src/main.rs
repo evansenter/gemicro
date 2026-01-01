@@ -1,6 +1,7 @@
 //! gemicro CLI - Deep research agent powered by Gemini.
 
 mod cli;
+pub mod config;
 pub mod confirmation;
 mod display;
 mod error;
@@ -13,7 +14,6 @@ use display::{IndicatifRenderer, Renderer};
 use futures_util::StreamExt;
 use gemicro_core::{enforce_final_result_contract, Agent, AgentContext, AgentError, LlmClient};
 use gemicro_deep_research::DeepResearchAgent;
-use gemicro_tool_agent::{ToolAgent, ToolAgentConfig};
 use repl::Session;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
@@ -66,15 +66,23 @@ async fn run_interactive(args: &cli::Args) -> Result<()> {
 
     let mut session = Session::new(llm, args.plain);
 
-    // Register available agents
-    let research_config = args.research_config();
-    session.registry.register("deep_research", move || {
-        Box::new(DeepResearchAgent::new(research_config.clone()).expect("Invalid research config"))
+    // Set CLI overrides (these take precedence over file config)
+    session.set_cli_overrides(repl::CliOverrides {
+        research_config: Some(args.research_config()),
     });
 
-    session.registry.register("tool_agent", || {
-        Box::new(ToolAgent::new(ToolAgentConfig::default()).expect("Invalid tool agent config"))
-    });
+    // Load config files and register agents (always succeeds, logs warnings on errors)
+    let loaded_files = session.load_config_and_register_agents();
+    if !loaded_files.is_empty() {
+        log::info!(
+            "Loaded config from: {}",
+            loaded_files
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
 
     // Set the initial agent
     session

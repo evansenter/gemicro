@@ -41,8 +41,15 @@ anyhow = "1.0"
 log = "0.4"
 env_logger = "0.11"
 
-# For tests
+# Serialization
+serde = { workspace = true }
 serde_json = { workspace = true }
+toml = { workspace = true }
+
+# Config
+dirs = { workspace = true }
 
 [dev-dependencies]
 async-stream = { workspace = true }
+serial_test = "3.2"
+tempfile = { workspace = true }

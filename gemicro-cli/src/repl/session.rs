@@ -3,6 +3,8 @@
 //! Handles the interactive session loop, command processing, and agent execution.
 
 use super::commands::Command;
+use crate::config::loader::ConfigChange;
+use crate::config::{ConfigLoader, GemicroConfig};
 use crate::confirmation::InteractiveConfirmation;
 use crate::display::{IndicatifRenderer, Renderer};
 use crate::error::ErrorFormatter;
@@ -13,7 +15,9 @@ use gemicro_core::{
     enforce_final_result_contract, AgentContext, AgentError, AgentUpdate, ConfirmationHandler,
     ConversationHistory, HistoryEntry, LlmClient,
 };
+use gemicro_deep_research::DeepResearchAgent;
 use gemicro_runner::AgentRegistry;
+use gemicro_tool_agent::{ToolAgent, ToolAgentConfig};
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 use std::path::PathBuf;
@@ -43,6 +47,12 @@ pub struct Session {
     /// LLM client (shared across agents)
     llm: Arc<LlmClient>,
 
+    /// Config loader for hot-reload support
+    config_loader: ConfigLoader,
+
+    /// CLI argument overrides (take precedence over file config)
+    cli_overrides: CliOverrides,
+
     /// Path to the CLI binary (for mtime checking).
     ///
     /// Used to detect when the binary has been recompiled, showing a `[stale]`
@@ -66,6 +76,35 @@ pub struct Session {
     confirmation_handler: Arc<dyn ConfirmationHandler>,
 }
 
+/// CLI argument overrides that take precedence over file config.
+#[derive(Debug, Clone, Default)]
+pub struct CliOverrides {
+    /// Deep research config from CLI args
+    pub research_config: Option<gemicro_deep_research::ResearchConfig>,
+}
+
+/// Result of a config reload operation.
+#[derive(Debug)]
+pub struct ReloadResult {
+    /// Config files that were loaded
+    pub loaded_files: Vec<PathBuf>,
+    /// Changes detected between old and new config
+    pub changes: Vec<ConfigChange>,
+    /// The old config (before reload) - kept for debugging
+    #[allow(dead_code)]
+    pub old_config: GemicroConfig,
+    /// The new config (after reload) - kept for debugging
+    #[allow(dead_code)]
+    pub new_config: GemicroConfig,
+}
+
+impl ReloadResult {
+    /// Check if any changes were detected.
+    pub fn has_changes(&self) -> bool {
+        !self.changes.is_empty()
+    }
+}
+
 impl Session {
     /// Create a new session.
     ///
@@ -82,12 +121,121 @@ impl Session {
             current_agent_name: String::new(),
             history: ConversationHistory::new(),
             llm: Arc::new(llm),
+            config_loader: ConfigLoader::new(),
+            cli_overrides: CliOverrides::default(),
             binary_path,
             binary_mtime,
             plain,
             session_tokens: 0,
             confirmation_handler: Arc::new(InteractiveConfirmation::default()),
         }
+    }
+
+    /// Set CLI overrides that take precedence over file config.
+    pub fn set_cli_overrides(&mut self, overrides: CliOverrides) {
+        self.cli_overrides = overrides;
+    }
+
+    /// Load config and register agents.
+    ///
+    /// This is called on startup and on /reload to (re)register agents
+    /// with the current config. Always succeeds - config errors are logged
+    /// as warnings and agents are registered with defaults.
+    pub fn load_config_and_register_agents(&mut self) -> Vec<PathBuf> {
+        let (config, loaded_files) = match self.config_loader.load() {
+            Ok((config, files)) => (config, files),
+            Err(e) => {
+                log::warn!("Failed to load config files: {}. Using defaults.", e);
+                (GemicroConfig::default(), Vec::new())
+            }
+        };
+
+        self.register_agents_from_config(&config);
+
+        loaded_files
+    }
+
+    /// Register agents based on config.
+    fn register_agents_from_config(&mut self, config: &GemicroConfig) {
+        // Build deep_research config: CLI overrides > file config > defaults
+        // Validate and fallback to defaults on error
+        let research_config = if let Some(cli_config) = &self.cli_overrides.research_config {
+            cli_config.clone()
+        } else if let Some(file_config) = &config.deep_research {
+            file_config.to_research_config()
+        } else {
+            gemicro_deep_research::ResearchConfig::default()
+        };
+
+        // Validate config before registering - fallback to defaults on error
+        let research_config = match DeepResearchAgent::new(research_config.clone()) {
+            Ok(_) => research_config,
+            Err(e) => {
+                log::warn!("Invalid deep_research config: {}. Using defaults.", e);
+                gemicro_deep_research::ResearchConfig::default()
+            }
+        };
+
+        // Register deep_research agent (config is pre-validated, unwrap is safe)
+        self.registry.register("deep_research", move || {
+            Box::new(
+                DeepResearchAgent::new(research_config.clone())
+                    .expect("pre-validated config should not fail"),
+            )
+        });
+
+        // Build tool_agent config from file or defaults
+        let tool_config = if let Some(file_config) = &config.tool_agent {
+            file_config.to_tool_agent_config()
+        } else {
+            ToolAgentConfig::default()
+        };
+
+        // Validate config before registering - fallback to defaults on error
+        let tool_config = match ToolAgent::new(tool_config.clone()) {
+            Ok(_) => tool_config,
+            Err(e) => {
+                log::warn!("Invalid tool_agent config: {}. Using defaults.", e);
+                ToolAgentConfig::default()
+            }
+        };
+
+        // Register tool_agent (config is pre-validated, unwrap is safe)
+        self.registry.register("tool_agent", move || {
+            Box::new(
+                ToolAgent::new(tool_config.clone()).expect("pre-validated config should not fail"),
+            )
+        });
+    }
+
+    /// Reload configuration from files.
+    ///
+    /// Re-reads config files, shows what changed, and re-registers agents.
+    /// Preserves conversation history across reload.
+    pub fn reload(&mut self) -> Result<ReloadResult> {
+        let old_config = self.config_loader.last_config().clone();
+
+        let (new_config, loaded_files) = self
+            .config_loader
+            .load()
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+        let changes = self.config_loader.diff(&new_config);
+
+        // Re-register agents with new config
+        self.register_agents_from_config(&new_config);
+
+        Ok(ReloadResult {
+            loaded_files,
+            changes,
+            old_config,
+            new_config,
+        })
+    }
+
+    /// Check if config files have changed since last load.
+    pub fn is_config_stale(&self) -> bool {
+        self.config_loader.is_stale()
     }
 
     /// Set the current agent by name.
@@ -299,8 +447,13 @@ impl Session {
         println!();
 
         loop {
-            // Build prompt with optional token count and stale indicator
-            let stale_indicator = if self.is_stale() { " [stale]" } else { "" };
+            // Build prompt with optional token count and stale indicators
+            let binary_stale = if self.is_stale() { " [stale]" } else { "" };
+            let config_stale = if self.is_config_stale() {
+                " [config]"
+            } else {
+                ""
+            };
             let token_display = if self.session_tokens > 0 {
                 format!(" ({})", format_tokens(self.session_tokens))
             } else {
@@ -311,7 +464,10 @@ impl Session {
             } else {
                 &self.current_agent_name
             };
-            let prompt = format!("[{}{}{}] > ", agent_display, token_display, stale_indicator);
+            let prompt = format!(
+                "[{}{}{}{}] > ",
+                agent_display, token_display, binary_stale, config_stale
+            );
 
             match rl.readline(&prompt) {
                 Ok(line) => {
@@ -369,10 +525,36 @@ impl Session {
                             self.history.clear();
                             println!("Conversation history cleared.");
                         }
-                        Command::Reload => {
-                            println!("Hot-reload not yet implemented. See issue #36.");
-                            // TODO: Implement state serialization, cargo build, exec
-                        }
+                        Command::Reload => match self.reload() {
+                            Ok(result) => {
+                                if result.loaded_files.is_empty() {
+                                    println!("No config files found.");
+                                    println!(
+                                        "  Create {} or {}",
+                                        ConfigLoader::local_config_path().display(),
+                                        ConfigLoader::global_config_path().display()
+                                    );
+                                } else {
+                                    println!("Reloaded config from:");
+                                    for path in &result.loaded_files {
+                                        println!("  {}", path.display());
+                                    }
+
+                                    if result.has_changes() {
+                                        println!("\nChanges:");
+                                        for change in &result.changes {
+                                            println!("  {}", change);
+                                        }
+                                    } else {
+                                        println!("\nNo changes detected.");
+                                    }
+                                }
+                                println!("\nAgents re-registered with updated config.");
+                            }
+                            Err(e) => {
+                                eprintln!("Reload failed: {:#}", e);
+                            }
+                        },
                         Command::Quit => {
                             println!("Goodbye!");
                             break;
