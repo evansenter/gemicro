@@ -16,7 +16,8 @@
 //! settings is only used when no CLI arguments are passed for those settings.
 //!
 //! In practice, to use file config values, omit the corresponding CLI flags.
-//! Future versions may implement finer-grained CLI/file merging.
+//! See [#176](https://github.com/evansenter/gemicro/issues/176) for planned
+//! finer-grained CLI/file merging.
 //!
 //! # Example Config File
 //!
