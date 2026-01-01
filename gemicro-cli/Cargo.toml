@@ -51,4 +51,5 @@ dirs = { workspace = true }
 
 [dev-dependencies]
 async-stream = { workspace = true }
+serial_test = "3.2"
 tempfile = { workspace = true }

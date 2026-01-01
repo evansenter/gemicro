@@ -6,6 +6,7 @@ use std::time::SystemTime;
 
 /// Represents a config file source with its path and mtime.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ConfigSource {
     /// Path to the config file
     pub path: PathBuf,
@@ -352,6 +353,7 @@ impl Default for ConfigLoader {
 
 /// Represents a config value change.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ConfigChange {
     /// The field that changed
     pub field: String,
@@ -373,6 +375,7 @@ impl std::fmt::Display for ConfigChange {
 
 /// Errors that can occur during config loading.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum ConfigError {
     /// IO error reading config file
     Io { path: PathBuf, error: String },
@@ -398,6 +401,7 @@ impl std::error::Error for ConfigError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use std::io::Write;
     use tempfile::TempDir;
 
@@ -425,6 +429,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_load_empty_config() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("gemicro.toml");
@@ -444,6 +449,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_load_config_with_values() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("gemicro.toml");
