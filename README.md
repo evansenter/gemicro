@@ -4,19 +4,112 @@
 
 Gemicro allows you to explore and interact with different AI agent patterns through a command-line interface, powered by the Gemini API via the [rust-genai](https://github.com/evansenter/rust-genai) library.
 
-## Features
+## Why Gemicro?
 
-- 🔬 **Deep Research Agent**: Query decomposition with parallel sub-query execution and synthesis
-- 🔄 **ReAct Agent**: Reasoning and Acting loops with Thought → Action → Observation cycles
-- 🛠️ **Tool Agent**: Native function calling with built-in tools (calculator, datetime, file operations)
-- 🎯 **Simple QA Agent**: Minimal reference implementation for agent authoring
-- 📊 **Real-time Observability**: Streaming updates show agent execution as it happens
-- 🏗️ **Extensible Architecture**: Soft-typed events allow adding new agent types without protocol changes
-- 📱 **Platform-Agnostic Core**: Library designed for future mobile and web support
-- ⚡ **Parallel Execution**: Sub-queries fan out for faster results
-- 🌐 **Google Search Grounding**: Enable real-time web search for current events and live data
-- 🔐 **Tool Confirmation**: Interactive approval for dangerous operations (bash, file writes)
-- 📈 **Evaluation Framework**: HotpotQA datasets, scorers (Contains, LLM Judge), and evaluation harness
+Building AI agents that call tools seems simple—until you need:
+
+- **Real-time visibility** — What is the agent doing *right now*? Which tool is it calling?
+- **Graceful cancellation** — User pressed Ctrl+C. Clean up without crashing or orphaned requests.
+- **User confirmation** — "This will execute `rm -rf`. Proceed?" Interactive approval for dangerous operations.
+- **Unified error handling** — Retry transient failures, surface permanent ones, categorize by type.
+- **Evaluation** — Is this agent actually accurate? Run it against benchmarks with scoring.
+- **Trajectory capture** — Debug failures by replaying exact LLM request/response sequences.
+- **Security hooks** — Block writes to sensitive paths, sanitize inputs, log all tool calls.
+- **Agent composability** — Switch agents at runtime, register new ones without code changes.
+
+Gemicro provides these capabilities so you can focus on the reasoning pattern.
+
+### Cross-Cutting Concerns
+
+| Concern | DIY Approach | With Gemicro |
+|---------|--------------|--------------|
+| **Observability** | Black box until completion | Streaming `AgentUpdate` events (`tool_call_started`, `tool_result`, custom) |
+| **Cancellation** | Kill the process, hope for the best | Cooperative `CancellationToken` checked at safe points |
+| **Tool Confirmation** | Manual checks scattered per tool | `ConfirmationHandler` trait with `AutoApprove`/`AutoDeny`/`Interactive` |
+| **Tool Discovery** | Hardcoded tool lists | `ToolRegistry` + `ToolSet` filtering (`All`/`None`/`Specific`/`Except`) |
+| **Error Handling** | Ad-hoc `anyhow::Error` | Typed `AgentError` with `is_retriable()`, `is_timeout()`, `is_cancelled()` |
+| **Result Metadata** | Parse it yourself | `FinalResult` with token counts, duration, agent-specific `extra` field |
+| **CLI Integration** | Build progress bars from scratch | `Renderer` trait + `ExecutionTracking` for automatic display |
+| **Evaluation** | Manual spot-checking | `EvalHarness` + scorers (`Contains`, `LLMJudge`) + datasets (`HotpotQA`, `GSM8K`) |
+| **Trajectory Recording** | Hope you logged enough | `Trajectory` capture/replay with `MockLlmClient` for offline testing |
+| **Security Hooks** | Audit logging? What's that? | `Interceptor` trait for pre/post tool execution (audit, security, metrics) |
+| **Agent Switching** | Refactor main() | `AgentRegistry` with runtime agent selection (`--agent developer`) |
+| **Extensibility** | Modify core types for each event | Soft-typed events per [Evergreen spec](https://github.com/google-deepmind/evergreen-spec) |
+
+## Quick Start
+
+```bash
+# Set your API key
+export GEMINI_API_KEY="your-api-key"
+
+# Single query mode
+gemicro "What are the latest developments in quantum computing?"
+
+# Interactive REPL mode
+gemicro --interactive
+```
+
+## Library Usage
+
+Beyond the CLI, Gemicro is a library for building agent-powered applications:
+
+```rust
+use gemicro_developer::{DeveloperAgent, DeveloperConfig};
+use gemicro_core::{Agent, AgentContext, LlmClient, LlmConfig};
+use gemicro_core::tool::{AutoApprove, ToolRegistry};
+use futures_util::StreamExt;
+use std::sync::Arc;
+
+// Create LLM client
+let genai_client = rust_genai::Client::builder(api_key).build();
+let llm = LlmClient::new(genai_client, LlmConfig::default());
+
+// Create tool registry (register tools you want to use)
+let tools = ToolRegistry::new();
+
+// Build context with tools and confirmation handler
+let context = AgentContext::new(llm)
+    .with_tools(tools)
+    .with_confirmation_handler(Arc::new(AutoApprove));
+
+// Create an agent with configuration
+let config = DeveloperConfig::default().with_max_iterations(20);
+let agent = DeveloperAgent::new(config)?;
+
+// Execute and stream updates in real-time
+let stream = agent.execute("Read CLAUDE.md and summarize it", context);
+futures_util::pin_mut!(stream);
+
+while let Some(update) = stream.next().await {
+    let update = update?;
+    match update.event_type.as_str() {
+        "tool_call_started" => println!("🔧 {}", update.message),
+        "tool_result" => println!("  ✓ Complete"),
+        "final_result" => {
+            let result = update.as_final_result().unwrap();
+            println!("\n📊 {} tokens in {:?}",
+                result.metadata.total_tokens,
+                std::time::Duration::from_millis(result.metadata.duration_ms)
+            );
+            println!("\n{}", result.result);
+        }
+        _ => {} // Gracefully ignore unknown events (Evergreen philosophy)
+    }
+}
+```
+
+For a complete working example, see [`agents/gemicro-developer/examples/developer.rs`](agents/gemicro-developer/examples/developer.rs).
+
+## Available Agents
+
+| Agent | Pattern | Use Case |
+|-------|---------|----------|
+| `deep_research` | Decompose → Parallel Execute → Synthesize | Multi-hop research questions |
+| `react` | Thought → Action → Observation loops | Step-by-step reasoning with tools |
+| `developer` | Explicit FC with real-time tool events | Code tasks with full visibility |
+| `tool_agent` | Automatic function calling | Simple tool use via rust-genai |
+| `critique` | LLM-as-judge with verdicts | Evaluation and quality assessment |
+| `simple_qa` | Single LLM call | Minimal reference implementation |
 
 ## Architecture
 
@@ -27,7 +120,7 @@ gemicro-core (Agent trait, Tool trait, Interceptor trait, Coordination trait, ev
     ↓
 tools/* (10 tool crates - file_read, web_fetch, task, web_search, glob, grep, file_write, file_edit, bash, event_bus)
 hooks/* (5 hook crates - audit_log, file_security, input_sanitizer, conditional_permission, metrics)
-agents/* (5 agent crates - hermetic isolation)
+agents/* (6 agent crates - hermetic isolation)
     ↓
 gemicro-runner (execution state, metrics, runner)
     ↓
@@ -40,9 +133,9 @@ gemicro-cli (terminal rendering)
 | **gemicro-core** | Agent/Tool/Interceptor/Coordination traits, AgentContext, AgentUpdate events, LlmClient. **No implementations.** |
 | **tools/** | file_read, web_fetch, task, web_search, glob, grep, file_write, file_edit, bash, event_bus |
 | **hooks/** | audit_log, file_security, input_sanitizer, conditional_permission, metrics |
-| **agents/** | deep_research, react, simple_qa, tool_agent, judge |
+| **agents/** | deep_research, react, simple_qa, tool_agent, critique, developer |
 | **gemicro-runner** | Headless execution: AgentRunner, AgentRegistry, ExecutionState, metrics |
-| **gemicro-eval** | Evaluation: HotpotQA/custom datasets, scorers (Contains, LLM Judge) |
+| **gemicro-eval** | Evaluation: HotpotQA/GSM8K datasets, scorers (Contains, LLM Judge) |
 | **gemicro-cli** | Terminal UI: indicatif progress, rustyline REPL, markdown rendering |
 
 ### Design Philosophy
@@ -59,22 +152,10 @@ gemicro-cli (terminal rendering)
 Each type lives in exactly one crate. Import from the canonical source:
 
 ```rust
-use gemicro_core::{Agent, AgentContext, AgentUpdate};     // Core types
+use gemicro_core::{Agent, AgentContext, AgentUpdate};           // Core types
 use gemicro_deep_research::{DeepResearchAgent, ResearchConfig}; // Agent + config
-use gemicro_critique::CritiqueAgent;                       // Critique agent
-```
-
-## Quick Start
-
-```bash
-# Set your API key
-export GEMINI_API_KEY="your-api-key"
-
-# Single query mode
-gemicro "What are the latest developments in quantum computing?"
-
-# Interactive REPL mode
-gemicro --interactive
+use gemicro_developer::{DeveloperAgent, DeveloperConfig};       // Developer agent
+use gemicro_critique::CritiqueAgent;                             // Critique agent
 ```
 
 ## Usage
@@ -132,11 +213,15 @@ gemicro REPL - Type /help for commands, /quit to exit
 ⠋ Executing sub-queries...
 ...
 
-[deep_research] > /agent
-Available agents:
-  deep_research * - Decomposes queries into sub-questions...
+[deep_research] > /agent developer
+Switched to: developer
 
-[deep_research] > /quit
+[developer] > Read the CLAUDE.md file
+🔧 FileRead: ./CLAUDE.md ...
+  ✓ FileRead (0.1s) → # CLAUDE.md...
+...
+
+[developer] > /quit
 Goodbye!
 ```
 
@@ -150,6 +235,7 @@ Arguments:
 
 Options:
   -i, --interactive            Interactive REPL mode
+      --agent <NAME>           Agent to use (required)
       --api-key <KEY>          Gemini API key (or GEMINI_API_KEY env var)
       --min-sub-queries <N>    Minimum sub-queries [default: 3]
       --max-sub-queries <N>    Maximum sub-queries [default: 5]
@@ -239,25 +325,6 @@ For a 100-question dataset with `--scorer llm_judge`:
 
 **Recommendation**: Use `--scorer contains` for rapid iteration during development, then add `llm_judge` for final accuracy assessment.
 
-## Future Exploration Areas
-
-See [GitHub Issues](https://github.com/evansenter/gemicro/issues) for the full roadmap. Key areas include:
-
-- Additional agent patterns (Reflexion, Plan-and-Execute)
-- Model Context Protocol (MCP) client support
-- Hot-reload for agent development (`/reload --watch`)
-- Persistent sessions across restarts
-- Tab completion for REPL commands and agent names
-- Performance benchmarks with criterion.rs
-
-## License
-
-MIT
-
-## Security
-
-See [SECURITY.md](SECURITY.md) for security policy, vulnerability reporting, and best practices.
-
 ## Trajectory Recording
 
 Gemicro supports capturing full LLM interaction traces for offline replay and evaluation:
@@ -287,12 +354,31 @@ Use cases:
 
 See the [Agent Authoring Guide](docs/AGENT_AUTHORING.md#trajectory-recording-and-replay) for details.
 
+## Future Exploration Areas
+
+See [GitHub Issues](https://github.com/evansenter/gemicro/issues) for the full roadmap. Key areas include:
+
+- Additional agent patterns (Reflexion, Plan-and-Execute)
+- Model Context Protocol (MCP) client support
+- Hot-reload for agent development (`/reload --watch`)
+- Persistent sessions across restarts
+- Tab completion for REPL commands and agent names
+- Performance benchmarks with criterion.rs
+
 ## Documentation
 
 - [Agent Authoring Guide](docs/AGENT_AUTHORING.md) - Complete walkthrough for implementing new agents
 - [Tool Authoring Guide](docs/TOOL_AUTHORING.md) - Complete walkthrough for implementing new tools
-- [Hook Authoring Guide](docs/HOOK_AUTHORING.md) - Complete walkthrough for implementing new hooks
+- [Interceptor Authoring Guide](docs/INTERCEPTOR_AUTHORING.md) - Complete walkthrough for implementing new interceptors
 - [CLAUDE.md](CLAUDE.md) - Project design philosophy and architecture decisions
+
+## License
+
+MIT
+
+## Security
+
+See [SECURITY.md](SECURITY.md) for security policy, vulnerability reporting, and best practices.
 
 ## Contributing
 

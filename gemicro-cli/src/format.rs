@@ -121,6 +121,17 @@ pub fn print_final_result(result: &FinalResult, elapsed: Duration, plain: bool) 
         println!("   Steps: {}/{} succeeded", steps_succeeded, total);
     }
 
+    // Show tool call count if available (agents using explicit function calling)
+    let tool_call_count = result
+        .metadata
+        .extra
+        .get("tool_call_count")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    if tool_call_count > 0 {
+        println!("   Tool calls: {}", tool_call_count);
+    }
+
     // Show tokens if available and non-zero
     if result.metadata.tokens_unavailable_count == 0 && result.metadata.total_tokens > 0 {
         println!("   Tokens used: {}", result.metadata.total_tokens);

@@ -16,6 +16,7 @@ use gemicro_core::{
     ConversationHistory, HistoryEntry, LlmClient,
 };
 use gemicro_deep_research::DeepResearchAgent;
+use gemicro_developer::{DeveloperAgent, DeveloperConfig};
 use gemicro_runner::AgentRegistry;
 use gemicro_tool_agent::{ToolAgent, ToolAgentConfig};
 use rustyline::error::ReadlineError;
@@ -206,6 +207,15 @@ impl Session {
                 ToolAgent::new(tool_config.clone()).expect("pre-validated config should not fail"),
             )
         });
+
+        // Register developer agent with defaults (config from file/CLI not yet implemented)
+        let developer_config = DeveloperConfig::default();
+        self.registry.register("developer", move || {
+            Box::new(
+                DeveloperAgent::new(developer_config.clone())
+                    .expect("default config should not fail"),
+            )
+        });
     }
 
     /// Reload configuration from files.
@@ -382,6 +392,11 @@ impl Session {
                         interrupted = true;
                         break;
                     }
+
+                    // Handle event-specific rendering first
+                    renderer
+                        .on_event(&update)
+                        .context("Renderer event handling failed")?;
 
                     // Update tracker with the event
                     tracker.handle_event(&update);

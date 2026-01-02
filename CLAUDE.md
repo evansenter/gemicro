@@ -6,9 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Gemicro is a CLI agent exploration platform for experimenting with AI agent implementation patterns, powered by the Gemini API via the rust-genai library.
 
-**Key Architecture**: 24-crate workspace with layered dependencies (5 agent crates in `agents/`, 10 tool crates in `tools/`, 5 hook crates in `hooks/`)
+**Key Architecture**: 24-crate workspace with layered dependencies (6 agent crates in `agents/`, 10 tool crates in `tools/`, 5 hook crates in `hooks/`)
 
 **Current Status**: Core implementation complete. Remaining work tracked in [GitHub Issues](https://github.com/evansenter/gemicro/issues).
+
+**README Maintenance**: When adding new cross-cutting features (observability, error handling, security, etc.), update the "Cross-Cutting Concerns" table in `README.md` to document what Gemicro provides vs DIY approaches.
 
 ## Versioning Philosophy
 
