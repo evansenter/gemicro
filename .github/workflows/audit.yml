@@ -12,6 +12,10 @@ on:
   schedule:
     - cron: '0 0 * * 0' # Weekly on Sundays
 
+permissions:
+  contents: read
+  checks: write  # Required for rustsec/audit-check to post results
+
 jobs:
   security:
     name: Security Audit
@@ -22,4 +26,7 @@ jobs:
         uses: rustsec/audit-check@v1.4.1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          ignore: RUSTSEC-2025-0119 # number_prefix is unmaintained (via indicatif, display-only dependency, low risk)
+          # Ignored unmaintained advisories (transitive deps we can't easily update):
+          # - RUSTSEC-2025-0119: number_prefix (via indicatif, display-only dependency)
+          # - RUSTSEC-2025-0134: rustls-pemfile (via eventsource-client -> hyper-rustls -> rustls-native-certs)
+          ignore: RUSTSEC-2025-0119,RUSTSEC-2025-0134
