@@ -20,7 +20,7 @@ Gemicro allows you to explore and interact with different AI agent patterns thro
 
 ## Architecture
 
-### 25-Crate Workspace
+### 24-Crate Workspace
 
 ```
 gemicro-core (Agent trait, Tool trait, Interceptor trait, Coordination trait, events, LLM - GENERIC ONLY)
