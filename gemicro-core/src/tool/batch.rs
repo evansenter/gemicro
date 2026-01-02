@@ -182,6 +182,13 @@ pub trait BatchConfirmationHandler: ConfirmationHandler {
 ///
 /// This helper function can be used by BatchConfirmationHandler implementations
 /// that want the default fallback behavior.
+///
+/// # Important
+///
+/// This function short-circuits on the first denial. If multiple tools require
+/// confirmation and an earlier one is approved but a later one is denied, the
+/// function returns `Denied`. The earlier approvals are not executed since the
+/// entire batch is rejected. This is intentional: batches are all-or-nothing.
 pub async fn default_batch_confirm<H: ConfirmationHandler + ?Sized>(
     handler: &H,
     batch: &ToolBatch,

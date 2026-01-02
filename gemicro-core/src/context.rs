@@ -54,6 +54,11 @@ impl ContextUsage {
     }
 
     /// Get the usage ratio (0.0 to 1.0+).
+    ///
+    /// Returns 0.0 if `context_window` is zero, which is an invalid state
+    /// indicating misconfiguration. A zero context window cannot be used
+    /// for meaningful ratio calculations, so 0.0 provides a safe fallback
+    /// that won't trigger false warnings or panics.
     pub fn usage_ratio(&self) -> f32 {
         if self.context_window == 0 {
             return 0.0;
