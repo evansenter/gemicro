@@ -16,7 +16,6 @@
 //! Common interceptor specializations:
 //! - [`ToolInterceptor`] - Intercepts tool calls (replaces the old `ToolHook` trait)
 //! - [`MessageInterceptor`] - Intercepts user messages
-//! - [`EventInterceptor`] - Intercepts external events (for cross-agent coordination)
 //!
 //! # Example
 //!
@@ -50,7 +49,7 @@
 
 mod types;
 
-pub use types::{ExternalEvent, ToolCall, UserContent, UserMessage};
+pub use types::{ToolCall, UserContent, UserMessage};
 
 use async_trait::async_trait;
 use std::fmt;
@@ -374,9 +373,6 @@ pub type ToolInterceptor = dyn Interceptor<ToolCall, ToolResult>;
 
 /// Message interceptor - intercepts user messages.
 pub type MessageInterceptor = dyn Interceptor<UserMessage, ()>;
-
-/// Event interceptor - intercepts external events (for cross-agent coordination).
-pub type EventInterceptor = dyn Interceptor<ExternalEvent, crate::AgentUpdate>;
 
 // ============================================================================
 // Tests
