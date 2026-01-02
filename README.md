@@ -56,20 +56,29 @@ Beyond the CLI, Gemicro is a library for building agent-powered applications:
 ```rust
 use gemicro_developer::{DeveloperAgent, DeveloperConfig};
 use gemicro_core::{Agent, AgentContext, LlmClient, LlmConfig};
+use gemicro_core::tool::{AutoApprove, ToolRegistry};
 use futures_util::StreamExt;
+use std::sync::Arc;
 
-// Create an agent with configuration
-let config = DeveloperConfig::default()
-    .with_max_iterations(20);
-let agent = DeveloperAgent::new(config)?;
+// Create LLM client
+let genai_client = rust_genai::Client::builder(api_key).build();
+let llm = LlmClient::new(genai_client, LlmConfig::default());
+
+// Create tool registry (register tools you want to use)
+let tools = ToolRegistry::new();
 
 // Build context with tools and confirmation handler
-let context = AgentContext::new(llm_client)
-    .with_tools(tool_registry)
-    .with_confirmation_handler(interactive_handler);
+let context = AgentContext::new(llm)
+    .with_tools(tools)
+    .with_confirmation_handler(Arc::new(AutoApprove));
+
+// Create an agent with configuration
+let config = DeveloperConfig::default().with_max_iterations(20);
+let agent = DeveloperAgent::new(config)?;
 
 // Execute and stream updates in real-time
-let mut stream = agent.execute("Read CLAUDE.md and summarize it", context);
+let stream = agent.execute("Read CLAUDE.md and summarize it", context);
+futures_util::pin_mut!(stream);
 
 while let Some(update) = stream.next().await {
     let update = update?;
@@ -88,6 +97,8 @@ while let Some(update) = stream.next().await {
     }
 }
 ```
+
+For a complete working example, see [`agents/gemicro-developer/examples/developer.rs`](agents/gemicro-developer/examples/developer.rs).
 
 ## Available Agents
 

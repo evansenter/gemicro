@@ -20,3 +20,6 @@ dirs = { workspace = true }
 
 [dev-dependencies]
 rstest = { workspace = true }
+gemicro-file-read = { path = "../../tools/gemicro-file-read" }
+gemicro-glob = { path = "../../tools/gemicro-glob" }
+tokio-util = { workspace = true }
