@@ -67,10 +67,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for (predicted, expected, description) in ground_truth_tests {
         let context = AgentContext::new(create_llm_client(&api_key));
-        let input =
-            CritiqueInput::new(predicted).with_criteria(CritiqueCriteria::GroundTruth {
-                expected: expected.to_string(),
-            });
+        let input = CritiqueInput::new(predicted).with_criteria(CritiqueCriteria::GroundTruth {
+            expected: expected.to_string(),
+        });
 
         print!("  {} ... ", description);
         let result = run_critique(&agent, &input, context).await?;
@@ -106,7 +105,10 @@ fn hash_password(password: &str) -> String {
     let spec = "Password hashing MUST use bcrypt with a cost factor of at least 10. \
                 Never use MD5 or SHA1 for password storage.";
 
-    for (code, description) in [(good_code, "bcrypt implementation"), (bad_code, "MD5 implementation")] {
+    for (code, description) in [
+        (good_code, "bcrypt implementation"),
+        (bad_code, "MD5 implementation"),
+    ] {
         let context = AgentContext::new(create_llm_client(&api_key));
         let input = CritiqueInput::new(code)
             .with_context(
@@ -196,8 +198,8 @@ Rust Code Conventions:
 "#;
 
     let context = AgentContext::new(create_llm_client(&api_key));
-    let input = CritiqueInput::new(code_with_issues)
-        .with_criteria(CritiqueCriteria::CodeConventions {
+    let input =
+        CritiqueInput::new(code_with_issues).with_criteria(CritiqueCriteria::CodeConventions {
             conventions: conventions.into(),
         });
 
