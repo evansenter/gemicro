@@ -174,7 +174,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "🔧 [{:>2}] {} {}",
                     tool_call_count,
                     tool_name,
-                    args_preview  // No truncation for paths
+                    args_preview // No truncation for paths
                 );
 
                 if verbose {
