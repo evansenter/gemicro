@@ -71,6 +71,9 @@ gemicro "What AI news happened this week?" --google-search
 
 # Custom configuration
 gemicro "Compare async runtimes" --min-sub-queries 3 --max-sub-queries 7 --timeout 120
+
+# With event bus for cross-session coordination
+gemicro "Analyze the codebase" --event-bus-url http://localhost:8765
 ```
 
 REPL commands: `/help`, `/agent [name]`, `/history`, `/clear`, `/reload`, `/quit`
@@ -78,9 +81,9 @@ REPL commands: `/help`, `/agent [name]`, `/history`, `/clear`, `/reload`, `/quit
 ## Crate Layers
 
 ```text
-gemicro-core (Agent trait, Tool trait, Interceptor trait, events, LLM - GENERIC ONLY)
+gemicro-core (Agent trait, Tool trait, Interceptor trait, Coordination trait, events, LLM - GENERIC ONLY)
     ↓
-tools/* (one crate per tool - file_read, web_fetch, task, web_search, glob, grep, file_write, file_edit, bash)
+tools/* (one crate per tool - file_read, web_fetch, task, web_search, glob, grep, file_write, file_edit, bash, event_bus)
 hooks/* (one crate per hook - audit_log, file_security, input_sanitizer, conditional_permission, metrics)
 agents/* (one crate per agent - hermetic isolation)
     ↓
@@ -96,7 +99,7 @@ Each crate has a specific purpose. Before adding code, verify it belongs in that
 
 | Crate | Contains | Does NOT Contain |
 |-------|----------|------------------|
-| **gemicro-core** | Agent trait, Tool trait, Interceptor trait, InterceptorChain, AgentContext, AgentUpdate, ToolRegistry, ToolSet, LlmClient, LlmConfig, errors | Agent/tool/interceptor implementations, agent-specific configs |
+| **gemicro-core** | Agent trait, Tool trait, Interceptor trait, InterceptorChain, Coordination trait, AgentContext, AgentUpdate, ToolRegistry, ToolSet, LlmClient, LlmConfig, errors | Agent/tool/interceptor implementations, agent-specific configs |
 | **tools/*** | One tool per crate (FileRead, WebFetch, Bash, etc.) | Other tools, agent logic, hook logic |
 | **hooks/*** | One hook per crate (AuditLog, FileSecurity, Metrics, etc.) | Other hooks, agent logic, tool logic |
 | **agents/*** | One agent per crate with its config and events | Other agents, core infrastructure |
@@ -133,7 +136,8 @@ Each agent crate:
 | `FinalResult`, `ResultMetadata` | `gemicro_core` |
 | `Tool`, `ToolRegistry`, `ToolSet`, `ToolResult`, `ToolError` | `gemicro_core::tool` |
 | `Interceptor`, `InterceptorChain`, `InterceptDecision`, `InterceptError` | `gemicro_core::interceptor` |
-| `ToolCall`, `UserMessage`, `ExternalEvent` | `gemicro_core::interceptor` |
+| `ToolCall`, `UserMessage` | `gemicro_core::interceptor` |
+| `Coordination`, `ExternalEvent`, `CoordinationError`, `HubCoordination` | `gemicro_core::coordination` |
 | `ConfirmationHandler`, `AutoApprove`, `AutoDeny`, `GemicroToolService` | `gemicro_core::tool` |
 | `Calculator`, `CurrentDatetime` | `gemicro_tool_agent::tools` |
 | `FileRead` | `gemicro_file_read` |

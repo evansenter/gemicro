@@ -20,12 +20,12 @@ Gemicro allows you to explore and interact with different AI agent patterns thro
 
 ## Architecture
 
-### 23-Crate Workspace
+### 24-Crate Workspace
 
 ```
-gemicro-core (Agent trait, Tool trait, Interceptor trait, events, LLM - GENERIC ONLY)
+gemicro-core (Agent trait, Tool trait, Interceptor trait, Coordination trait, events, LLM - GENERIC ONLY)
     ↓
-tools/* (9 tool crates - file_read, web_fetch, task, web_search, glob, grep, file_write, file_edit, bash)
+tools/* (10 tool crates - file_read, web_fetch, task, web_search, glob, grep, file_write, file_edit, bash, event_bus)
 hooks/* (5 hook crates - audit_log, file_security, input_sanitizer, conditional_permission, metrics)
 agents/* (5 agent crates - hermetic isolation)
     ↓
@@ -37,8 +37,8 @@ gemicro-cli (terminal rendering)
 
 | Layer | Crates |
 |-------|--------|
-| **gemicro-core** | Agent/Tool/Interceptor traits, AgentContext, AgentUpdate events, LlmClient. **No implementations.** |
-| **tools/** | file_read, web_fetch, task, web_search, glob, grep, file_write, file_edit, bash |
+| **gemicro-core** | Agent/Tool/Interceptor/Coordination traits, AgentContext, AgentUpdate events, LlmClient. **No implementations.** |
+| **tools/** | file_read, web_fetch, task, web_search, glob, grep, file_write, file_edit, bash, event_bus |
 | **hooks/** | audit_log, file_security, input_sanitizer, conditional_permission, metrics |
 | **agents/** | deep_research, react, simple_qa, tool_agent, judge |
 | **gemicro-runner** | Headless execution: AgentRunner, AgentRegistry, ExecutionState, metrics |
@@ -160,6 +160,7 @@ Options:
       --max-tokens <N>         Max tokens per LLM request [default: 16384]
       --temperature <F>        Temperature 0.0-1.0 [default: 0.7]
       --google-search          Enable Google Search grounding
+      --event-bus-url <URL>    Event bus URL for cross-session coordination
       --plain                  Plain text output (no markdown)
   -v, --verbose                Enable debug logging
   -h, --help                   Print help
