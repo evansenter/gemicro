@@ -16,24 +16,13 @@
 //! Press Ctrl+C to cancel gracefully.
 
 use futures_util::StreamExt;
-use gemicro_core::{AgentContext, AgentError, LlmClient, LlmConfig};
+use gemicro_core::{truncate, AgentContext, AgentError, LlmClient, LlmConfig};
 use gemicro_react::{ReactAgent, ReactConfig};
 use std::env;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
-
-/// Truncate text to a maximum length, adding ellipsis if needed
-fn truncate(s: &str, max_chars: usize) -> String {
-    let s = s.trim();
-    if s.chars().count() <= max_chars {
-        s.to_string()
-    } else {
-        let truncated: String = s.chars().take(max_chars - 3).collect();
-        format!("{}...", truncated.trim_end())
-    }
-}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

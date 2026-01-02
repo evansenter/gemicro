@@ -828,4 +828,35 @@ mod tests {
         assert!(collected[3].as_ref().unwrap().event_type == "final_result");
         // Note: Warnings are logged for collected[2] and collected[3] but we can't easily verify logs
     }
+
+    // Builder pattern and Arc sharing tests
+
+    #[test]
+    fn test_orchestration_config_builder() {
+        use crate::agent::orchestration::{OrchestrationConfig, OrchestrationState};
+
+        let config = OrchestrationConfig::default()
+            .with_global_max_concurrent(10)
+            .with_max_depth(3);
+
+        let orchestration = Arc::new(OrchestrationState::new(config));
+
+        // Verify OrchestrationConfig builder and Arc sharing work correctly
+        let orchestration_clone: Arc<OrchestrationState> = Arc::clone(&orchestration);
+        assert_eq!(orchestration_clone.config().max_depth, 3);
+        assert_eq!(orchestration_clone.config().global_max_concurrent, 10);
+    }
+
+    #[test]
+    fn test_tool_registry_arc_sharing() {
+        use crate::tool::ToolRegistry;
+
+        let registry = ToolRegistry::new();
+        assert!(registry.is_empty());
+
+        // Verify ToolRegistry can be wrapped in Arc for sharing across contexts
+        let registry_arc = Arc::new(registry);
+        let cloned = Arc::clone(&registry_arc);
+        assert!(cloned.is_empty());
+    }
 }

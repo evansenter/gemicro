@@ -12,7 +12,7 @@
 //!   gemicro "What happened in tech news today?" --google-search
 
 use futures_util::StreamExt;
-use gemicro_core::{AgentContext, AgentError, LlmClient, LlmConfig};
+use gemicro_core::{first_sentence, truncate, AgentContext, AgentError, LlmClient, LlmConfig};
 use gemicro_deep_research::{DeepResearchAgent, DeepResearchEventExt, ResearchConfig};
 use std::collections::HashMap;
 use std::env;
@@ -20,30 +20,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
-
-/// Truncate text to a maximum length, adding ellipsis if needed
-fn truncate(s: &str, max_chars: usize) -> String {
-    let s = s.trim();
-    if s.chars().count() <= max_chars {
-        s.to_string()
-    } else {
-        let truncated: String = s.chars().take(max_chars - 3).collect();
-        format!("{}...", truncated.trim_end())
-    }
-}
-
-/// Extract the first sentence or line from text
-fn first_sentence(s: &str) -> String {
-    let s = s.trim();
-    // Try to find end of first sentence
-    if let Some(pos) = s.find(['.', '\n']) {
-        let sentence = s[..=pos].trim();
-        if sentence.len() > 10 {
-            return truncate(sentence, 100);
-        }
-    }
-    truncate(s, 100)
-}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
