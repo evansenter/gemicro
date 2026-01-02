@@ -4,7 +4,7 @@
 //! enabling easy switching between indicatif, ratatui, or other backends.
 
 use anyhow::Result;
-use gemicro_core::ExecutionTracking;
+use gemicro_core::{AgentUpdate, ExecutionTracking};
 
 /// Trait for rendering agent execution progress to the terminal.
 ///
@@ -14,6 +14,18 @@ use gemicro_core::ExecutionTracking;
 /// This trait is agent-agnostic - each agent provides its own tracker
 /// implementation that supplies appropriate status messages.
 pub trait Renderer {
+    /// Called for each event to allow event-specific rendering.
+    ///
+    /// This is called BEFORE `on_status()` and allows renderers to handle
+    /// specific event types (like `tool_call_started`, `tool_result`) with
+    /// specialized display logic.
+    ///
+    /// Default implementation does nothing - renderers can opt-in to
+    /// event-specific handling.
+    fn on_event(&mut self, _event: &AgentUpdate) -> Result<()> {
+        Ok(())
+    }
+
     /// Called after each event to update the display.
     ///
     /// The tracker provides status messages via `status_message()`.

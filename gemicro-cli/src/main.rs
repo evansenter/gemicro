@@ -188,6 +188,10 @@ async fn run_research(args: &cli::Args, query: &str) -> Result<()> {
                             interrupted = true;
                             break;
                         }
+                        // Handle event-specific rendering first
+                        renderer
+                            .on_event(&update)
+                            .context("Renderer event handling failed")?;
                         tracker.handle_event(&update);
                         renderer
                             .on_status(tracker.as_ref())
@@ -226,6 +230,11 @@ async fn run_research(args: &cli::Args, query: &str) -> Result<()> {
                                 interrupted = true;
                                 break;
                             }
+
+                            // Handle event-specific rendering first
+                            renderer
+                                .on_event(&update)
+                                .context("Renderer event handling failed")?;
 
                             tracker.handle_event(&update);
                             renderer
@@ -286,6 +295,11 @@ async fn run_research(args: &cli::Args, query: &str) -> Result<()> {
                         interrupted = true;
                         break;
                     }
+
+                    // Handle event-specific rendering first
+                    renderer
+                        .on_event(&update)
+                        .context("Renderer event handling failed")?;
 
                     tracker.handle_event(&update);
                     renderer
