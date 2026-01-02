@@ -42,22 +42,17 @@
 //! # }
 //! ```
 
-mod batch;
 mod config;
-mod context;
 mod events;
 
-pub use batch::{
-    BatchApproval, BatchConfirmationHandler, BatchSummary, PendingToolCall, ToolBatch,
-};
 pub use config::DeveloperConfig;
-pub use context::{ContextLevel, ContextUsage, DEFAULT_CONTEXT_WINDOW, DEFAULT_WARNING_THRESHOLD};
 
 use async_stream::try_stream;
 use gemicro_core::{
     tool::{AutoDeny, ConfirmationHandler, ToolError},
-    Agent, AgentContext, AgentError, AgentStream, AgentUpdate, DefaultTracker, ExecutionTracking,
-    LlmError, ResultMetadata, MODEL,
+    Agent, AgentContext, AgentError, AgentStream, AgentUpdate, BatchApproval,
+    BatchConfirmationHandler, ContextLevel, ContextUsage, DefaultTracker, ExecutionTracking,
+    LlmError, PendingToolCall, ResultMetadata, ToolBatch, MODEL,
 };
 use rust_genai::{
     function_result_content, FunctionDeclaration, InteractionContent, InteractionResponse,
@@ -336,7 +331,8 @@ impl Agent for DeveloperAgent {
                     );
 
                     // Get batch confirmation
-                    let approval = confirmation_handler.confirm_batch(&batch).await;
+                    // Deref: Arc<dyn ConfirmationHandler> -> dyn ConfirmationHandler
+                    let approval = (*confirmation_handler).confirm_batch(&batch).await;
                     match approval {
                         BatchApproval::Approved => {
                             yield AgentUpdate::custom(

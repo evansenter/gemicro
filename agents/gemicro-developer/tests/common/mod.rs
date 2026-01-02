@@ -2,11 +2,14 @@
 
 #![allow(dead_code)]
 
-use gemicro_core::tool::{AutoApprove, ToolRegistry};
+use async_trait::async_trait;
+use gemicro_core::tool::{AutoApprove, ConfirmationHandler, ToolRegistry};
 use gemicro_core::{AgentContext, LlmClient, LlmConfig};
 use gemicro_file_read::FileRead;
 use gemicro_glob::Glob;
+use serde_json::Value;
 use std::env;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -36,4 +39,72 @@ pub fn create_test_context(api_key: &str) -> AgentContext {
     AgentContext::new(llm)
         .with_tools(tools)
         .with_confirmation_handler(Arc::new(AutoApprove))
+}
+
+/// Create a test AgentContext with a custom confirmation handler.
+pub fn create_test_context_with_handler(
+    api_key: &str,
+    handler: Arc<dyn ConfirmationHandler>,
+) -> AgentContext {
+    let genai_client = rust_genai::Client::builder(api_key.to_string()).build();
+    let config = LlmConfig::default()
+        .with_timeout(Duration::from_secs(60))
+        .with_max_tokens(4096)
+        .with_temperature(0.7)
+        .with_max_retries(1)
+        .with_retry_base_delay_ms(500);
+    let llm = LlmClient::new(genai_client, config);
+
+    // Create tool registry with read-only tools
+    let mut tools = ToolRegistry::new();
+    tools.register(FileRead);
+    tools.register(Glob);
+
+    AgentContext::new(llm)
+        .with_tools(tools)
+        .with_confirmation_handler(handler)
+}
+
+/// Configurable confirmation handler for testing.
+///
+/// Implements ConfirmationHandler with configurable approval behavior.
+/// The BatchConfirmationHandler blanket impl provides default batch behavior
+/// (falls back to individual confirms).
+#[derive(Debug)]
+pub struct TestConfirmationHandler {
+    /// Whether to approve individual confirmations.
+    pub approve: bool,
+    /// Counter for confirm calls.
+    pub confirm_count: AtomicUsize,
+}
+
+impl TestConfirmationHandler {
+    /// Create handler that approves all confirmations.
+    pub fn approve_all() -> Self {
+        Self {
+            approve: true,
+            confirm_count: AtomicUsize::new(0),
+        }
+    }
+
+    /// Create handler that denies all confirmations.
+    pub fn deny_all() -> Self {
+        Self {
+            approve: false,
+            confirm_count: AtomicUsize::new(0),
+        }
+    }
+
+    /// Get the number of times confirm was called.
+    pub fn confirm_calls(&self) -> usize {
+        self.confirm_count.load(Ordering::SeqCst)
+    }
+}
+
+#[async_trait]
+impl ConfirmationHandler for TestConfirmationHandler {
+    async fn confirm(&self, _tool_name: &str, _message: &str, _args: &Value) -> bool {
+        self.confirm_count.fetch_add(1, Ordering::SeqCst);
+        self.approve
+    }
 }

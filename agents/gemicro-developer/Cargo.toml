@@ -17,7 +17,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 log = { workspace = true }
 dirs = { workspace = true }
-async-trait = { workspace = true }
 
 [dev-dependencies]
 rstest = { workspace = true }
@@ -25,3 +24,4 @@ gemicro-file-read = { path = "../../tools/gemicro-file-read" }
 gemicro-glob = { path = "../../tools/gemicro-glob" }
 tokio-util = { workspace = true }
 textwrap = "0.16"
+async-trait = { workspace = true }

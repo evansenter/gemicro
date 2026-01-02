@@ -48,10 +48,15 @@
 //! ```
 
 mod adapter;
+mod batch;
 mod registry;
 mod service;
 
 pub use adapter::{tools_to_callables, ToolCallableAdapter};
+pub use batch::{
+    default_batch_confirm, BatchApproval, BatchConfirmationHandler, BatchSummary, PendingToolCall,
+    ToolBatch,
+};
 pub use registry::ToolRegistry;
 pub use service::GemicroToolService;
 
@@ -158,6 +163,40 @@ pub struct AutoDeny;
 impl ConfirmationHandler for AutoDeny {
     async fn confirm(&self, _tool_name: &str, _message: &str, _args: &Value) -> bool {
         false
+    }
+}
+
+// ============================================================================
+// BatchConfirmationHandler implementations
+// ============================================================================
+
+#[async_trait]
+impl BatchConfirmationHandler for AutoApprove {
+    async fn confirm_batch(&self, batch: &ToolBatch) -> BatchApproval {
+        batch::default_batch_confirm(self, batch).await
+    }
+}
+
+#[async_trait]
+impl BatchConfirmationHandler for AutoDeny {
+    async fn confirm_batch(&self, batch: &ToolBatch) -> BatchApproval {
+        batch::default_batch_confirm(self, batch).await
+    }
+}
+
+// Enable BatchConfirmationHandler for trait objects
+#[async_trait]
+impl BatchConfirmationHandler for dyn ConfirmationHandler {
+    async fn confirm_batch(&self, batch: &ToolBatch) -> BatchApproval {
+        batch::default_batch_confirm(self, batch).await
+    }
+}
+
+// Enable BatchConfirmationHandler for trait objects with Send + Sync
+#[async_trait]
+impl BatchConfirmationHandler for dyn ConfirmationHandler + Send + Sync {
+    async fn confirm_batch(&self, batch: &ToolBatch) -> BatchApproval {
+        batch::default_batch_confirm(self, batch).await
     }
 }
 
