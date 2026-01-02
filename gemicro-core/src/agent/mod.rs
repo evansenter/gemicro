@@ -26,7 +26,7 @@
 //! - `gemicro-react`: Reasoning + Acting pattern with iterative tool use
 //! - `gemicro-simple-qa`: Minimal single-call agent for reference/demonstration
 //! - `gemicro-tool-agent`: Native function calling via rust-genai's `#[tool]` macro
-//! - `gemicro-judge`: LLM-based semantic evaluation for scoring
+//! - `gemicro-critique`: Generalized output validation and actionable feedback
 //!
 //! ## Example
 //!
@@ -427,6 +427,12 @@ where
 // ============================================================================
 
 /// The event type that signals agent completion.
+///
+/// This is the **only** universal event constant. Agent-specific events
+/// (like `react_thought`, `decomposition_started`, `critique_started`) should
+/// be defined as constants within their respective agent crates, not here.
+/// Per Evergreen soft-typing principles, adding agent-specific constants here
+/// would require core changes for each new agent.
 pub const EVENT_FINAL_RESULT: &str = "final_result";
 
 /// Wraps an agent stream to enforce the `final_result` contract.

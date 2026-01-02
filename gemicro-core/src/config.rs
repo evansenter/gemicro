@@ -19,7 +19,7 @@ pub const MODEL: &str = "gemini-3-flash-preview";
 /// - `gemicro-react`: ReactConfig, ReactPrompts
 /// - `gemicro-simple-qa`: SimpleQaConfig
 /// - `gemicro-tool-agent`: ToolAgentConfig
-/// - `gemicro-judge`: JudgeConfig
+/// - `gemicro-critique`: CritiqueConfig
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct GemicroConfig {

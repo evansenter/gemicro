@@ -149,16 +149,19 @@ impl Default for Scorers {
     }
 }
 
-/// LLM-as-judge scorer using semantic comparison.
+/// Critique-based scorer using semantic comparison.
 ///
-/// Uses an LLM to evaluate whether the predicted answer is semantically
+/// Uses the CritiqueAgent to evaluate whether the predicted answer is semantically
 /// correct compared to the ground truth. More flexible than exact matching
 /// but slower and requires API calls.
 ///
 /// # Returns
 ///
-/// - `1.0` if the LLM judges the prediction as semantically correct
-/// - `0.0` if the LLM judges the prediction as incorrect
+/// - Score between 0.0 and 1.0 based on the critique verdict:
+///   - `Pass`: 1.0
+///   - `PassWithWarnings`: 0.75
+///   - `NeedsRevision`: 0.25
+///   - `Reject`: 0.0
 /// - `NaN` if the evaluation itself failed (LLM error, timeout, etc.)
 ///
 /// Use [`f64::is_nan()`] to check for evaluation failures.
@@ -171,43 +174,52 @@ impl Default for Scorers {
 /// # Example
 ///
 /// ```no_run
-/// use gemicro_eval::{Scorer, LlmJudgeScorer};
+/// use gemicro_eval::{Scorer, CritiqueScorer};
 /// use gemicro_core::{LlmClient, LlmConfig};
 /// use std::sync::Arc;
 ///
 /// // Must be called within a tokio runtime
 /// let genai = rust_genai::Client::builder("api-key".to_string()).build();
 /// let llm = Arc::new(LlmClient::new(genai, LlmConfig::default()));
-/// let scorer = LlmJudgeScorer::new(llm);
+/// let scorer = CritiqueScorer::new(llm);
 ///
-/// // Returns 1.0 (correct), 0.0 (incorrect), or NaN (evaluation failed)
+/// // Returns score based on verdict, or NaN if evaluation failed
 /// // let score = scorer.score("The capital is Paris", "Paris");
 /// // if score.is_nan() { /* handle evaluation failure */ }
 /// ```
-pub struct LlmJudgeScorer {
+pub struct CritiqueScorer {
     llm: std::sync::Arc<gemicro_core::LlmClient>,
 }
 
-impl LlmJudgeScorer {
-    /// Create a new LLM judge scorer with the given client.
+impl CritiqueScorer {
+    /// Create a new critique scorer with the given client.
     pub fn new(llm: std::sync::Arc<gemicro_core::LlmClient>) -> Self {
         Self { llm }
     }
 }
 
-impl Scorer for LlmJudgeScorer {
+impl Scorer for CritiqueScorer {
     fn name(&self) -> &str {
-        "llm_judge"
+        "critique"
     }
 
     fn score(&self, predicted: &str, ground_truth: &str) -> f64 {
         use futures_util::StreamExt;
         use gemicro_core::{Agent, AgentContext};
-        use gemicro_judge::{JudgeConfig, JudgeInput, LlmJudgeAgent};
+        use gemicro_critique::{CritiqueAgent, CritiqueConfig, CritiqueCriteria, CritiqueInput};
 
-        // Create judge agent and input
-        let agent = LlmJudgeAgent::new(JudgeConfig::default());
-        let input = JudgeInput::new(predicted, ground_truth);
+        // Handle empty predicted strings: an empty answer is always incorrect (score 0.0).
+        // CritiqueAgent validates that content is non-empty and would return an error,
+        // but for evaluation purposes, empty predictions should score 0.0, not NaN.
+        if predicted.trim().is_empty() {
+            return 0.0;
+        }
+
+        // Create critique agent with ground truth criteria
+        let agent = CritiqueAgent::new(CritiqueConfig::default()).expect("default config is valid");
+        let input = CritiqueInput::new(predicted).with_criteria(CritiqueCriteria::GroundTruth {
+            expected: ground_truth.into(),
+        });
         let context = AgentContext::from_arc(self.llm.clone());
 
         // Run async agent from sync context using block_in_place.
@@ -220,33 +232,37 @@ impl Scorer for LlmJudgeScorer {
                 while let Some(result) = stream.next().await {
                     match result {
                         Ok(update) => {
-                            if update.event_type == "judge_result" {
-                                match update.data.get("correct") {
-                                    Some(value) => match value.as_bool() {
-                                        Some(correct) => return if correct { 1.0 } else { 0.0 },
-                                        None => {
+                            if update.event_type == "critique_result" {
+                                // Extract verdict and convert to score
+                                match update.data.get("verdict") {
+                                    Some(value) => match value.as_str() {
+                                        Some("Pass") => return 1.0,
+                                        Some("PassWithWarnings") => return 0.75,
+                                        Some("NeedsRevision") => return 0.25,
+                                        Some("Reject") => return 0.0,
+                                        _ => {
                                             log::error!(
-                                                "LLM judge 'correct' field is not a boolean: {:?}",
+                                                "Critique 'verdict' has unexpected value: {:?}",
                                                 value
                                             );
                                             return f64::NAN;
                                         }
                                     },
                                     None => {
-                                        log::error!("LLM judge result missing 'correct' field");
+                                        log::error!("Critique result missing 'verdict' field");
                                         return f64::NAN;
                                     }
                                 }
                             }
                         }
                         Err(e) => {
-                            log::error!("LLM judge failed: {:?}", e);
+                            log::error!("Critique failed: {:?}", e);
                             return f64::NAN;
                         }
                     }
                 }
-                // Stream ended without producing a judge_result
-                log::error!("LLM judge did not produce a result");
+                // Stream ended without producing a critique_result
+                log::error!("Critique did not produce a result");
                 f64::NAN
             })
         })

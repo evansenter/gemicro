@@ -18,7 +18,7 @@
 //! - `gemicro-react`: Reasoning + Acting pattern with iterative tool use
 //! - `gemicro-simple-qa`: Minimal single-call agent for reference/demonstration
 //! - `gemicro-tool-agent`: Native function calling via rust-genai's `#[tool]` macro
-//! - `gemicro-judge`: LLM-based semantic evaluation for scoring
+//! - `gemicro-critique`: Generalized output validation and actionable feedback
 //!
 //! ## Example
 //!

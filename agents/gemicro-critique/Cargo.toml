@@ -1,11 +1,11 @@
 [package]
-name = "gemicro-judge"
+name = "gemicro-critique"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "LLM Judge agent: LLM-based evaluation scoring"
+description = "Critique agent: generalized output validation and feedback"
 
 [dependencies]
 gemicro-core = { path = "../../gemicro-core" }

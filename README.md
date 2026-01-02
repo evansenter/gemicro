@@ -61,7 +61,7 @@ Each type lives in exactly one crate. Import from the canonical source:
 ```rust
 use gemicro_core::{Agent, AgentContext, AgentUpdate};     // Core types
 use gemicro_deep_research::{DeepResearchAgent, ResearchConfig}; // Agent + config
-use gemicro_judge::LlmJudgeAgent;                          // Judge agent
+use gemicro_critique::CritiqueAgent;                       // Critique agent
 ```
 
 ## Quick Start

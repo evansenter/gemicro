@@ -1,23 +1,23 @@
 //! A/B Comparison Example
 //!
 //! Demonstrates using AgentRegistry to compare different agent configurations
-//! on the same dataset, with LlmJudgeAgent for semantic evaluation.
+//! on the same dataset, with CritiqueAgent for semantic evaluation.
 //!
 //! Run with:
 //!   GEMINI_API_KEY=your_key cargo run -p gemicro-eval --example ab_comparison
 //!
 //! This example:
 //! 1. Registers research agents with different configurations
-//! 2. Registers an LlmJudgeAgent for semantic evaluation
+//! 2. Registers a CritiqueAgent for semantic evaluation
 //! 3. Runs the same evaluation dataset against each research agent
-//! 4. Uses the judge agent to score semantic correctness
+//! 4. Uses the critique agent to score semantic correctness
 //! 5. Compares performance metrics
 
 use futures_util::StreamExt;
 use gemicro_core::{AgentContext, LlmClient, LlmConfig};
+use gemicro_critique::{CritiqueAgent, CritiqueConfig, CritiqueCriteria, CritiqueInput};
 use gemicro_deep_research::{DeepResearchAgent, ResearchConfig};
 use gemicro_eval::{EvalConfig, EvalHarness, EvalProgress, JsonFileDataset, Scorers};
-use gemicro_judge::{JudgeConfig, JudgeInput, LlmJudgeAgent};
 use gemicro_runner::AgentRegistry;
 use std::env;
 use std::io::Write;
@@ -34,14 +34,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
          Set it with: export GEMINI_API_KEY=your_key",
     );
 
-    println!("╔══════════════════════════════════════════════════════════════╗");
-    println!("║              A/B Agent Comparison Demo                       ║");
-    println!("╚══════════════════════════════════════════════════════════════╝");
+    println!("=====================================================");
+    println!("              A/B Agent Comparison Demo              ");
+    println!("=====================================================");
     println!();
 
     // Create a small test dataset
     let dataset = create_test_dataset()?;
-    println!("📊 Dataset: {} questions", 3);
+    println!("Dataset: {} questions", 3);
     println!();
 
     // Register agents with different configurations
@@ -73,15 +73,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
     });
 
-    // Register the LLM Judge as an agent (demonstrates judges are just agents)
-    registry.register("llm_judge", || {
-        Box::new(LlmJudgeAgent::new(JudgeConfig::default()))
+    // Register the Critique agent for evaluation (demonstrates agents are composable)
+    registry.register("critique", || {
+        Box::new(CritiqueAgent::new(CritiqueConfig::default()).expect("Invalid config"))
     });
 
-    println!("🤖 Agents registered:");
+    println!("Agents registered:");
     println!("   - conservative: 2 sub-queries (faster)");
     println!("   - aggressive: 4-5 sub-queries (more thorough)");
-    println!("   - llm_judge: semantic correctness evaluator");
+    println!("   - critique: semantic correctness evaluator");
     println!();
 
     // Create LLM client configuration
@@ -97,25 +97,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let eval_config = EvalConfig::new().with_concurrency(1).with_max_retries(0);
     let harness = EvalHarness::new(eval_config);
 
-    // Get research agent names (exclude the judge)
+    // Get research agent names (exclude the critique agent)
     let research_agents: Vec<_> = registry
         .list()
         .into_iter()
-        .filter(|name| *name != "llm_judge")
+        .filter(|name| *name != "critique")
         .collect();
 
     // Run A/B comparison
-    println!("═══════════════════════════════════════════════════════════════");
+    println!("===================================================================");
     println!("                    Running A/B Comparison");
-    println!("═══════════════════════════════════════════════════════════════");
+    println!("===================================================================");
     println!();
 
     let mut results = Vec::new();
 
     for name in research_agents {
-        println!("┌─────────────────────────────────────────────────────────────┐");
-        println!("│ Testing: {:<51}│", name);
-        println!("└─────────────────────────────────────────────────────────────┘");
+        println!("-------------------------------------------------------------");
+        println!(" Testing: {}", name);
+        println!("-------------------------------------------------------------");
 
         let agent = registry.get(name).unwrap();
         let llm = LlmClient::new(genai_client.clone(), llm_config.clone());
@@ -136,7 +136,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         total,
                         success,
                     } => {
-                        let icon = if success { "✓" } else { "✗" };
+                        let icon = if success { "[OK]" } else { "[FAIL]" };
                         println!("   [{}/{}] {}", completed, total, icon);
                     }
                     _ => {}
@@ -144,59 +144,66 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             )
             .await?;
 
-        // Run LLM judge on results using the registered agent
-        println!("   Running LLM judge (via agent)...");
-        let judge = registry.get("llm_judge").unwrap();
+        // Run critique agent on results using the registered agent
+        println!("   Running critique agent...");
+        let critique = registry.get("critique").unwrap();
 
         for result in &mut summary.results {
             if let Some(predicted) = &result.predicted {
-                // Create judge input and run the agent
-                let input = JudgeInput::new(predicted, &result.ground_truth);
-                let judge_llm = LlmClient::new(genai_client.clone(), llm_config.clone());
-                let context = AgentContext::new(judge_llm);
+                // Create critique input with ground truth criteria
+                let input =
+                    CritiqueInput::new(predicted).with_criteria(CritiqueCriteria::GroundTruth {
+                        expected: result.ground_truth.clone(),
+                    });
+                let critique_llm = LlmClient::new(genai_client.clone(), llm_config.clone());
+                let context = AgentContext::new(critique_llm);
 
-                let stream = judge.execute(&input.to_query(), context);
+                let stream = critique.execute(&input.to_query(), context);
                 futures_util::pin_mut!(stream);
 
-                // Collect the judge result
+                // Collect the critique result
                 while let Some(update_result) = stream.next().await {
                     match update_result {
                         Ok(update) => {
-                            if update.event_type == "judge_result" {
-                                let correct = update.data["correct"].as_bool().unwrap_or(false);
-                                result.scores.insert(
-                                    "llm_judge".to_string(),
-                                    if correct { 1.0 } else { 0.0 },
-                                );
+                            if update.event_type == "critique_result" {
+                                // Convert verdict to score
+                                let score = match update.data["verdict"].as_str() {
+                                    Some("Pass") => 1.0,
+                                    Some("PassWithWarnings") => 0.75,
+                                    Some("NeedsRevision") => 0.25,
+                                    Some("Reject") => 0.0,
+                                    _ => 0.0,
+                                };
+                                result.scores.insert("critique".to_string(), score);
                             }
                         }
                         Err(e) => {
-                            eprintln!("   ⚠ Judge error: {}", e);
+                            eprintln!("   Warning: Critique error: {}", e);
                         }
                     }
                 }
             }
         }
 
-        // Recalculate averages after adding judge scores
+        // Recalculate averages after adding critique scores
         summary.recalculate_averages();
 
         println!();
         println!("   Results for '{}':", name);
         println!(
-            "   ├── Succeeded: {}/{}",
+            "   - Succeeded: {}/{}",
             summary.succeeded, summary.total_questions
         );
         println!(
-            "   ├── LLM Judge: {:.3}",
-            summary.avg_score("llm_judge").unwrap_or(0.0)
+            "   - Critique: {:.3}",
+            summary.avg_score("critique").unwrap_or(0.0)
         );
         println!(
-            "   ├── Contains:  {:.3}",
+            "   - Contains:  {:.3}",
             summary.avg_score("contains").unwrap_or(0.0)
         );
         println!(
-            "   └── Duration: {:.1}s",
+            "   - Duration: {:.1}s",
             summary.total_duration.as_secs_f64()
         );
         println!();
@@ -205,13 +212,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Print comparison summary
-    println!("═══════════════════════════════════════════════════════════════");
+    println!("===================================================================");
     println!("                      Comparison Summary");
-    println!("═══════════════════════════════════════════════════════════════");
+    println!("===================================================================");
     println!();
     println!(
         "{:<15} {:>10} {:>10} {:>10} {:>10}",
-        "Agent", "Success", "LLM Judge", "Contains", "Time(s)"
+        "Agent", "Success", "Critique", "Contains", "Time(s)"
     );
     println!("{}", "-".repeat(55));
 
@@ -220,31 +227,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "{:<15} {:>10} {:>10.3} {:>10.3} {:>10.1}",
             name,
             format!("{}/{}", summary.succeeded, summary.total_questions),
-            summary.avg_score("llm_judge").unwrap_or(0.0),
+            summary.avg_score("critique").unwrap_or(0.0),
             summary.avg_score("contains").unwrap_or(0.0),
             summary.total_duration.as_secs_f64()
         );
     }
     println!();
 
-    // Determine winner based on LLM judge
+    // Determine winner based on critique score
     if results.len() == 2 {
         let (name_a, summary_a) = &results[0];
         let (name_b, summary_b) = &results[1];
-        let judge_a = summary_a.avg_score("llm_judge").unwrap_or(0.0);
-        let judge_b = summary_b.avg_score("llm_judge").unwrap_or(0.0);
+        let score_a = summary_a.avg_score("critique").unwrap_or(0.0);
+        let score_b = summary_b.avg_score("critique").unwrap_or(0.0);
 
-        if (judge_a - judge_b).abs() < 0.01 {
-            println!("🤝 Result: Tie (LLM Judge scores within 0.01)");
-        } else if judge_a > judge_b {
+        if (score_a - score_b).abs() < 0.01 {
+            println!("Result: Tie (Critique scores within 0.01)");
+        } else if score_a > score_b {
             println!(
-                "🏆 Winner: {} (LLM Judge: {:.3} vs {:.3})",
-                name_a, judge_a, judge_b
+                "Winner: {} (Critique: {:.3} vs {:.3})",
+                name_a, score_a, score_b
             );
         } else {
             println!(
-                "🏆 Winner: {} (LLM Judge: {:.3} vs {:.3})",
-                name_b, judge_b, judge_a
+                "Winner: {} (Critique: {:.3} vs {:.3})",
+                name_b, score_b, score_a
             );
         }
     }

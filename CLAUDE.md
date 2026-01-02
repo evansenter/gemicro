@@ -157,7 +157,7 @@ Each agent crate:
 | `Metrics` | `gemicro_metrics` |
 | `DeepResearchAgent`, `ResearchConfig` | `gemicro_deep_research` |
 | `ReactAgent`, `ReactConfig` | `gemicro_react` |
-| `LlmJudgeAgent`, `JudgeConfig` | `gemicro_judge` |
+| `CritiqueAgent`, `CritiqueConfig` | `gemicro_critique` |
 | `EvalHarness`, `Scorers` | `gemicro_eval` |
 
 **Why?**
@@ -427,29 +427,16 @@ const EVENT_MY_STEP: &str = "my_step";
 yield Ok(AgentUpdate::custom(EVENT_MY_STEP, "Step complete", json!({})));
 ```
 
-### Standard Events
+### Universal Events
 
-For interoperability, all agents should emit `final_result` when complete:
+This table lists **only** events that ALL agents must emit. Agent-specific events
+(like `react_thought`, `decomposition_started`, `critique_started`) belong in their
+respective agent crate documentation, not here. Per Evergreen soft-typing principles,
+adding agent-specific events to this table would require core changes for each new agent.
 
 | Event Type | Purpose | Emitted By | Required |
 |------------|---------|------------|----------|
 | `final_result` | Signals completion with answer | All agents | **Yes** |
-| `decomposition_started` | Query decomposition begins | DeepResearchAgent | No |
-| `decomposition_complete` | Sub-queries determined | DeepResearchAgent | No |
-| `sub_query_started` | Individual query starts | DeepResearchAgent | No |
-| `sub_query_completed` | Individual query finishes | DeepResearchAgent | No |
-| `sub_query_failed` | Individual query fails | DeepResearchAgent | No |
-| `synthesis_started` | Result synthesis begins | DeepResearchAgent | No |
-| `react_started` | ReAct loop begins | ReactAgent | No |
-| `react_thought` | Agent reasoning | ReactAgent | No |
-| `react_action` | Tool invocation | ReactAgent | No |
-| `react_observation` | Tool result | ReactAgent | No |
-| `react_complete` | Answer found | ReactAgent | No |
-| `react_max_iterations` | Max iterations reached | ReactAgent | No |
-| `simple_qa_started` | Query starts | SimpleQaAgent | No |
-| `simple_qa_result` | Response received | SimpleQaAgent | No |
-| `tool_agent_started` | Tool agent starts | ToolAgent | No |
-| `tool_agent_complete` | Tool agent finishes | ToolAgent | No |
 
 **Event Contract:**
 - `final_result` **MUST** be the last event emitted by any agent

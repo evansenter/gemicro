@@ -101,4 +101,4 @@ pub use dataset::{
 };
 pub use harness::{EvalConfig, EvalError, EvalHarness, EvalProgress};
 pub use results::{EvalQuestion, EvalResult, EvalSummary};
-pub use scorer::{Contains, LlmJudgeScorer, Scorer, Scorers};
+pub use scorer::{Contains, CritiqueScorer, Scorer, Scorers};

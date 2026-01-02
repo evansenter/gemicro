@@ -8,7 +8,7 @@ members = [
     "agents/gemicro-react",
     "agents/gemicro-simple-qa",
     "agents/gemicro-tool-agent",
-    "agents/gemicro-judge",
+    "agents/gemicro-critique",
     "tools/gemicro-file-read",
     "tools/gemicro-web-fetch",
     "tools/gemicro-task",

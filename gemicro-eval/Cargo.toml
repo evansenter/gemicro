@@ -17,7 +17,7 @@ gemicro-deep-research = { path = "../agents/gemicro-deep-research" }
 gemicro-react = { path = "../agents/gemicro-react" }
 gemicro-simple-qa = { path = "../agents/gemicro-simple-qa" }
 gemicro-tool-agent = { path = "../agents/gemicro-tool-agent" }
-gemicro-judge = { path = "../agents/gemicro-judge" }
+gemicro-critique = { path = "../agents/gemicro-critique" }
 tokio = { workspace = true }
 futures-util = { workspace = true }
 serde = { workspace = true }

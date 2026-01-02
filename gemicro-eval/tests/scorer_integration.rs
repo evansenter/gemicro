@@ -1,10 +1,10 @@
-//! Integration tests for LlmJudgeScorer.
+//! Integration tests for CritiqueScorer.
 //!
 //! These tests require a valid GEMINI_API_KEY environment variable.
 //! Run with: `cargo test -p gemicro-eval -- --include-ignored`
 
 use gemicro_core::{LlmClient, LlmConfig};
-use gemicro_eval::{LlmJudgeScorer, Scorer};
+use gemicro_eval::{CritiqueScorer, Scorer};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -12,7 +12,7 @@ fn get_api_key() -> Option<String> {
     std::env::var("GEMINI_API_KEY").ok()
 }
 
-fn create_test_scorer(api_key: &str) -> LlmJudgeScorer {
+fn create_test_scorer(api_key: &str) -> CritiqueScorer {
     let genai_client = rust_genai::Client::builder(api_key.to_string()).build();
     let config = LlmConfig::default()
         .with_timeout(Duration::from_secs(30))
@@ -21,12 +21,12 @@ fn create_test_scorer(api_key: &str) -> LlmJudgeScorer {
         .with_max_retries(1)
         .with_retry_base_delay_ms(500);
     let llm = Arc::new(LlmClient::new(genai_client, config));
-    LlmJudgeScorer::new(llm)
+    CritiqueScorer::new(llm)
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[ignore] // Requires GEMINI_API_KEY
-async fn test_llm_judge_scorer_correct_answer() {
+async fn test_critique_scorer_correct_answer() {
     let Some(api_key) = get_api_key() else {
         eprintln!("Skipping test: GEMINI_API_KEY not set");
         return;
@@ -49,7 +49,7 @@ async fn test_llm_judge_scorer_correct_answer() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[ignore] // Requires GEMINI_API_KEY
-async fn test_llm_judge_scorer_incorrect_answer() {
+async fn test_critique_scorer_incorrect_answer() {
     let Some(api_key) = get_api_key() else {
         eprintln!("Skipping test: GEMINI_API_KEY not set");
         return;
@@ -72,7 +72,7 @@ async fn test_llm_judge_scorer_incorrect_answer() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[ignore] // Requires GEMINI_API_KEY
-async fn test_llm_judge_scorer_semantic_match() {
+async fn test_critique_scorer_semantic_match() {
     let Some(api_key) = get_api_key() else {
         eprintln!("Skipping test: GEMINI_API_KEY not set");
         return;
@@ -95,7 +95,7 @@ async fn test_llm_judge_scorer_semantic_match() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[ignore] // Requires GEMINI_API_KEY
-async fn test_llm_judge_scorer_semantic_equivalence() {
+async fn test_critique_scorer_semantic_equivalence() {
     let Some(api_key) = get_api_key() else {
         eprintln!("Skipping test: GEMINI_API_KEY not set");
         return;
@@ -121,7 +121,7 @@ async fn test_llm_judge_scorer_semantic_equivalence() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[ignore] // Requires GEMINI_API_KEY
-async fn test_llm_judge_scorer_empty_strings() {
+async fn test_critique_scorer_empty_strings() {
     let Some(api_key) = get_api_key() else {
         eprintln!("Skipping test: GEMINI_API_KEY not set");
         return;
@@ -145,7 +145,7 @@ async fn test_llm_judge_scorer_empty_strings() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[ignore] // Requires GEMINI_API_KEY
-async fn test_llm_judge_scorer_numeric_answer() {
+async fn test_critique_scorer_numeric_answer() {
     let Some(api_key) = get_api_key() else {
         eprintln!("Skipping test: GEMINI_API_KEY not set");
         return;
@@ -164,11 +164,11 @@ async fn test_llm_judge_scorer_numeric_answer() {
 }
 
 #[test]
-fn test_llm_judge_scorer_name() {
+fn test_critique_scorer_name() {
     // Unit test - doesn't need API key
     let genai_client = rust_genai::Client::builder("fake-key".to_string()).build();
     let llm = Arc::new(LlmClient::new(genai_client, LlmConfig::default()));
-    let scorer = LlmJudgeScorer::new(llm);
+    let scorer = CritiqueScorer::new(llm);
 
-    assert_eq!(scorer.name(), "llm_judge");
+    assert_eq!(scorer.name(), "critique");
 }
