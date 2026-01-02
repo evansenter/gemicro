@@ -59,6 +59,6 @@ pub mod utils;
 // Re-export public API
 pub use metrics::{ExecutionMetrics, StepTiming};
 pub use registry::{AgentFactory, AgentRegistry};
-pub use runner::AgentRunner;
+pub use runner::{AgentRunner, EVENT_EXTERNAL};
 pub use state::{phases, ExecutionState, ExecutionStep, StepStatus};
 pub use utils::{first_sentence, format_duration, truncate};

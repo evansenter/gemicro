@@ -69,6 +69,14 @@ pub struct Args {
     /// or live data. Note: May have different pricing.
     #[arg(long)]
     pub google_search: bool,
+
+    /// Event bus URL for real-time coordination (e.g., http://localhost:8765)
+    ///
+    /// When provided, connects to the event bus via SSE for push-based
+    /// event notifications. External events are injected into the agent's
+    /// update stream in real-time.
+    #[arg(long, env = "GEMICRO_EVENT_BUS_URL")]
+    pub event_bus_url: Option<String>,
 }
 
 impl Args {
@@ -171,6 +179,7 @@ mod tests {
             verbose: false,
             plain: false,
             google_search: false,
+            event_bus_url: None,
         }
     }
 

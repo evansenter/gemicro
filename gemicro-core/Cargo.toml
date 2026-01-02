@@ -17,6 +17,9 @@ serde_json = { workspace = true }
 futures-util = { workspace = true }
 log = { workspace = true }
 uuid = { workspace = true }
+reqwest = { workspace = true }
+eventsource-client = { workspace = true }
+chrono = { workspace = true }
 meval = "0.2"
 
 [dev-dependencies]

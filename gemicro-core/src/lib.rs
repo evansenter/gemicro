@@ -45,6 +45,7 @@
 
 pub mod agent;
 pub mod config;
+pub mod coordination;
 pub mod error;
 pub mod history;
 pub mod interceptor;
@@ -80,3 +81,6 @@ pub use trajectory::{
 };
 pub use update::{AgentUpdate, FinalResult, ResultMetadata};
 pub use utils::{extract_total_tokens, first_sentence, truncate, truncate_with_count};
+
+// Coordination infrastructure for cross-agent event handling
+pub use coordination::{Coordination, CoordinationError, ExternalEvent, HubCoordination};
