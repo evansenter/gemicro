@@ -345,28 +345,17 @@ impl CritiqueOutput {
 
     /// Check if the verdict indicates the content passed.
     pub fn passed(&self) -> bool {
-        matches!(
-            self.verdict,
-            CritiqueVerdict::Pass | CritiqueVerdict::PassWithWarnings
-        )
+        self.verdict.is_passing()
     }
 
     /// Check if the verdict indicates failure.
     pub fn failed(&self) -> bool {
-        matches!(
-            self.verdict,
-            CritiqueVerdict::NeedsRevision | CritiqueVerdict::Reject
-        )
+        !self.verdict.is_passing()
     }
 
     /// Convert verdict to a numeric score (0.0 = Reject, 1.0 = Pass).
     pub fn to_score(&self) -> f64 {
-        match self.verdict {
-            CritiqueVerdict::Pass => 1.0,
-            CritiqueVerdict::PassWithWarnings => 0.75,
-            CritiqueVerdict::NeedsRevision => 0.25,
-            CritiqueVerdict::Reject => 0.0,
-        }
+        self.verdict.to_score()
     }
 }
 
@@ -405,11 +394,12 @@ impl std::str::FromStr for CritiqueVerdict {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "Pass" => Ok(CritiqueVerdict::Pass),
-            "PassWithWarnings" => Ok(CritiqueVerdict::PassWithWarnings),
-            "NeedsRevision" => Ok(CritiqueVerdict::NeedsRevision),
-            "Reject" => Ok(CritiqueVerdict::Reject),
+        // Case-insensitive matching for robustness with LLM responses
+        match s.to_lowercase().as_str() {
+            "pass" => Ok(CritiqueVerdict::Pass),
+            "passwithwarnings" => Ok(CritiqueVerdict::PassWithWarnings),
+            "needsrevision" => Ok(CritiqueVerdict::NeedsRevision),
+            "reject" => Ok(CritiqueVerdict::Reject),
             _ => Err(format!("Unknown verdict: {}", s)),
         }
     }
@@ -1301,5 +1291,56 @@ mod tests {
         let prompt = build_prompt(&input);
         assert!(prompt.contains("1. item one"));
         assert!(prompt.contains("2. item two"));
+    }
+
+    // FromStr tests
+    #[test]
+    fn test_verdict_from_str_case_insensitive() {
+        use std::str::FromStr;
+
+        // Exact case
+        assert_eq!(
+            CritiqueVerdict::from_str("Pass").unwrap(),
+            CritiqueVerdict::Pass
+        );
+
+        // Lowercase
+        assert_eq!(
+            CritiqueVerdict::from_str("pass").unwrap(),
+            CritiqueVerdict::Pass
+        );
+
+        // Uppercase
+        assert_eq!(
+            CritiqueVerdict::from_str("PASS").unwrap(),
+            CritiqueVerdict::Pass
+        );
+
+        // Mixed case
+        assert_eq!(
+            CritiqueVerdict::from_str("pAsS").unwrap(),
+            CritiqueVerdict::Pass
+        );
+        assert_eq!(
+            CritiqueVerdict::from_str("PASSWITHWARNINGS").unwrap(),
+            CritiqueVerdict::PassWithWarnings
+        );
+        assert_eq!(
+            CritiqueVerdict::from_str("needsrevision").unwrap(),
+            CritiqueVerdict::NeedsRevision
+        );
+        assert_eq!(
+            CritiqueVerdict::from_str("REJECT").unwrap(),
+            CritiqueVerdict::Reject
+        );
+    }
+
+    #[test]
+    fn test_verdict_from_str_invalid() {
+        use std::str::FromStr;
+
+        assert!(CritiqueVerdict::from_str("invalid").is_err());
+        assert!(CritiqueVerdict::from_str("").is_err());
+        assert!(CritiqueVerdict::from_str("pass ").is_err()); // trailing space
     }
 }
