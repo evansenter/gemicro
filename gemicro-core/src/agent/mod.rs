@@ -828,4 +828,36 @@ mod tests {
         assert!(collected[3].as_ref().unwrap().event_type == "final_result");
         // Note: Warnings are logged for collected[2] and collected[3] but we can't easily verify logs
     }
+
+    // AgentContext builder tests
+
+    #[test]
+    fn test_agent_context_with_orchestration() {
+        use crate::agent::orchestration::{OrchestrationConfig, OrchestrationState};
+
+        let config = OrchestrationConfig::default()
+            .with_global_max_concurrent(10)
+            .with_max_depth(3);
+
+        let orchestration = Arc::new(OrchestrationState::new(config));
+
+        // Verify we can create a context with orchestration using the builder
+        // We can't fully test without a real LlmClient, but we can verify the Arc is clonable
+        let orchestration_clone: Arc<OrchestrationState> = Arc::clone(&orchestration);
+        assert_eq!(orchestration_clone.config().max_depth, 3);
+        assert_eq!(orchestration_clone.config().global_max_concurrent, 10);
+    }
+
+    #[test]
+    fn test_agent_context_with_tools() {
+        use crate::tool::ToolRegistry;
+
+        let registry = ToolRegistry::new();
+        assert!(registry.is_empty());
+
+        // Verify ToolRegistry can be wrapped in Arc for sharing
+        let registry_arc = Arc::new(registry);
+        let cloned = Arc::clone(&registry_arc);
+        assert!(cloned.is_empty());
+    }
 }

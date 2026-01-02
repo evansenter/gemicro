@@ -331,4 +331,22 @@ mod tests {
         assert_eq!(result.metadata.total_tokens, 100);
         assert_eq!(result.metadata.extra["steps_succeeded"], 2);
     }
+
+    #[test]
+    fn test_result_metadata_default_extra_is_null() {
+        let metadata = ResultMetadata::new(100, 0, 5000);
+
+        // Default extra is null (valid per docstring: "SimpleQA: `null` or `{}`")
+        assert!(metadata.extra.is_null());
+    }
+
+    #[test]
+    fn test_final_result_with_empty_extra() {
+        let metadata = ResultMetadata::with_extra(100, 0, 5000, json!({}));
+        let update = AgentUpdate::final_result(json!("Answer"), metadata);
+
+        let result = update.as_final_result().unwrap();
+        assert!(result.metadata.extra.is_object());
+        assert!(result.metadata.extra.as_object().unwrap().is_empty());
+    }
 }
