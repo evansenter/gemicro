@@ -149,7 +149,7 @@ impl Default for Scorers {
     }
 }
 
-/// LLM-as-judge scorer using semantic comparison.
+/// Critique-based scorer using semantic comparison.
 ///
 /// Uses the CritiqueAgent to evaluate whether the predicted answer is semantically
 /// correct compared to the ground truth. More flexible than exact matching
@@ -174,33 +174,33 @@ impl Default for Scorers {
 /// # Example
 ///
 /// ```no_run
-/// use gemicro_eval::{Scorer, LlmJudgeScorer};
+/// use gemicro_eval::{Scorer, CritiqueScorer};
 /// use gemicro_core::{LlmClient, LlmConfig};
 /// use std::sync::Arc;
 ///
 /// // Must be called within a tokio runtime
 /// let genai = rust_genai::Client::builder("api-key".to_string()).build();
 /// let llm = Arc::new(LlmClient::new(genai, LlmConfig::default()));
-/// let scorer = LlmJudgeScorer::new(llm);
+/// let scorer = CritiqueScorer::new(llm);
 ///
 /// // Returns score based on verdict, or NaN if evaluation failed
 /// // let score = scorer.score("The capital is Paris", "Paris");
 /// // if score.is_nan() { /* handle evaluation failure */ }
 /// ```
-pub struct LlmJudgeScorer {
+pub struct CritiqueScorer {
     llm: std::sync::Arc<gemicro_core::LlmClient>,
 }
 
-impl LlmJudgeScorer {
-    /// Create a new LLM judge scorer with the given client.
+impl CritiqueScorer {
+    /// Create a new critique scorer with the given client.
     pub fn new(llm: std::sync::Arc<gemicro_core::LlmClient>) -> Self {
         Self { llm }
     }
 }
 
-impl Scorer for LlmJudgeScorer {
+impl Scorer for CritiqueScorer {
     fn name(&self) -> &str {
-        "llm_judge"
+        "critique"
     }
 
     fn score(&self, predicted: &str, ground_truth: &str) -> f64 {
@@ -242,27 +242,27 @@ impl Scorer for LlmJudgeScorer {
                                         Some("Reject") => return 0.0,
                                         _ => {
                                             log::error!(
-                                                "LLM judge 'verdict' has unexpected value: {:?}",
+                                                "Critique 'verdict' has unexpected value: {:?}",
                                                 value
                                             );
                                             return f64::NAN;
                                         }
                                     },
                                     None => {
-                                        log::error!("LLM judge result missing 'verdict' field");
+                                        log::error!("Critique result missing 'verdict' field");
                                         return f64::NAN;
                                     }
                                 }
                             }
                         }
                         Err(e) => {
-                            log::error!("LLM judge failed: {:?}", e);
+                            log::error!("Critique failed: {:?}", e);
                             return f64::NAN;
                         }
                     }
                 }
                 // Stream ended without producing a critique_result
-                log::error!("LLM judge did not produce a result");
+                log::error!("Critique did not produce a result");
                 f64::NAN
             })
         })

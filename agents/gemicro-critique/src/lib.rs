@@ -107,7 +107,7 @@ pub struct CritiqueInput {
 impl CritiqueInput {
     /// Create a new critique input with the content to evaluate.
     ///
-    /// Uses default criteria (Custom with empty description).
+    /// Uses default criteria (Custom with "Evaluate for correctness and quality").
     /// Call `.with_criteria()` to specify what to evaluate against.
     pub fn new(content: impl Into<String>) -> Self {
         Self {

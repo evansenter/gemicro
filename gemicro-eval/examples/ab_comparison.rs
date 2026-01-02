@@ -174,7 +174,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     Some("Reject") => 0.0,
                                     _ => 0.0,
                                 };
-                                result.scores.insert("llm_judge".to_string(), score);
+                                result.scores.insert("critique".to_string(), score);
                             }
                         }
                         Err(e) => {
@@ -195,8 +195,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             summary.succeeded, summary.total_questions
         );
         println!(
-            "   - LLM Judge: {:.3}",
-            summary.avg_score("llm_judge").unwrap_or(0.0)
+            "   - Critique: {:.3}",
+            summary.avg_score("critique").unwrap_or(0.0)
         );
         println!(
             "   - Contains:  {:.3}",
@@ -218,7 +218,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
     println!(
         "{:<15} {:>10} {:>10} {:>10} {:>10}",
-        "Agent", "Success", "LLM Judge", "Contains", "Time(s)"
+        "Agent", "Success", "Critique", "Contains", "Time(s)"
     );
     println!("{}", "-".repeat(55));
 
@@ -227,31 +227,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "{:<15} {:>10} {:>10.3} {:>10.3} {:>10.1}",
             name,
             format!("{}/{}", summary.succeeded, summary.total_questions),
-            summary.avg_score("llm_judge").unwrap_or(0.0),
+            summary.avg_score("critique").unwrap_or(0.0),
             summary.avg_score("contains").unwrap_or(0.0),
             summary.total_duration.as_secs_f64()
         );
     }
     println!();
 
-    // Determine winner based on LLM judge
+    // Determine winner based on critique score
     if results.len() == 2 {
         let (name_a, summary_a) = &results[0];
         let (name_b, summary_b) = &results[1];
-        let judge_a = summary_a.avg_score("llm_judge").unwrap_or(0.0);
-        let judge_b = summary_b.avg_score("llm_judge").unwrap_or(0.0);
+        let score_a = summary_a.avg_score("critique").unwrap_or(0.0);
+        let score_b = summary_b.avg_score("critique").unwrap_or(0.0);
 
-        if (judge_a - judge_b).abs() < 0.01 {
-            println!("Result: Tie (LLM Judge scores within 0.01)");
-        } else if judge_a > judge_b {
+        if (score_a - score_b).abs() < 0.01 {
+            println!("Result: Tie (Critique scores within 0.01)");
+        } else if score_a > score_b {
             println!(
-                "Winner: {} (LLM Judge: {:.3} vs {:.3})",
-                name_a, judge_a, judge_b
+                "Winner: {} (Critique: {:.3} vs {:.3})",
+                name_a, score_a, score_b
             );
         } else {
             println!(
-                "Winner: {} (LLM Judge: {:.3} vs {:.3})",
-                name_b, judge_b, judge_a
+                "Winner: {} (Critique: {:.3} vs {:.3})",
+                name_b, score_b, score_a
             );
         }
     }

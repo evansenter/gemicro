@@ -6,8 +6,8 @@ use clap::Parser;
 use gemicro_core::{LlmClient, LlmConfig};
 use gemicro_deep_research::{DeepResearchAgent, ResearchConfig};
 use gemicro_eval::{
-    Contains, Dataset, EvalConfig, EvalHarness, EvalProgress, EvalSummary, HotpotQA,
-    JsonFileDataset, LlmJudgeScorer, Scorers, GSM8K,
+    Contains, CritiqueScorer, Dataset, EvalConfig, EvalHarness, EvalProgress, EvalSummary,
+    HotpotQA, JsonFileDataset, Scorers, GSM8K,
 };
 use gemicro_react::{ReactAgent, ReactConfig};
 use gemicro_runner::AgentRegistry;
@@ -32,8 +32,8 @@ struct Args {
     #[arg(long, short = 's')]
     sample: Option<usize>,
 
-    /// Comma-separated list of scorers: contains, llm_judge
-    #[arg(long, default_value = "contains,llm_judge")]
+    /// Comma-separated list of scorers: contains, critique
+    #[arg(long, default_value = "contains,critique")]
     scorer: String,
 
     /// Agent to evaluate: deep_research, react, simple_qa, tool_agent
@@ -91,9 +91,9 @@ impl Args {
         // Validate scorers
         for scorer in self.scorer.split(',') {
             let scorer = scorer.trim();
-            if !["contains", "llm_judge"].contains(&scorer) {
+            if !["contains", "critique"].contains(&scorer) {
                 return Err(format!(
-                    "Invalid scorer '{}'. Use contains or llm_judge.",
+                    "Invalid scorer '{}'. Use contains or critique.",
                     scorer
                 ));
             }
@@ -142,13 +142,13 @@ impl Args {
 
     /// Build Scorers from CLI arguments.
     ///
-    /// Requires an LlmClient for the llm_judge scorer.
+    /// Requires an LlmClient for the critique scorer.
     fn scorers(&self, llm: std::sync::Arc<LlmClient>) -> Scorers {
         let mut scorers = Scorers::new(vec![]);
         for scorer in self.scorer.split(',') {
             match scorer.trim() {
                 "contains" => scorers.add(Contains),
-                "llm_judge" => scorers.add(LlmJudgeScorer::new(llm.clone())),
+                "critique" => scorers.add(CritiqueScorer::new(llm.clone())),
                 _ => {} // Already validated
             }
         }
@@ -185,7 +185,7 @@ async fn run_evaluation(args: &Args) -> Result<EvalSummary, String> {
     let genai_client = rust_genai::Client::builder(args.api_key.clone()).build();
     let llm = LlmClient::new(genai_client, args.llm_config());
 
-    // Create separate LLM client for scorer (llm_judge needs its own client)
+    // Create separate LLM client for scorer (critique needs its own client)
     let scorer_genai_client = rust_genai::Client::builder(args.api_key.clone()).build();
     let scorer_llm = std::sync::Arc::new(LlmClient::new(scorer_genai_client, args.llm_config()));
 
@@ -371,7 +371,7 @@ mod tests {
         Args {
             dataset: "hotpotqa".to_string(),
             sample: Some(10),
-            scorer: "contains,llm_judge".to_string(),
+            scorer: "contains,critique".to_string(),
             agent: "deep_research".to_string(),
             concurrency: 5,
             retries: 1,
