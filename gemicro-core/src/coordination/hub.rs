@@ -222,10 +222,12 @@ impl HubCoordination {
                                         .and_then(|s| {
                                             chrono::DateTime::parse_from_rfc3339(&s).ok().map(
                                                 |dt| {
+                                                    // Use try_from to safely handle negative timestamps
+                                                    // (dates before Unix epoch) without panicking
+                                                    let secs =
+                                                        u64::try_from(dt.timestamp()).unwrap_or(0);
                                                     SystemTime::UNIX_EPOCH
-                                                        + std::time::Duration::from_secs(
-                                                            dt.timestamp() as u64,
-                                                        )
+                                                        + std::time::Duration::from_secs(secs)
                                                 },
                                             )
                                         })

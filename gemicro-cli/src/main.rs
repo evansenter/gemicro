@@ -171,10 +171,48 @@ async fn run_research(args: &cli::Args, query: &str) -> Result<()> {
     // Consume stream, optionally with coordination
     if let Some(ref mut coord) = coordination {
         // With coordination: use select! to interleave external events
+        // Track if coordination channel is still active to avoid busy-loop
+        let mut coord_active = true;
+
         loop {
             if is_interrupted() {
                 interrupted = true;
                 break;
+            }
+
+            // If coordination is closed, fall back to simple stream consumption
+            if !coord_active {
+                match stream.next().await {
+                    Some(Ok(update)) => {
+                        if is_interrupted() {
+                            interrupted = true;
+                            break;
+                        }
+                        tracker.handle_event(&update);
+                        renderer
+                            .on_status(tracker.as_ref())
+                            .context("Renderer status update failed")?;
+                        if tracker.is_complete() {
+                            renderer
+                                .on_complete(tracker.as_ref())
+                                .context("Renderer completion failed")?;
+                            break;
+                        }
+                    }
+                    Some(Err(AgentError::Cancelled)) => {
+                        interrupted = true;
+                        break;
+                    }
+                    Some(Err(e)) => {
+                        signal_task.abort();
+                        if let Err(finish_err) = renderer.finish() {
+                            log::warn!("Failed to clean up renderer during error: {}", finish_err);
+                        }
+                        return Err(format_agent_error(e));
+                    }
+                    None => break,
+                }
+                continue;
             }
 
             tokio::select! {
@@ -226,8 +264,11 @@ async fn run_research(args: &cli::Args, query: &str) -> Result<()> {
                             external_event.payload,
                             source
                         );
+                    } else {
+                        // Coordination channel closed - stop polling to avoid busy-loop
+                        log::debug!("Coordination channel closed, continuing with agent stream only");
+                        coord_active = false;
                     }
-                    // If recv_event returns None, coordination closed - continue with agent only
                 }
             }
         }
@@ -255,6 +296,7 @@ async fn run_research(args: &cli::Args, query: &str) -> Result<()> {
                         renderer
                             .on_complete(tracker.as_ref())
                             .context("Renderer completion failed")?;
+                        break;
                     }
                 }
                 Err(AgentError::Cancelled) => {
