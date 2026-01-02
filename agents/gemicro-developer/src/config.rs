@@ -12,6 +12,9 @@ const DEFAULT_SYSTEM_PROMPT: &str = r#"You are a developer agent that helps with
 
 You have access to tools for reading files, editing code, running commands, and searching the codebase.
 
+IMPORTANT: File tools (file_read, file_write, file_edit, glob, grep) require ABSOLUTE paths.
+Use the working directory provided below to construct absolute paths.
+
 When working on tasks:
 1. First understand the codebase structure and existing patterns
 2. Make targeted, minimal changes that follow existing conventions
@@ -120,11 +123,20 @@ impl DeveloperConfig {
         Ok(())
     }
 
-    /// Build the complete system prompt with CLAUDE.md content.
+    /// Build the complete system prompt with CLAUDE.md content and environment context.
     ///
     /// Loads CLAUDE.md from configured paths and appends to base prompt.
+    /// Also injects the current working directory for file path resolution.
     pub fn build_system_prompt(&self) -> String {
         let mut prompt = self.system_prompt.clone();
+
+        // Inject working directory so LLM can construct absolute paths
+        if let Ok(cwd) = std::env::current_dir() {
+            prompt.push_str(&format!(
+                "\n## Environment\n\nWorking directory: {}\n",
+                cwd.display()
+            ));
+        }
 
         // Load CLAUDE.md content from first available path
         let mut found = false;
@@ -211,7 +223,26 @@ mod tests {
             .with_claude_md_paths(vec![PathBuf::from("/nonexistent/path")]);
 
         let prompt = config.build_system_prompt();
-        // Should just return base prompt when CLAUDE.md not found
-        assert_eq!(prompt, config.system_prompt);
+        // Should contain base prompt and working directory
+        assert!(prompt.starts_with(&config.system_prompt));
+        assert!(prompt.contains("Working directory:"));
+        // Should NOT contain CLAUDE.md section
+        assert!(!prompt.contains("## Project Context"));
+    }
+
+    #[test]
+    fn test_build_system_prompt_includes_working_dir() {
+        let config = DeveloperConfig::default()
+            .with_claude_md_paths(vec![PathBuf::from("/nonexistent/path")]);
+
+        let prompt = config.build_system_prompt();
+
+        // Should include working directory section
+        assert!(prompt.contains("## Environment"));
+        assert!(prompt.contains("Working directory:"));
+
+        // Working directory should be an absolute path
+        let cwd = std::env::current_dir().expect("Should have CWD");
+        assert!(prompt.contains(&cwd.display().to_string()));
     }
 }

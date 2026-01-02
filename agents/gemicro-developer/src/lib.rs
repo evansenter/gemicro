@@ -90,6 +90,33 @@ fn build_final_result(
     )
 }
 
+/// Build a final result for incomplete execution (cancellation, max iterations).
+///
+/// Per the event contract, `final_result` MUST always be emitted as the last event.
+fn build_incomplete_result(
+    reason: &str,
+    start: Instant,
+    total_tool_calls: usize,
+    iteration: usize,
+) -> AgentUpdate {
+    let duration_ms = start.elapsed().as_millis() as u64;
+
+    AgentUpdate::final_result(
+        json!(format!("[Execution incomplete: {}]", reason)),
+        ResultMetadata::with_extra(
+            0,
+            0,
+            duration_ms,
+            json!({
+                "tool_call_count": total_tool_calls,
+                "iterations": iteration,
+                "incomplete": true,
+                "reason": reason,
+            }),
+        ),
+    )
+}
+
 /// Owned representation of a function call for cross-iteration processing.
 ///
 /// `FunctionCallInfo<'a>` from rust-genai borrows from the response, so we need
@@ -183,12 +210,19 @@ impl Agent for DeveloperAgent {
                 // Check for cancellation at start of each iteration
                 if context.cancellation_token.is_cancelled() {
                     log::info!("DeveloperAgent cancelled");
+                    yield build_incomplete_result("cancelled", start, total_tool_calls, iteration);
                     break;
                 }
 
                 iteration += 1;
                 if iteration > max_iterations {
                     log::warn!("DeveloperAgent hit max iterations ({})", max_iterations);
+                    yield build_incomplete_result(
+                        &format!("max iterations ({}) reached", max_iterations),
+                        start,
+                        total_tool_calls,
+                        iteration,
+                    );
                     break;
                 }
 
@@ -316,6 +350,7 @@ impl Agent for DeveloperAgent {
 
                 // Exit outer loop if cancelled during tool execution
                 if cancelled {
+                    yield build_incomplete_result("cancelled during tool execution", start, total_tool_calls, iteration);
                     break;
                 }
 
