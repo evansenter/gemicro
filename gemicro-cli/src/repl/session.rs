@@ -17,6 +17,7 @@ use gemicro_core::{
 };
 use gemicro_deep_research::DeepResearchAgent;
 use gemicro_developer::{DeveloperAgent, DeveloperConfig};
+use gemicro_echo::EchoAgent;
 use gemicro_runner::AgentRegistry;
 use gemicro_tool_agent::{ToolAgent, ToolAgentConfig};
 use rustyline::error::ReadlineError;
@@ -216,6 +217,9 @@ impl Session {
                     .expect("default config should not fail"),
             )
         });
+
+        // Register echo agent (no config needed - for testing)
+        self.registry.register("echo", || Box::new(EchoAgent));
     }
 
     /// Reload configuration from files.

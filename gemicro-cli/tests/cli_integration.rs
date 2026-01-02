@@ -49,7 +49,7 @@ fn test_cli_invalid_temperature() {
     let output = run_cli(&[
         "test query",
         "--agent",
-        "deep_research",
+        "echo",
         "--api-key",
         "fake-key",
         "--temperature",
@@ -65,7 +65,7 @@ fn test_cli_invalid_min_max_queries() {
     let output = run_cli(&[
         "test query",
         "--agent",
-        "deep_research",
+        "echo",
         "--api-key",
         "fake-key",
         "--min-sub-queries",
@@ -83,7 +83,7 @@ fn test_cli_zero_timeout() {
     let output = run_cli(&[
         "test query",
         "--agent",
-        "deep_research",
+        "echo",
         "--api-key",
         "fake-key",
         "--timeout",
@@ -99,7 +99,7 @@ fn test_cli_llm_timeout_exceeds_total() {
     let output = run_cli(&[
         "test query",
         "--agent",
-        "deep_research",
+        "echo",
         "--api-key",
         "fake-key",
         "--timeout",
@@ -234,13 +234,7 @@ fn test_cli_interactive_help() {
 fn test_cli_interactive_no_query_required() {
     // Interactive mode should not require a query argument
     // This will fail on missing API key, but that's expected
-    let output = run_cli(&[
-        "--interactive",
-        "--agent",
-        "deep_research",
-        "--api-key",
-        "fake-key",
-    ]);
+    let output = run_cli(&["--interactive", "--agent", "echo", "--api-key", "fake-key"]);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
     // Should NOT fail with "Query is required"
