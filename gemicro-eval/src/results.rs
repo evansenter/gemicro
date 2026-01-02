@@ -327,7 +327,7 @@ mod tests {
         let question = sample_question();
         let mut scores = HashMap::new();
         scores.insert("contains".to_string(), 1.0);
-        scores.insert("llm_judge".to_string(), 0.8);
+        scores.insert("critique".to_string(), 0.8);
 
         let results = vec![
             EvalResult::success(
@@ -351,7 +351,7 @@ mod tests {
         assert_eq!(summary.succeeded, 1);
         assert_eq!(summary.failed, 1);
         assert_eq!(summary.average_scores.get("contains"), Some(&1.0));
-        assert_eq!(summary.average_scores.get("llm_judge"), Some(&0.8));
+        assert_eq!(summary.average_scores.get("critique"), Some(&0.8));
     }
 
     #[test]
@@ -402,21 +402,21 @@ mod tests {
 
         // Verify initial state
         assert_eq!(summary.avg_score("contains"), Some(1.0));
-        assert_eq!(summary.avg_score("llm_judge"), None);
+        assert_eq!(summary.avg_score("critique"), None);
 
-        // Add llm_judge scores after the fact (simulating CritiqueAgent)
+        // Add critique scores after the fact (simulating CritiqueAgent)
         summary.results[0]
             .scores
-            .insert("llm_judge".to_string(), 1.0);
+            .insert("critique".to_string(), 1.0);
         summary.results[1]
             .scores
-            .insert("llm_judge".to_string(), 0.0);
+            .insert("critique".to_string(), 0.0);
 
         // Recalculate averages
         summary.recalculate_averages();
 
         // Verify new score is included
-        assert_eq!(summary.avg_score("llm_judge"), Some(0.5));
+        assert_eq!(summary.avg_score("critique"), Some(0.5));
         // Existing scores are preserved
         assert_eq!(summary.avg_score("contains"), Some(1.0));
     }
@@ -473,17 +473,17 @@ mod tests {
         // First result has valid scores
         let mut scores1 = HashMap::new();
         scores1.insert("contains".to_string(), 1.0);
-        scores1.insert("llm_judge".to_string(), 1.0);
+        scores1.insert("critique".to_string(), 1.0);
 
-        // Second result has NaN for llm_judge (simulating scorer failure)
+        // Second result has NaN for critique (simulating scorer failure)
         let mut scores2 = HashMap::new();
         scores2.insert("contains".to_string(), 0.0);
-        scores2.insert("llm_judge".to_string(), f64::NAN);
+        scores2.insert("critique".to_string(), f64::NAN);
 
         // Third result has valid scores
         let mut scores3 = HashMap::new();
         scores3.insert("contains".to_string(), 1.0);
-        scores3.insert("llm_judge".to_string(), 0.0);
+        scores3.insert("critique".to_string(), 0.0);
 
         let results = vec![
             EvalResult::success(
@@ -524,12 +524,12 @@ mod tests {
             contains_avg
         );
 
-        // llm_judge: (1.0 + 0.0) / 2 = 0.5 (NaN is skipped)
-        let llm_judge_avg = summary.avg_score("llm_judge").unwrap();
+        // critique: (1.0 + 0.0) / 2 = 0.5 (NaN is skipped)
+        let critique_avg = summary.avg_score("critique").unwrap();
         assert!(
-            (llm_judge_avg - 0.5).abs() < 0.01,
+            (critique_avg - 0.5).abs() < 0.01,
             "Expected 0.5, got {} (NaN should be skipped)",
-            llm_judge_avg
+            critique_avg
         );
     }
 }

@@ -28,9 +28,9 @@
 //! assert_eq!(child.path, vec!["simple_qa".to_string()]);
 //!
 //! // Grandchild context
-//! let grandchild = child.child("llm_judge");
+//! let grandchild = child.child("critique");
 //! assert_eq!(grandchild.depth, 2);
-//! assert_eq!(grandchild.path, vec!["simple_qa".to_string(), "llm_judge".to_string()]);
+//! assert_eq!(grandchild.path, vec!["simple_qa".to_string(), "critique".to_string()]);
 //! ```
 
 use std::fmt;
