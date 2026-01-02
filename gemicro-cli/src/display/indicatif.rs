@@ -105,6 +105,18 @@ impl IndicatifRenderer {
         }
     }
 
+    /// Format a diff preview for FileEdit showing old → new.
+    fn format_diff_preview(&self, args: &serde_json::Value) -> Option<String> {
+        let old_str = args.get("old_string").and_then(|v| v.as_str())?;
+        let new_str = args.get("new_string").and_then(|v| v.as_str())?;
+
+        // Truncate both strings for preview
+        let old_preview = truncate(old_str.lines().next().unwrap_or(old_str), 30);
+        let new_preview = truncate(new_str.lines().next().unwrap_or(new_str), 30);
+
+        Some(format!("\"{}\" → \"{}\"", old_preview, new_preview))
+    }
+
     /// Extract a meaningful preview from tool arguments.
     fn format_args_preview(&self, tool_name: &str, args: &serde_json::Value) -> String {
         // Tool-specific argument formatting
@@ -119,11 +131,24 @@ impl IndicatifRenderer {
                 .and_then(|v| v.as_str())
                 .map(|s| truncate(s, TOOL_ARGS_PREVIEW_CHARS))
                 .unwrap_or_default(),
-            "file_write" | "FileWrite" | "file_edit" | "FileEdit" => args
+            "file_write" | "FileWrite" => args
                 .get("path")
                 .and_then(|v| v.as_str())
                 .map(|s| truncate(s, TOOL_ARGS_PREVIEW_CHARS))
                 .unwrap_or_default(),
+            "file_edit" | "FileEdit" => {
+                // Show path + diff preview for edits
+                let path = args
+                    .get("path")
+                    .and_then(|v| v.as_str())
+                    .map(|s| truncate(s, 30))
+                    .unwrap_or_default();
+                if let Some(diff) = self.format_diff_preview(args) {
+                    format!("{} {}", path, diff)
+                } else {
+                    path
+                }
+            }
             "glob" | "Glob" => args
                 .get("pattern")
                 .and_then(|v| v.as_str())

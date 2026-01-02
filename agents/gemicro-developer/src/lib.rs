@@ -59,6 +59,37 @@ use serde_json::json;
 use std::sync::Arc;
 use std::time::Instant;
 
+/// Build the final result event with answer and metadata.
+fn build_final_result(
+    response: &rust_genai::InteractionResponse,
+    start: Instant,
+    total_tool_calls: usize,
+    iteration: usize,
+) -> AgentUpdate {
+    let answer = response.text().map(|s| s.to_string()).unwrap_or_else(|| {
+        log::warn!("LLM response contained no text content");
+        String::new()
+    });
+    let total_tokens = gemicro_core::extract_total_tokens(response).unwrap_or_else(|| {
+        log::debug!("Could not extract token count from response");
+        0
+    });
+    let duration_ms = start.elapsed().as_millis() as u64;
+
+    AgentUpdate::final_result(
+        json!(answer),
+        ResultMetadata::with_extra(
+            total_tokens,
+            0,
+            duration_ms,
+            json!({
+                "tool_call_count": total_tool_calls,
+                "iterations": iteration,
+            }),
+        ),
+    )
+}
+
 /// Owned representation of a function call for cross-iteration processing.
 ///
 /// `FunctionCallInfo<'a>` from rust-genai borrows from the response, so we need
@@ -149,6 +180,12 @@ impl Agent for DeveloperAgent {
 
             // Explicit function calling loop
             loop {
+                // Check for cancellation at start of each iteration
+                if context.cancellation_token.is_cancelled() {
+                    log::info!("DeveloperAgent cancelled");
+                    break;
+                }
+
                 iteration += 1;
                 if iteration > max_iterations {
                     log::warn!("DeveloperAgent hit max iterations ({})", max_iterations);
@@ -187,28 +224,7 @@ impl Agent for DeveloperAgent {
 
                     if calls.is_empty() {
                         // No function calls - extract final answer and exit
-                        let answer = response.text().map(|s| s.to_string()).unwrap_or_else(|| {
-                            log::warn!("LLM response contained no text content");
-                            String::new()
-                        });
-                        let total_tokens = gemicro_core::extract_total_tokens(&response).unwrap_or_else(|| {
-                            log::debug!("Could not extract token count from response");
-                            0
-                        });
-                        let duration_ms = start.elapsed().as_millis() as u64;
-
-                        yield AgentUpdate::final_result(
-                            json!(answer),
-                            ResultMetadata::with_extra(
-                                total_tokens,
-                                0,
-                                duration_ms,
-                                json!({
-                                    "tool_call_count": total_tool_calls,
-                                    "iterations": iteration,
-                                }),
-                            ),
-                        );
+                        yield build_final_result(&response, start, total_tool_calls, iteration);
                         break;
                     }
 
@@ -221,6 +237,7 @@ impl Agent for DeveloperAgent {
 
                 // Process each function call with real-time events
                 let mut function_results: Vec<InteractionContent> = Vec::new();
+                let mut cancelled = false;
 
                 for fc in &function_calls_to_process {
                     let tool_name = &fc.name;
@@ -282,12 +299,24 @@ impl Agent for DeveloperAgent {
                         }),
                     );
 
+                    // Check for cancellation after each tool execution
+                    if context.cancellation_token.is_cancelled() {
+                        log::info!("DeveloperAgent cancelled after tool execution");
+                        cancelled = true;
+                        break;
+                    }
+
                     // Add function result for the next LLM call
                     function_results.push(function_result_content(
                         tool_name.to_string(),
                         call_id.to_string(),
                         result_json,
                     ));
+                }
+
+                // Exit outer loop if cancelled during tool execution
+                if cancelled {
+                    break;
                 }
 
                 // Send function results back to the model
@@ -314,28 +343,7 @@ impl Agent for DeveloperAgent {
 
                 if more_calls.is_empty() {
                     // Done - extract final answer
-                    let answer = follow_up_response.text().map(|s| s.to_string()).unwrap_or_else(|| {
-                        log::warn!("LLM response contained no text content");
-                        String::new()
-                    });
-                    let total_tokens = gemicro_core::extract_total_tokens(&follow_up_response).unwrap_or_else(|| {
-                        log::debug!("Could not extract token count from response");
-                        0
-                    });
-                    let duration_ms = start.elapsed().as_millis() as u64;
-
-                    yield AgentUpdate::final_result(
-                        json!(answer),
-                        ResultMetadata::with_extra(
-                            total_tokens,
-                            0,
-                            duration_ms,
-                            json!({
-                                "tool_call_count": total_tool_calls,
-                                "iterations": iteration,
-                            }),
-                        ),
-                    );
+                    yield build_final_result(&follow_up_response, start, total_tool_calls, iteration);
                     break;
                 } else {
                     // More function calls - store them for next iteration
@@ -351,7 +359,6 @@ impl Agent for DeveloperAgent {
     }
 
     fn create_tracker(&self) -> Box<dyn ExecutionTracking> {
-        // Use DefaultTracker for now - will implement custom DeveloperTracker later
         Box::new(DefaultTracker::default())
     }
 }
