@@ -171,6 +171,7 @@ mod tests {
         Args {
             query: Some("test query".to_string()),
             interactive: false,
+            agent: "deep_research".to_string(),
             api_key: "test-key".to_string(),
             min_sub_queries: 3,
             max_sub_queries: 5,

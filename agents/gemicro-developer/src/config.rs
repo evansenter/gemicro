@@ -143,14 +143,21 @@ impl DeveloperConfig {
                     break;
                 }
                 Ok(_) => {
-                    log::debug!("Developer instructions at {} empty, skipping", path.display());
+                    log::debug!(
+                        "Developer instructions at {} empty, skipping",
+                        path.display()
+                    );
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                     log::debug!("Developer instructions not found at {}", path.display());
                 }
                 Err(e) => {
                     // Log actual read errors (permissions, etc.) at warn level
-                    log::warn!("Failed to read developer instructions from {}: {}", path.display(), e);
+                    log::warn!(
+                        "Failed to read developer instructions from {}: {}",
+                        path.display(),
+                        e
+                    );
                 }
             }
         }
@@ -212,8 +219,8 @@ mod tests {
 
     #[test]
     fn test_build_system_prompt_without_di() {
-        let config = DeveloperConfig::default()
-            .with_di_paths(vec![PathBuf::from("/nonexistent/path")]);
+        let config =
+            DeveloperConfig::default().with_di_paths(vec![PathBuf::from("/nonexistent/path")]);
 
         let prompt = config.build_system_prompt();
         // Should contain base prompt and working directory
@@ -225,8 +232,8 @@ mod tests {
 
     #[test]
     fn test_build_system_prompt_includes_working_dir() {
-        let config = DeveloperConfig::default()
-            .with_di_paths(vec![PathBuf::from("/nonexistent/path")]);
+        let config =
+            DeveloperConfig::default().with_di_paths(vec![PathBuf::from("/nonexistent/path")]);
 
         let prompt = config.build_system_prompt();
 
