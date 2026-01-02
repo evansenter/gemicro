@@ -315,7 +315,8 @@ impl Agent for DeveloperAgent {
                 }
 
                 // Handle batch approval if enabled and required
-                let batch_approved = if approval_batching && batch.requires_confirmation() {
+                // review_individually tracks when user wants per-tool confirmation
+                let (batch_approved, review_individually) = if approval_batching && batch.requires_confirmation() {
                     // Emit batch plan event for CLI display
                     let summary = batch.summary();
                     yield AgentUpdate::custom(
@@ -343,7 +344,7 @@ impl Agent for DeveloperAgent {
                                 "Batch approved",
                                 json!({ "total": batch.len() }),
                             );
-                            true
+                            (true, false)
                         }
                         BatchApproval::Denied => {
                             yield AgentUpdate::custom(
@@ -351,16 +352,16 @@ impl Agent for DeveloperAgent {
                                 "Batch denied by user",
                                 json!({ "total": batch.len() }),
                             );
-                            false
+                            (false, false)
                         }
                         BatchApproval::ReviewIndividually => {
-                            // Fall through to individual confirmation below
-                            true
+                            // Proceed but do individual confirmations for each tool
+                            (true, true)
                         }
                     }
                 } else {
                     // No batch confirmation needed
-                    true
+                    (true, false)
                 };
 
                 if !batch_approved {
@@ -454,10 +455,11 @@ impl Agent for DeveloperAgent {
                     let tool_start = Instant::now();
 
                     // Get the tool from registry
-                    // If batch was approved, skip individual confirmation (already handled)
-                    // If approval_batching is disabled, do individual confirmation as before
+                    // Individual confirmation needed when:
+                    // - approval_batching is disabled (original behavior), OR
+                    // - user chose ReviewIndividually for the batch
                     let tool_result = if let Some(tool) = tools.get(tool_name) {
-                        let needs_individual_confirm = !approval_batching
+                        let needs_individual_confirm = (!approval_batching || review_individually)
                             && tool.requires_confirmation(arguments);
 
                         if needs_individual_confirm {
