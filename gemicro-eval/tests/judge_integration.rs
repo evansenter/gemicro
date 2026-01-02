@@ -1,10 +1,10 @@
-//! Integration tests for LlmJudgeAgent
+//! Integration tests for CritiqueAgent (ground truth mode)
 //!
 //! These tests require a valid GEMINI_API_KEY environment variable.
 
 use futures_util::StreamExt;
 use gemicro_core::{Agent, AgentContext, LlmClient, LlmConfig};
-use gemicro_judge::{JudgeConfig, JudgeInput, LlmJudgeAgent};
+use gemicro_critique::{CritiqueAgent, CritiqueConfig, CritiqueCriteria, CritiqueInput};
 use std::time::Duration;
 
 fn get_api_key() -> Option<String> {
@@ -24,7 +24,7 @@ fn create_test_client(api_key: &str) -> LlmClient {
 
 #[tokio::test]
 #[ignore] // Requires GEMINI_API_KEY
-async fn test_llm_judge_correct_answer() {
+async fn test_critique_ground_truth_correct_answer() {
     let Some(api_key) = get_api_key() else {
         eprintln!("Skipping test: GEMINI_API_KEY not set");
         return;
@@ -33,43 +33,42 @@ async fn test_llm_judge_correct_answer() {
     let client = create_test_client(&api_key);
     let context = AgentContext::new(client);
 
-    let judge = LlmJudgeAgent::new(JudgeConfig::default());
+    let agent = CritiqueAgent::new(CritiqueConfig::default()).unwrap();
 
     // Test: Correct answer
-    let input = JudgeInput::new("Paris", "The capital of France is Paris");
+    let input = CritiqueInput::new("Paris").with_criteria(CritiqueCriteria::GroundTruth {
+        expected: "The capital of France is Paris".into(),
+    });
     let query = input.to_query();
 
-    let stream = judge.execute(&query, context);
+    let stream = agent.execute(&query, context);
     futures_util::pin_mut!(stream);
 
     let mut found_result = false;
     while let Some(update) = stream.next().await {
-        let update = update.expect("Judge should not fail");
+        let update = update.expect("Critique should not fail");
         println!("[{}] {}", update.event_type, update.message);
 
-        if update.event_type == "judge_result" {
+        if update.event_type == "critique_result" {
             found_result = true;
-            let correct = update.data["correct"].as_bool();
-            let reasoning = update.data["reasoning"].as_str();
+            let verdict = update.data["verdict"].as_str();
 
-            println!("  Correct: {:?}", correct);
-            println!("  Reasoning: {:?}", reasoning);
+            println!("  Verdict: {:?}", verdict);
 
             assert!(
-                correct == Some(true),
-                "Paris should be judged correct for 'capital of France', got: {:?}",
-                correct
+                verdict == Some("Pass") || verdict == Some("PassWithWarnings"),
+                "Paris should pass for 'capital of France', got: {:?}",
+                verdict
             );
-            assert!(reasoning.is_some(), "Should have reasoning");
         }
     }
 
-    assert!(found_result, "Should have received judge_result event");
+    assert!(found_result, "Should have received critique_result event");
 }
 
 #[tokio::test]
 #[ignore] // Requires GEMINI_API_KEY
-async fn test_llm_judge_incorrect_answer() {
+async fn test_critique_ground_truth_incorrect_answer() {
     let Some(api_key) = get_api_key() else {
         eprintln!("Skipping test: GEMINI_API_KEY not set");
         return;
@@ -78,39 +77,41 @@ async fn test_llm_judge_incorrect_answer() {
     let client = create_test_client(&api_key);
     let context = AgentContext::new(client);
 
-    let judge = LlmJudgeAgent::new(JudgeConfig::default());
+    let agent = CritiqueAgent::new(CritiqueConfig::default()).unwrap();
 
     // Test: Incorrect answer
-    let input = JudgeInput::new("London", "The capital of France is Paris");
+    let input = CritiqueInput::new("London").with_criteria(CritiqueCriteria::GroundTruth {
+        expected: "The capital of France is Paris".into(),
+    });
     let query = input.to_query();
 
-    let stream = judge.execute(&query, context);
+    let stream = agent.execute(&query, context);
     futures_util::pin_mut!(stream);
 
     let mut found_result = false;
     while let Some(update) = stream.next().await {
-        let update = update.expect("Judge should not fail");
+        let update = update.expect("Critique should not fail");
 
-        if update.event_type == "judge_result" {
+        if update.event_type == "critique_result" {
             found_result = true;
-            let correct = update.data["correct"].as_bool();
+            let verdict = update.data["verdict"].as_str();
 
-            println!("London as capital of France - Correct: {:?}", correct);
+            println!("London as capital of France - Verdict: {:?}", verdict);
 
             assert!(
-                correct == Some(false),
-                "London should be judged incorrect for 'capital of France', got: {:?}",
-                correct
+                verdict == Some("NeedsRevision") || verdict == Some("Reject"),
+                "London should fail for 'capital of France', got: {:?}",
+                verdict
             );
         }
     }
 
-    assert!(found_result, "Should have received judge_result event");
+    assert!(found_result, "Should have received critique_result event");
 }
 
 #[tokio::test]
 #[ignore] // Requires GEMINI_API_KEY
-async fn test_llm_judge_semantic_equivalence() {
+async fn test_critique_ground_truth_semantic_equivalence() {
     let Some(api_key) = get_api_key() else {
         eprintln!("Skipping test: GEMINI_API_KEY not set");
         return;
@@ -119,35 +120,36 @@ async fn test_llm_judge_semantic_equivalence() {
     let client = create_test_client(&api_key);
     let context = AgentContext::new(client);
 
-    let judge = LlmJudgeAgent::new(JudgeConfig::default());
+    let agent = CritiqueAgent::new(CritiqueConfig::default()).unwrap();
 
     // Test: Semantically equivalent but differently worded
-    let input = JudgeInput::new(
-        "William Shakespeare wrote Romeo and Juliet",
-        "Romeo and Juliet was written by Shakespeare",
+    let input = CritiqueInput::new("William Shakespeare wrote Romeo and Juliet").with_criteria(
+        CritiqueCriteria::GroundTruth {
+            expected: "Romeo and Juliet was written by Shakespeare".into(),
+        },
     );
     let query = input.to_query();
 
-    let stream = judge.execute(&query, context);
+    let stream = agent.execute(&query, context);
     futures_util::pin_mut!(stream);
 
     let mut found_result = false;
     while let Some(update) = stream.next().await {
-        let update = update.expect("Judge should not fail");
+        let update = update.expect("Critique should not fail");
 
-        if update.event_type == "judge_result" {
+        if update.event_type == "critique_result" {
             found_result = true;
-            let correct = update.data["correct"].as_bool();
+            let verdict = update.data["verdict"].as_str();
 
-            println!("Semantic equivalence test - Correct: {:?}", correct);
+            println!("Semantic equivalence test - Verdict: {:?}", verdict);
 
             assert!(
-                correct == Some(true),
-                "Semantically equivalent answers should be judged correct, got: {:?}",
-                correct
+                verdict == Some("Pass") || verdict == Some("PassWithWarnings"),
+                "Semantically equivalent answers should pass, got: {:?}",
+                verdict
             );
         }
     }
 
-    assert!(found_result, "Should have received judge_result event");
+    assert!(found_result, "Should have received critique_result event");
 }

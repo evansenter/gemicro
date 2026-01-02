@@ -151,14 +151,17 @@ impl Default for Scorers {
 
 /// LLM-as-judge scorer using semantic comparison.
 ///
-/// Uses an LLM to evaluate whether the predicted answer is semantically
+/// Uses the CritiqueAgent to evaluate whether the predicted answer is semantically
 /// correct compared to the ground truth. More flexible than exact matching
 /// but slower and requires API calls.
 ///
 /// # Returns
 ///
-/// - `1.0` if the LLM judges the prediction as semantically correct
-/// - `0.0` if the LLM judges the prediction as incorrect
+/// - Score between 0.0 and 1.0 based on the critique verdict:
+///   - `Pass`: 1.0
+///   - `PassWithWarnings`: 0.75
+///   - `NeedsRevision`: 0.25
+///   - `Reject`: 0.0
 /// - `NaN` if the evaluation itself failed (LLM error, timeout, etc.)
 ///
 /// Use [`f64::is_nan()`] to check for evaluation failures.
@@ -180,7 +183,7 @@ impl Default for Scorers {
 /// let llm = Arc::new(LlmClient::new(genai, LlmConfig::default()));
 /// let scorer = LlmJudgeScorer::new(llm);
 ///
-/// // Returns 1.0 (correct), 0.0 (incorrect), or NaN (evaluation failed)
+/// // Returns score based on verdict, or NaN if evaluation failed
 /// // let score = scorer.score("The capital is Paris", "Paris");
 /// // if score.is_nan() { /* handle evaluation failure */ }
 /// ```
@@ -203,11 +206,13 @@ impl Scorer for LlmJudgeScorer {
     fn score(&self, predicted: &str, ground_truth: &str) -> f64 {
         use futures_util::StreamExt;
         use gemicro_core::{Agent, AgentContext};
-        use gemicro_judge::{JudgeConfig, JudgeInput, LlmJudgeAgent};
+        use gemicro_critique::{CritiqueAgent, CritiqueConfig, CritiqueCriteria, CritiqueInput};
 
-        // Create judge agent and input
-        let agent = LlmJudgeAgent::new(JudgeConfig::default());
-        let input = JudgeInput::new(predicted, ground_truth);
+        // Create critique agent with ground truth criteria
+        let agent = CritiqueAgent::new(CritiqueConfig::default()).expect("default config is valid");
+        let input = CritiqueInput::new(predicted).with_criteria(CritiqueCriteria::GroundTruth {
+            expected: ground_truth.into(),
+        });
         let context = AgentContext::from_arc(self.llm.clone());
 
         // Run async agent from sync context using block_in_place.
@@ -220,20 +225,24 @@ impl Scorer for LlmJudgeScorer {
                 while let Some(result) = stream.next().await {
                     match result {
                         Ok(update) => {
-                            if update.event_type == "judge_result" {
-                                match update.data.get("correct") {
-                                    Some(value) => match value.as_bool() {
-                                        Some(correct) => return if correct { 1.0 } else { 0.0 },
-                                        None => {
+                            if update.event_type == "critique_result" {
+                                // Extract verdict and convert to score
+                                match update.data.get("verdict") {
+                                    Some(value) => match value.as_str() {
+                                        Some("Pass") => return 1.0,
+                                        Some("PassWithWarnings") => return 0.75,
+                                        Some("NeedsRevision") => return 0.25,
+                                        Some("Reject") => return 0.0,
+                                        _ => {
                                             log::error!(
-                                                "LLM judge 'correct' field is not a boolean: {:?}",
+                                                "LLM judge 'verdict' has unexpected value: {:?}",
                                                 value
                                             );
                                             return f64::NAN;
                                         }
                                     },
                                     None => {
-                                        log::error!("LLM judge result missing 'correct' field");
+                                        log::error!("LLM judge result missing 'verdict' field");
                                         return f64::NAN;
                                     }
                                 }
@@ -245,7 +254,7 @@ impl Scorer for LlmJudgeScorer {
                         }
                     }
                 }
-                // Stream ended without producing a judge_result
+                // Stream ended without producing a critique_result
                 log::error!("LLM judge did not produce a result");
                 f64::NAN
             })

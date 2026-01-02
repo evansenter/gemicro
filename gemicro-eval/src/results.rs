@@ -247,7 +247,7 @@ impl EvalSummary {
     /// Recalculate average scores from results.
     ///
     /// Call this after manually adding scores to individual results
-    /// (e.g., after running `LlmJudgeAgent` on each result).
+    /// (e.g., after running `CritiqueAgent` on each result).
     ///
     /// NaN scores are skipped (they indicate scorer failures, not incorrect answers).
     pub fn recalculate_averages(&mut self) {
@@ -404,7 +404,7 @@ mod tests {
         assert_eq!(summary.avg_score("contains"), Some(1.0));
         assert_eq!(summary.avg_score("llm_judge"), None);
 
-        // Add llm_judge scores after the fact (simulating LlmJudgeAgent)
+        // Add llm_judge scores after the fact (simulating CritiqueAgent)
         summary.results[0]
             .scores
             .insert("llm_judge".to_string(), 1.0);
