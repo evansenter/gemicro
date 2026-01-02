@@ -53,7 +53,9 @@ use gemicro_core::{
     Agent, AgentContext, AgentError, AgentStream, AgentUpdate, DefaultTracker, ExecutionTracking,
     LlmError, ResultMetadata, MODEL,
 };
-use rust_genai::{function_result_content, FunctionDeclaration, InteractionContent};
+use rust_genai::{
+    function_result_content, FunctionDeclaration, InteractionContent, OwnedFunctionCallInfo,
+};
 use serde_json::json;
 use std::sync::Arc;
 use std::time::Instant;
@@ -114,27 +116,6 @@ fn build_incomplete_result(
             }),
         ),
     )
-}
-
-/// Owned representation of a function call for cross-iteration processing.
-///
-/// `FunctionCallInfo<'a>` from rust-genai borrows from the response, so we need
-/// an owned version to carry function calls across loop iterations.
-struct OwnedFunctionCall {
-    id: Option<String>,
-    name: String,
-    args: serde_json::Value,
-}
-
-impl OwnedFunctionCall {
-    /// Convert a borrowed `FunctionCallInfo` to owned.
-    fn from_info(info: &rust_genai::FunctionCallInfo<'_>) -> Self {
-        Self {
-            id: info.id.map(String::from),
-            name: info.name.to_string(),
-            args: info.args.clone(),
-        }
-    }
 }
 
 /// Developer agent with explicit function calling loop.
@@ -201,7 +182,7 @@ impl Agent for DeveloperAgent {
             let mut total_tool_calls = 0usize;
             let mut iteration = 0usize;
             let mut previous_interaction_id: Option<String> = None;
-            let mut pending_function_calls: Vec<OwnedFunctionCall> = Vec::new();
+            let mut pending_function_calls: Vec<OwnedFunctionCallInfo> = Vec::new();
 
             // ══════════════════════════════════════════════════════════════════
             // SECTION 2: Main Function Calling Loop
@@ -266,7 +247,7 @@ impl Agent for DeveloperAgent {
                     previous_interaction_id = response.id.clone();
 
                     // Convert to owned for processing across iterations
-                    calls.iter().map(OwnedFunctionCall::from_info).collect()
+                    calls.iter().map(|c| c.to_owned()).collect()
                 };
 
                 // ─────────────────────────────────────────────────────────────
@@ -388,7 +369,7 @@ impl Agent for DeveloperAgent {
                 } else {
                     // More function calls - store them for next iteration
                     previous_interaction_id = follow_up_response.id.clone();
-                    pending_function_calls = more_calls.iter().map(OwnedFunctionCall::from_info).collect();
+                    pending_function_calls = more_calls.iter().map(|c| c.to_owned()).collect();
                     log::debug!(
                         "Follow-up response contained {} more function calls, processing next iteration",
                         pending_function_calls.len()
