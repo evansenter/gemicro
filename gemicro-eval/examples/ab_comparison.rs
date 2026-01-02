@@ -13,7 +13,6 @@
 //! 4. Uses the critique agent to score semantic correctness
 //! 5. Compares performance metrics
 
-use futures_util::StreamExt;
 use gemicro_core::{AgentContext, LlmClient, LlmConfig};
 use gemicro_critique::{CritiqueAgent, CritiqueConfig, CritiqueCriteria, CritiqueInput};
 use gemicro_deep_research::{DeepResearchAgent, ResearchConfig};
@@ -144,9 +143,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             )
             .await?;
 
-        // Run critique agent on results using the registered agent
+        // Run critique agent on results
+        // Note: We create CritiqueAgent directly here to use the typed critique() helper.
+        // The registry registration above demonstrates agents are composable/registrable.
         println!("   Running critique agent...");
-        let critique = registry.get("critique").unwrap();
+        let critique_agent =
+            CritiqueAgent::new(CritiqueConfig::default()).expect("default config is valid");
 
         for result in &mut summary.results {
             if let Some(predicted) = &result.predicted {
@@ -158,28 +160,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let critique_llm = LlmClient::new(genai_client.clone(), llm_config.clone());
                 let context = AgentContext::new(critique_llm);
 
-                let stream = critique.execute(&input.to_query(), context);
-                futures_util::pin_mut!(stream);
-
-                // Collect the critique result
-                while let Some(update_result) = stream.next().await {
-                    match update_result {
-                        Ok(update) => {
-                            if update.event_type == "critique_result" {
-                                // Convert verdict to score
-                                let score = match update.data["verdict"].as_str() {
-                                    Some("Pass") => 1.0,
-                                    Some("PassWithWarnings") => 0.75,
-                                    Some("NeedsRevision") => 0.25,
-                                    Some("Reject") => 0.0,
-                                    _ => 0.0,
-                                };
-                                result.scores.insert("critique".to_string(), score);
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!("   Warning: Critique error: {}", e);
-                        }
+                // Use the critique() helper for cleaner typed output
+                match critique_agent.critique(&input, context).await {
+                    Ok(output) => {
+                        result
+                            .scores
+                            .insert("critique".to_string(), output.to_score());
+                    }
+                    Err(e) => {
+                        eprintln!("   Warning: Critique error: {}", e);
                     }
                 }
             }
