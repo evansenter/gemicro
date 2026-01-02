@@ -69,7 +69,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "│ Working dir: {:<48} │",
         truncate(&env::current_dir()?.display().to_string(), 48)
     );
-    println!("│ Max iterations: {:<45} │", 10);
+    println!("│ Max iterations: {:<45} │", 50);
     println!("│ LLM timeout: {:<48} │", "60s");
     println!("│ Temperature: {:<48} │", 0.7);
     println!("│ Verbose: {:<52} │", if verbose { "yes" } else { "no" });
@@ -121,7 +121,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_confirmation_handler(Arc::new(AutoApprove));
 
     // Create developer agent
-    let config = DeveloperConfig::default().with_max_iterations(10); // Limit for demo
+    let config = DeveloperConfig::default().with_max_iterations(50);
     let agent = DeveloperAgent::new(config)?;
 
     println!("┌─ Query ──────────────────────────────────────────────────────┐");
@@ -172,12 +172,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 };
 
                 println!("│                                                              │");
-                println!(
-                    "│ 🔧 [{:>2}] {} {}",
+                // Format: 🔧 [NN] tool_name args_preview
+                // Width: 62 chars inside box, minus "🔧 [NN] " (9 chars) = 53 for tool+args
+                let tool_line = format!(
+                    "🔧 [{:>2}] {} {}",
                     tool_call_count,
                     tool_name,
-                    truncate(&args_preview, 45)
+                    truncate(&args_preview, 40)
                 );
+                println!("│ {:<60} │", truncate(&tool_line, 60));
 
                 if verbose {
                     println!("│      Call ID: {:<47} │", truncate(call_id, 47));
@@ -196,13 +199,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let status_icon = if success { "✓" } else { "✗" };
                 let status_text = if success { "OK" } else { "FAILED" };
 
-                println!(
-                    "│    {} {} {} ({:.2}s)",
+                // Format: ✓ OK tool_name (Xs)
+                let result_line = format!(
+                    "{} {} {} ({:.2}s)",
                     status_icon,
                     status_text,
                     tool_name,
                     duration_ms as f64 / 1000.0
                 );
+                println!("│    {:<56} │", result_line);
 
                 if verbose || !success {
                     // Show result preview (or full error)
