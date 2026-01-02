@@ -8,7 +8,7 @@ use std::time::Duration;
 /// AI agent exploration platform
 #[derive(Parser, Debug)]
 #[command(name = "gemicro")]
-#[command(about = "Deep research agent powered by Gemini", long_about = None)]
+#[command(about = "Agent exploration platform powered by Gemini", long_about = None)]
 #[command(version)]
 pub struct Args {
     /// Research query (required unless using --interactive)
@@ -17,6 +17,10 @@ pub struct Args {
     /// Interactive REPL mode
     #[arg(short, long)]
     pub interactive: bool,
+
+    /// Agent to use (e.g., deep_research, developer, tool_agent)
+    #[arg(long)]
+    pub agent: String,
 
     /// Gemini API key (can also use GEMINI_API_KEY env var)
     #[arg(long, env = "GEMINI_API_KEY")]

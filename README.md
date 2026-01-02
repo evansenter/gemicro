@@ -17,7 +17,7 @@ Building AI agents that call tools seems simple—until you need:
 - **Security hooks** — Block writes to sensitive paths, sanitize inputs, log all tool calls.
 - **Agent composability** — Switch agents at runtime, register new ones without code changes.
 
-Gemicro handles these cross-cutting concerns so your agent code stays focused on the reasoning pattern.
+Gemicro provides these capabilities so you can focus on the reasoning pattern.
 
 ### Cross-Cutting Concerns
 
@@ -235,7 +235,7 @@ Arguments:
 
 Options:
   -i, --interactive            Interactive REPL mode
-      --agent <NAME>           Agent to use [default: deep_research]
+      --agent <NAME>           Agent to use (required)
       --api-key <KEY>          Gemini API key (or GEMINI_API_KEY env var)
       --min-sub-queries <N>    Minimum sub-queries [default: 3]
       --max-sub-queries <N>    Maximum sub-queries [default: 5]

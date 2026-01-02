@@ -37,7 +37,7 @@ struct Args {
     scorer: String,
 
     /// Agent to evaluate: deep_research, react, simple_qa, tool_agent
-    #[arg(long, short = 'a', default_value = "deep_research")]
+    #[arg(long, short = 'a')]
     agent: String,
 
     /// Maximum concurrent evaluations

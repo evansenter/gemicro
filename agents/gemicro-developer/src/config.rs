@@ -5,24 +5,13 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 /// Default timeout for developer agent (10 minutes).
+///
+/// This covers the entire multi-turn conversation including all LLM calls
+/// and tool executions, not just a single request.
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(600);
 
-/// Default system prompt for developer agent.
-const DEFAULT_SYSTEM_PROMPT: &str = r#"You are a developer agent that helps with software engineering tasks.
-
-You have access to tools for reading files, editing code, running commands, and searching the codebase.
-
-IMPORTANT: File tools (file_read, file_write, file_edit, glob, grep) require ABSOLUTE paths.
-Use the working directory provided below to construct absolute paths.
-
-When working on tasks:
-1. First understand the codebase structure and existing patterns
-2. Make targeted, minimal changes that follow existing conventions
-3. Verify your changes work correctly
-4. Explain what you did and why
-
-Be precise and careful. Prefer editing existing files over creating new ones.
-"#;
+/// Default system prompt loaded from `prompts/developer_system.md`.
+const DEFAULT_SYSTEM_PROMPT: &str = include_str!("../prompts/developer_system.md");
 
 /// Configuration for DeveloperAgent.
 #[derive(Clone, Debug)]
@@ -37,9 +26,13 @@ pub struct DeveloperConfig {
     /// Maximum execution time.
     pub timeout: Duration,
 
-    /// Paths to load CLAUDE.md from (in order of precedence).
+    /// Paths to load developer instructions from (in order of precedence).
+    ///
+    /// These files (e.g., CLAUDE.md) provide project-specific context that gets
+    /// appended to the system prompt. First found file is used.
+    ///
     /// Default: `["./CLAUDE.md", "~/.claude/CLAUDE.md"]`
-    pub claude_md_paths: Vec<PathBuf>,
+    pub di_paths: Vec<PathBuf>,
 
     /// Maximum iterations (LLM turns) before forcing completion.
     pub max_iterations: usize,
@@ -51,7 +44,7 @@ impl Default for DeveloperConfig {
             system_prompt: DEFAULT_SYSTEM_PROMPT.to_string(),
             tool_filter: ToolSet::All,
             timeout: DEFAULT_TIMEOUT,
-            claude_md_paths: vec![
+            di_paths: vec![
                 PathBuf::from("./CLAUDE.md"),
                 dirs::home_dir()
                     .map(|h| h.join(".claude/CLAUDE.md"))
@@ -89,10 +82,10 @@ impl DeveloperConfig {
         self
     }
 
-    /// Set the CLAUDE.md paths.
+    /// Set the developer instruction paths.
     #[must_use]
-    pub fn with_claude_md_paths(mut self, paths: Vec<PathBuf>) -> Self {
-        self.claude_md_paths = paths;
+    pub fn with_di_paths(mut self, paths: Vec<PathBuf>) -> Self {
+        self.di_paths = paths;
         self
     }
 
@@ -138,33 +131,33 @@ impl DeveloperConfig {
             ));
         }
 
-        // Load CLAUDE.md content from first available path
+        // Load developer instructions from first available path
         let mut found = false;
-        for path in &self.claude_md_paths {
+        for path in &self.di_paths {
             match std::fs::read_to_string(path) {
                 Ok(content) if !content.trim().is_empty() => {
-                    prompt.push_str("\n\n## Project Context (from CLAUDE.md)\n\n");
+                    prompt.push_str("\n\n## Developer Instructions\n\n");
                     prompt.push_str(&content);
-                    log::info!("Loaded CLAUDE.md from: {}", path.display());
+                    log::info!("Loaded developer instructions from: {}", path.display());
                     found = true;
                     break;
                 }
                 Ok(_) => {
-                    log::debug!("CLAUDE.md at {} is empty, skipping", path.display());
+                    log::debug!("Developer instructions at {} empty, skipping", path.display());
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    log::debug!("CLAUDE.md not found at {}", path.display());
+                    log::debug!("Developer instructions not found at {}", path.display());
                 }
                 Err(e) => {
                     // Log actual read errors (permissions, etc.) at warn level
-                    log::warn!("Failed to read CLAUDE.md from {}: {}", path.display(), e);
+                    log::warn!("Failed to read developer instructions from {}: {}", path.display(), e);
                 }
             }
         }
         if !found {
             log::debug!(
-                "No CLAUDE.md found in configured paths: {:?}",
-                self.claude_md_paths
+                "No developer instructions found in configured paths: {:?}",
+                self.di_paths
             );
         }
 
@@ -218,22 +211,22 @@ mod tests {
     }
 
     #[test]
-    fn test_build_system_prompt_without_claude_md() {
+    fn test_build_system_prompt_without_di() {
         let config = DeveloperConfig::default()
-            .with_claude_md_paths(vec![PathBuf::from("/nonexistent/path")]);
+            .with_di_paths(vec![PathBuf::from("/nonexistent/path")]);
 
         let prompt = config.build_system_prompt();
         // Should contain base prompt and working directory
         assert!(prompt.starts_with(&config.system_prompt));
         assert!(prompt.contains("Working directory:"));
-        // Should NOT contain CLAUDE.md section
-        assert!(!prompt.contains("## Project Context"));
+        // Should NOT contain developer instructions section
+        assert!(!prompt.contains("## Developer Instructions"));
     }
 
     #[test]
     fn test_build_system_prompt_includes_working_dir() {
         let config = DeveloperConfig::default()
-            .with_claude_md_paths(vec![PathBuf::from("/nonexistent/path")]);
+            .with_di_paths(vec![PathBuf::from("/nonexistent/path")]);
 
         let prompt = config.build_system_prompt();
 

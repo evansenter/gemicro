@@ -1,8 +1,7 @@
 //! Developer agent with explicit function calling for real-time tool events.
 //!
-//! Unlike ToolAgent which delegates function calling to rust-genai's automatic
-//! mode, DeveloperAgent uses an explicit FC loop to emit `tool_call_started` and
-//! `tool_result` events for real-time CLI feedback.
+//! Uses an explicit function calling loop (rather than rust-genai's automatic mode)
+//! to emit `tool_call_started` and `tool_result` events for real-time CLI feedback.
 //!
 //! # Architecture
 //!
@@ -25,7 +24,7 @@
 //! use futures_util::StreamExt;
 //!
 //! # async fn example() -> Result<(), gemicro_core::AgentError> {
-//! let genai_client = rust_genai::Client::builder("key".to_string()).build();
+//! let genai_client = rust_genai::Client::builder("your-api-key".to_string()).build();
 //! let llm = LlmClient::new(genai_client, LlmConfig::default());
 //! let context = AgentContext::new(llm);
 //!
@@ -80,7 +79,7 @@ fn build_final_result(
         json!(answer),
         ResultMetadata::with_extra(
             total_tokens,
-            0,
+            0, // tokens_unavailable_count: we only make one final LLM call
             duration_ms,
             json!({
                 "tool_call_count": total_tool_calls,
@@ -104,8 +103,8 @@ fn build_incomplete_result(
     AgentUpdate::final_result(
         json!(format!("[Execution incomplete: {}]", reason)),
         ResultMetadata::with_extra(
-            0,
-            0,
+            0, // total_tokens: unavailable for incomplete executions
+            0, // tokens_unavailable_count: not tracked for incomplete
             duration_ms,
             json!({
                 "tool_call_count": total_tool_calls,
@@ -174,23 +173,23 @@ impl Agent for DeveloperAgent {
         let system_prompt = self.config.build_system_prompt();
 
         Box::pin(try_stream! {
-            // Emit started event
+            // ══════════════════════════════════════════════════════════════════
+            // SECTION 1: Initialization
+            // ══════════════════════════════════════════════════════════════════
+
             yield AgentUpdate::custom(
                 events::EVENT_DEVELOPER_STARTED,
                 "Starting developer agent",
                 json!({ "query": &query }),
             );
 
-            // Get tools from context
             let tools = context.tools.clone().ok_or_else(|| {
                 AgentError::InvalidConfig("DeveloperAgent requires tools in context".into())
             })?;
 
-            // Get confirmation handler (default to AutoDeny for safety)
             let confirmation_handler: Arc<dyn ConfirmationHandler> =
                 context.confirmation_handler.clone().unwrap_or_else(|| Arc::new(AutoDeny));
 
-            // Build tool declarations for rust-genai
             let filtered_tools = tools.filter(&tool_filter);
             let function_declarations: Vec<FunctionDeclaration> = filtered_tools
                 .iter()
@@ -202,10 +201,11 @@ impl Agent for DeveloperAgent {
             let mut total_tool_calls = 0usize;
             let mut iteration = 0usize;
             let mut previous_interaction_id: Option<String> = None;
-            // Track pending function calls from the LLM that need processing
             let mut pending_function_calls: Vec<OwnedFunctionCall> = Vec::new();
 
-            // Explicit function calling loop
+            // ══════════════════════════════════════════════════════════════════
+            // SECTION 2: Main Function Calling Loop
+            // ══════════════════════════════════════════════════════════════════
             loop {
                 // Check for cancellation at start of each iteration
                 if context.cancellation_token.is_cancelled() {
@@ -269,7 +269,10 @@ impl Agent for DeveloperAgent {
                     calls.iter().map(OwnedFunctionCall::from_info).collect()
                 };
 
-                // Process each function call with real-time events
+                // ─────────────────────────────────────────────────────────────
+                // SECTION 2a: Execute Function Calls with Real-Time Events
+                // ─────────────────────────────────────────────────────────────
+
                 let mut function_results: Vec<InteractionContent> = Vec::new();
                 let mut cancelled = false;
 
@@ -348,13 +351,15 @@ impl Agent for DeveloperAgent {
                     ));
                 }
 
-                // Exit outer loop if cancelled during tool execution
                 if cancelled {
                     yield build_incomplete_result("cancelled during tool execution", start, total_tool_calls, iteration);
                     break;
                 }
 
-                // Send function results back to the model
+                // ─────────────────────────────────────────────────────────────
+                // SECTION 2b: Send Results to LLM and Check for More Calls
+                // ─────────────────────────────────────────────────────────────
+
                 let mut result_builder = genai_client
                     .interaction()
                     .with_model(MODEL)

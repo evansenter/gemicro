@@ -121,7 +121,7 @@ pub fn print_final_result(result: &FinalResult, elapsed: Duration, plain: bool) 
         println!("   Steps: {}/{} succeeded", steps_succeeded, total);
     }
 
-    // Show tool call count if available (from DeveloperAgent and similar)
+    // Show tool call count if available (agents using explicit function calling)
     let tool_call_count = result
         .metadata
         .extra
