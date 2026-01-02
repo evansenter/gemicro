@@ -36,6 +36,15 @@ pub struct DeveloperConfig {
 
     /// Maximum iterations (LLM turns) before forcing completion.
     pub max_iterations: usize,
+
+    /// Whether to batch tool approvals.
+    ///
+    /// When true, the agent collects all tool calls from an LLM response,
+    /// shows a plan summary, and requests a single approval for the batch.
+    /// When false, each tool requiring confirmation is approved individually.
+    ///
+    /// Default: true
+    pub approval_batching: bool,
 }
 
 impl Default for DeveloperConfig {
@@ -51,6 +60,7 @@ impl Default for DeveloperConfig {
                     .unwrap_or_else(|| PathBuf::from("~/.claude/CLAUDE.md")),
             ],
             max_iterations: 50,
+            approval_batching: true,
         }
     }
 }
@@ -93,6 +103,13 @@ impl DeveloperConfig {
     #[must_use]
     pub fn with_max_iterations(mut self, max: usize) -> Self {
         self.max_iterations = max;
+        self
+    }
+
+    /// Set whether to use approval batching.
+    #[must_use]
+    pub fn with_approval_batching(mut self, enabled: bool) -> Self {
+        self.approval_batching = enabled;
         self
     }
 

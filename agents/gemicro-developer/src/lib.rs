@@ -42,10 +42,16 @@
 //! # }
 //! ```
 
+mod batch;
 mod config;
+mod context;
 mod events;
 
+pub use batch::{
+    BatchApproval, BatchConfirmationHandler, BatchSummary, PendingToolCall, ToolBatch,
+};
 pub use config::DeveloperConfig;
+pub use context::{ContextLevel, ContextUsage, DEFAULT_CONTEXT_WINDOW, DEFAULT_WARNING_THRESHOLD};
 
 use async_stream::try_stream;
 use gemicro_core::{
@@ -119,6 +125,21 @@ fn build_incomplete_result(
     )
 }
 
+/// Check if context level has changed and return the new level if it has.
+///
+/// This is used to detect when we should emit a context_usage event.
+fn check_context_level_change(
+    usage: &ContextUsage,
+    last_level: ContextLevel,
+) -> Option<ContextLevel> {
+    let current_level = usage.level();
+    if current_level != last_level {
+        Some(current_level)
+    } else {
+        None
+    }
+}
+
 /// Developer agent with explicit function calling loop.
 ///
 /// Provides real-time tool execution events for CLI display.
@@ -153,6 +174,7 @@ impl Agent for DeveloperAgent {
         let max_iterations = self.config.max_iterations;
         let tool_filter = self.config.tool_filter.clone();
         let system_prompt = self.config.build_system_prompt();
+        let approval_batching = self.config.approval_batching;
 
         Box::pin(try_stream! {
             // ══════════════════════════════════════════════════════════════════
@@ -184,6 +206,8 @@ impl Agent for DeveloperAgent {
             let mut iteration = 0usize;
             let mut previous_interaction_id: Option<String> = None;
             let mut pending_function_calls: Vec<OwnedFunctionCallInfo> = Vec::new();
+            let mut context_usage = ContextUsage::new();
+            let mut last_context_level = ContextLevel::Normal;
 
             // ══════════════════════════════════════════════════════════════════
             // SECTION 2: Main Function Calling Loop
@@ -243,6 +267,25 @@ impl Agent for DeveloperAgent {
                         }
                     };
 
+                    // Track context usage
+                    if let Some(tokens) = gemicro_core::extract_total_tokens(&response) {
+                        context_usage.add_tokens(tokens);
+                        if let Some(new_level) = check_context_level_change(&context_usage, last_context_level) {
+                            last_context_level = new_level;
+                            yield AgentUpdate::custom(
+                                events::EVENT_CONTEXT_USAGE,
+                                format!("Context usage: {:.1}% ({})", context_usage.usage_percent(), new_level),
+                                json!({
+                                    "tokens_used": context_usage.tokens_used,
+                                    "context_window": context_usage.context_window,
+                                    "usage_percent": context_usage.usage_percent(),
+                                    "level": new_level.to_string(),
+                                    "remaining": context_usage.remaining(),
+                                }),
+                            );
+                        }
+                    }
+
                     let calls = response.function_calls();
 
                     if calls.is_empty() {
@@ -259,7 +302,131 @@ impl Agent for DeveloperAgent {
                 };
 
                 // ─────────────────────────────────────────────────────────────
-                // SECTION 2a: Execute Function Calls with Real-Time Events
+                // SECTION 2a: Build Batch and Handle Approval
+                // ─────────────────────────────────────────────────────────────
+
+                // Build a batch from all pending function calls
+                let mut batch = ToolBatch::new();
+                for fc in &function_calls_to_process {
+                    let call_id = fc.id.clone().unwrap_or_else(|| "unknown".to_string());
+                    let pending = PendingToolCall::new(call_id, &fc.name, fc.args.clone())
+                        .with_tool_info(&tools);
+                    batch.push(pending);
+                }
+
+                // Handle batch approval if enabled and required
+                let batch_approved = if approval_batching && batch.requires_confirmation() {
+                    // Emit batch plan event for CLI display
+                    let summary = batch.summary();
+                    yield AgentUpdate::custom(
+                        events::EVENT_BATCH_PLAN,
+                        format!("Batch plan: {}", summary),
+                        json!({
+                            "total": summary.total,
+                            "requires_confirmation": summary.requires_confirmation,
+                            "tool_counts": summary.tool_counts,
+                            "calls": batch.calls.iter().map(|c| json!({
+                                "call_id": c.call_id,
+                                "tool_name": c.tool_name,
+                                "requires_confirmation": c.requires_confirmation,
+                                "confirmation_message": c.confirmation_message,
+                            })).collect::<Vec<_>>(),
+                        }),
+                    );
+
+                    // Get batch confirmation
+                    let approval = confirmation_handler.confirm_batch(&batch).await;
+                    match approval {
+                        BatchApproval::Approved => {
+                            yield AgentUpdate::custom(
+                                events::EVENT_BATCH_APPROVED,
+                                "Batch approved",
+                                json!({ "total": batch.len() }),
+                            );
+                            true
+                        }
+                        BatchApproval::Denied => {
+                            yield AgentUpdate::custom(
+                                events::EVENT_BATCH_DENIED,
+                                "Batch denied by user",
+                                json!({ "total": batch.len() }),
+                            );
+                            false
+                        }
+                        BatchApproval::ReviewIndividually => {
+                            // Fall through to individual confirmation below
+                            true
+                        }
+                    }
+                } else {
+                    // No batch confirmation needed
+                    true
+                };
+
+                if !batch_approved {
+                    // User denied the batch - send denial results back to LLM
+                    let denial_results: Vec<InteractionContent> = function_calls_to_process
+                        .iter()
+                        .map(|fc| {
+                            let call_id = fc.id.as_deref().unwrap_or("unknown");
+                            function_result_content(
+                                fc.name.clone(),
+                                call_id.to_string(),
+                                json!({ "error": "User denied batch execution" }),
+                            )
+                        })
+                        .collect();
+
+                    // Send denial back to LLM and continue loop
+                    let mut denial_builder = genai_client
+                        .interaction()
+                        .with_model(MODEL)
+                        .with_system_instruction(&system_prompt)
+                        .with_functions(function_declarations.clone())
+                        .with_store(true)
+                        .with_content(denial_results);
+
+                    if let Some(prev_id) = &previous_interaction_id {
+                        denial_builder = denial_builder.with_previous_interaction(prev_id);
+                    }
+
+                    let denial_response = denial_builder
+                        .create()
+                        .await
+                        .map_err(|e| AgentError::Llm(LlmError::GenAi(e)))?;
+
+                    // Track context usage
+                    if let Some(tokens) = gemicro_core::extract_total_tokens(&denial_response) {
+                        context_usage.add_tokens(tokens);
+                        if let Some(new_level) = check_context_level_change(&context_usage, last_context_level) {
+                            last_context_level = new_level;
+                            yield AgentUpdate::custom(
+                                events::EVENT_CONTEXT_USAGE,
+                                format!("Context usage: {:.1}% ({})", context_usage.usage_percent(), new_level),
+                                json!({
+                                    "tokens_used": context_usage.tokens_used,
+                                    "context_window": context_usage.context_window,
+                                    "usage_percent": context_usage.usage_percent(),
+                                    "level": new_level.to_string(),
+                                    "remaining": context_usage.remaining(),
+                                }),
+                            );
+                        }
+                    }
+
+                    let more_calls = denial_response.function_calls();
+                    if more_calls.is_empty() {
+                        yield build_final_result(&denial_response, start, total_tool_calls, iteration);
+                        break;
+                    } else {
+                        previous_interaction_id = denial_response.id.clone();
+                        pending_function_calls = more_calls.iter().map(|c| c.to_owned()).collect();
+                        continue;
+                    }
+                }
+
+                // ─────────────────────────────────────────────────────────────
+                // SECTION 2b: Execute Function Calls with Real-Time Events
                 // ─────────────────────────────────────────────────────────────
 
                 let mut function_results: Vec<InteractionContent> = Vec::new();
@@ -287,9 +454,13 @@ impl Agent for DeveloperAgent {
                     let tool_start = Instant::now();
 
                     // Get the tool from registry
+                    // If batch was approved, skip individual confirmation (already handled)
+                    // If approval_batching is disabled, do individual confirmation as before
                     let tool_result = if let Some(tool) = tools.get(tool_name) {
-                        // Check if tool requires confirmation
-                        if tool.requires_confirmation(arguments) {
+                        let needs_individual_confirm = !approval_batching
+                            && tool.requires_confirmation(arguments);
+
+                        if needs_individual_confirm {
                             let message = tool.confirmation_message(arguments);
                             if !confirmation_handler.confirm(tool_name, &message, arguments).await {
                                 Err(ToolError::ConfirmationDenied(message))
@@ -346,7 +517,7 @@ impl Agent for DeveloperAgent {
                 }
 
                 // ─────────────────────────────────────────────────────────────
-                // SECTION 2b: Send Results to LLM and Check for More Calls
+                // SECTION 2c: Send Results to LLM and Check for More Calls
                 // ─────────────────────────────────────────────────────────────
 
                 // Function result returns don't need tools re-sent - the model already
@@ -367,6 +538,25 @@ impl Agent for DeveloperAgent {
                     .create()
                     .await
                     .map_err(|e| AgentError::Llm(LlmError::GenAi(e)))?;
+
+                // Track context usage
+                if let Some(tokens) = gemicro_core::extract_total_tokens(&follow_up_response) {
+                    context_usage.add_tokens(tokens);
+                    if let Some(new_level) = check_context_level_change(&context_usage, last_context_level) {
+                        last_context_level = new_level;
+                        yield AgentUpdate::custom(
+                            events::EVENT_CONTEXT_USAGE,
+                            format!("Context usage: {:.1}% ({})", context_usage.usage_percent(), new_level),
+                            json!({
+                                "tokens_used": context_usage.tokens_used,
+                                "context_window": context_usage.context_window,
+                                "usage_percent": context_usage.usage_percent(),
+                                "level": new_level.to_string(),
+                                "remaining": context_usage.remaining(),
+                            }),
+                        );
+                    }
+                }
 
                 // Check if there are more function calls
                 let more_calls = follow_up_response.function_calls();
