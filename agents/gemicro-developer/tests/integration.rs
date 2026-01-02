@@ -248,3 +248,192 @@ async fn test_developer_invalid_config_zero_timeout() {
     assert!(result.is_err());
     assert!(matches!(result, Err(AgentError::InvalidConfig(_))));
 }
+
+/// Test tool_call_started event contains required fields
+#[tokio::test]
+#[ignore] // Requires GEMINI_API_KEY
+async fn test_tool_call_started_event_structure() {
+    let Some(api_key) = get_api_key() else {
+        eprintln!("Skipping test: GEMINI_API_KEY not set");
+        return;
+    };
+
+    let context = create_test_context(&api_key);
+    let config = DeveloperConfig::default()
+        .with_max_iterations(3)
+        .with_timeout(Duration::from_secs(60));
+
+    let agent = DeveloperAgent::new(config).expect("Should create agent");
+    let stream = agent.execute("List *.toml files in the current directory", context);
+    futures_util::pin_mut!(stream);
+
+    let mut found_tool_call = false;
+
+    while let Some(result) = stream.next().await {
+        if let Ok(update) = result {
+            if update.event_type == "tool_call_started" {
+                found_tool_call = true;
+
+                // Verify required fields exist
+                assert!(
+                    update.data.get("tool_name").is_some(),
+                    "tool_call_started should have tool_name"
+                );
+                assert!(
+                    update.data.get("call_id").is_some(),
+                    "tool_call_started should have call_id"
+                );
+                assert!(
+                    update.data.get("arguments").is_some(),
+                    "tool_call_started should have arguments"
+                );
+
+                // Verify tool_name is a non-empty string
+                let tool_name = update.data["tool_name"].as_str().unwrap();
+                assert!(!tool_name.is_empty(), "tool_name should not be empty");
+
+                // Verify arguments is an object
+                assert!(
+                    update.data["arguments"].is_object(),
+                    "arguments should be a JSON object"
+                );
+
+                break;
+            }
+        }
+    }
+
+    assert!(
+        found_tool_call,
+        "Should have at least one tool_call_started event"
+    );
+}
+
+/// Test tool_result event contains required fields
+#[tokio::test]
+#[ignore] // Requires GEMINI_API_KEY
+async fn test_tool_result_event_structure() {
+    let Some(api_key) = get_api_key() else {
+        eprintln!("Skipping test: GEMINI_API_KEY not set");
+        return;
+    };
+
+    let context = create_test_context(&api_key);
+    let config = DeveloperConfig::default()
+        .with_max_iterations(3)
+        .with_timeout(Duration::from_secs(60));
+
+    let agent = DeveloperAgent::new(config).expect("Should create agent");
+    let stream = agent.execute("List *.toml files in the current directory", context);
+    futures_util::pin_mut!(stream);
+
+    let mut found_tool_result = false;
+
+    while let Some(result) = stream.next().await {
+        if let Ok(update) = result {
+            if update.event_type == "tool_result" {
+                found_tool_result = true;
+
+                // Verify required fields exist
+                assert!(
+                    update.data.get("tool_name").is_some(),
+                    "tool_result should have tool_name"
+                );
+                assert!(
+                    update.data.get("call_id").is_some(),
+                    "tool_result should have call_id"
+                );
+                assert!(
+                    update.data.get("success").is_some(),
+                    "tool_result should have success"
+                );
+                assert!(
+                    update.data.get("duration_ms").is_some(),
+                    "tool_result should have duration_ms"
+                );
+                assert!(
+                    update.data.get("result").is_some(),
+                    "tool_result should have result"
+                );
+
+                // Verify types
+                assert!(
+                    update.data["success"].is_boolean(),
+                    "success should be a boolean"
+                );
+                assert!(
+                    update.data["duration_ms"].is_u64(),
+                    "duration_ms should be a number"
+                );
+
+                break;
+            }
+        }
+    }
+
+    assert!(
+        found_tool_result,
+        "Should have at least one tool_result event"
+    );
+}
+
+/// Test incomplete execution metadata on max_iterations
+#[tokio::test]
+#[ignore] // Requires GEMINI_API_KEY
+async fn test_max_iterations_incomplete_metadata() {
+    let Some(api_key) = get_api_key() else {
+        eprintln!("Skipping test: GEMINI_API_KEY not set");
+        return;
+    };
+
+    let context = create_test_context(&api_key);
+
+    // Use only 1 iteration to force hitting the limit
+    let config = DeveloperConfig::default()
+        .with_max_iterations(1)
+        .with_timeout(Duration::from_secs(60));
+
+    let agent = DeveloperAgent::new(config).expect("Should create agent");
+    let stream = agent.execute(
+        "Read all Cargo.toml files in the repository and summarize each one",
+        context,
+    );
+    futures_util::pin_mut!(stream);
+
+    let mut final_result_data = None;
+
+    while let Some(result) = stream.next().await {
+        if let Ok(update) = result {
+            if update.event_type == "final_result" {
+                final_result_data = Some(update);
+            }
+        }
+    }
+
+    let update = final_result_data.expect("Should have final_result");
+    let result = update
+        .as_final_result()
+        .expect("Should parse as FinalResult");
+
+    // Verify incomplete metadata
+    let extra = &result.metadata.extra;
+    assert!(
+        extra
+            .get("incomplete")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        "Should have incomplete: true in metadata. Extra: {:?}",
+        extra
+    );
+    assert!(
+        extra.get("reason").is_some(),
+        "Should have reason in metadata when incomplete"
+    );
+
+    let reason = extra["reason"].as_str().unwrap();
+    assert!(
+        reason.contains("max iterations"),
+        "Reason should mention max iterations: got {}",
+        reason
+    );
+}

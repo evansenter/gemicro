@@ -6,11 +6,14 @@
 //! Or with a custom query:
 //!   GEMINI_API_KEY=your_key cargo run -p gemicro-developer --example developer -- "List files in src/"
 //!
+//! For verbose output (full tool args/results):
+//!   VERBOSE=1 GEMINI_API_KEY=your_key cargo run -p gemicro-developer --example developer
+//!
 //! Press Ctrl+C to cancel gracefully.
 
 use futures_util::StreamExt;
 use gemicro_core::tool::{AutoApprove, ToolRegistry};
-use gemicro_core::{Agent, AgentContext, LlmClient, LlmConfig};
+use gemicro_core::{Agent, AgentContext, LlmClient, LlmConfig, MODEL};
 use gemicro_developer::{DeveloperAgent, DeveloperConfig};
 use gemicro_file_read::FileRead;
 use gemicro_glob::Glob;
@@ -20,8 +23,29 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 
+/// Truncate a string for display, adding ellipsis if needed.
+fn truncate(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        s.to_string()
+    } else {
+        format!("{}...", &s[..max_len.saturating_sub(3)])
+    }
+}
+
+/// Format JSON for display, either compact or pretty based on verbosity.
+fn format_json(value: &Value, verbose: bool) -> String {
+    if verbose {
+        serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
+    } else {
+        value.to_string()
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Check for verbose mode
+    let verbose = env::var("VERBOSE").is_ok();
+
     // Get API key from environment
     let api_key = env::var("GEMINI_API_KEY").expect(
         "GEMINI_API_KEY environment variable not set.\n\
@@ -33,11 +57,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "Read the CLAUDE.md file and summarize what this project is about".into()
     });
 
-    println!("==============================================================");
-    println!("                  Developer Agent Demo                       ");
-    println!("==============================================================");
+    println!("╔══════════════════════════════════════════════════════════════╗");
+    println!("║                   Developer Agent Demo                       ║");
+    println!("╚══════════════════════════════════════════════════════════════╝");
     println!();
-    println!("Query: {}", query);
+
+    // Show configuration
+    println!("┌─ Configuration ─────────────────────────────────────────────┐");
+    println!("│ Model: {:<54} │", MODEL);
+    println!(
+        "│ Working dir: {:<48} │",
+        truncate(&env::current_dir()?.display().to_string(), 48)
+    );
+    println!("│ Max iterations: {:<45} │", 10);
+    println!("│ LLM timeout: {:<48} │", "60s");
+    println!("│ Temperature: {:<48} │", 0.7);
+    println!("│ Verbose: {:<52} │", if verbose { "yes" } else { "no" });
+    println!("└──────────────────────────────────────────────────────────────┘");
     println!();
 
     // Set up cancellation token for graceful shutdown
@@ -47,12 +83,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Spawn signal handler for Ctrl+C
     tokio::spawn(async move {
         if tokio::signal::ctrl_c().await.is_ok() {
-            eprintln!("\nInterrupt received - cancelling...");
+            eprintln!("\n⚠ Interrupt received - cancelling gracefully...");
             token_clone.cancel();
 
             // Wait for second Ctrl+C to force exit
             if tokio::signal::ctrl_c().await.is_ok() {
-                eprintln!("\nForce exit");
+                eprintln!("\n✗ Force exit");
                 std::process::exit(130);
             }
         }
@@ -62,6 +98,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut tools = ToolRegistry::new();
     tools.register(FileRead);
     tools.register(Glob);
+
+    // Show registered tools
+    println!("┌─ Registered Tools ──────────────────────────────────────────┐");
+    for tool_name in tools.list() {
+        println!("│ • {:<58} │", tool_name);
+    }
+    println!("└──────────────────────────────────────────────────────────────┘");
+    println!();
 
     // Create LLM client
     let genai_client = rust_genai::Client::builder(api_key).build();
@@ -80,7 +124,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = DeveloperConfig::default().with_max_iterations(10); // Limit for demo
     let agent = DeveloperAgent::new(config)?;
 
+    println!("┌─ Query ──────────────────────────────────────────────────────┐");
+    // Word-wrap the query for display
+    let wrapped = textwrap::wrap(&query, 60);
+    for line in &wrapped {
+        println!("│ {:<60} │", line);
+    }
+    println!("└──────────────────────────────────────────────────────────────┘");
+    println!();
+
     // Execute and stream updates
+    println!("┌─ Execution ─────────────────────────────────────────────────┐");
     let start = Instant::now();
     let stream = agent.execute(&query, context);
     futures_util::pin_mut!(stream);
@@ -92,11 +146,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         match update.event_type.as_str() {
             "developer_started" => {
-                println!("Starting developer agent...");
-                println!();
+                println!("│ ▶ Agent started                                             │");
+                if let Some(q) = update.data.get("query") {
+                    if verbose {
+                        println!(
+                            "│   Query: {:<52} │",
+                            truncate(q.as_str().unwrap_or(""), 52)
+                        );
+                    }
+                }
             }
             "tool_call_started" => {
+                tool_call_count += 1;
                 let tool_name = update.data["tool_name"].as_str().unwrap_or("unknown");
+                let call_id = update.data["call_id"].as_str().unwrap_or("?");
                 let args = update.data.get("arguments").unwrap_or(&Value::Null);
 
                 // Format args preview
@@ -105,50 +168,137 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 } else if let Some(pattern) = args["pattern"].as_str() {
                     pattern.to_string()
                 } else {
-                    format!("{}", args)
+                    truncate(&args.to_string(), 40)
                 };
 
-                println!("  {} {} ...", tool_name, args_preview);
-                tool_call_count += 1;
+                println!("│                                                              │");
+                println!(
+                    "│ 🔧 [{:>2}] {} {}",
+                    tool_call_count,
+                    tool_name,
+                    truncate(&args_preview, 45)
+                );
+
+                if verbose {
+                    println!("│      Call ID: {:<47} │", truncate(call_id, 47));
+                    println!("│      Arguments:");
+                    for line in format_json(args, true).lines() {
+                        println!("│        {}", line);
+                    }
+                }
             }
             "tool_result" => {
                 let tool_name = update.data["tool_name"].as_str().unwrap_or("unknown");
                 let success = update.data["success"].as_bool().unwrap_or(false);
                 let duration_ms = update.data["duration_ms"].as_u64().unwrap_or(0);
+                let result = update.data.get("result").unwrap_or(&Value::Null);
 
-                let status = if success { "OK" } else { "FAILED" };
+                let status_icon = if success { "✓" } else { "✗" };
+                let status_text = if success { "OK" } else { "FAILED" };
+
                 println!(
-                    "    -> {} {} ({:.1}s)",
-                    status,
+                    "│    {} {} {} ({:.2}s)",
+                    status_icon,
+                    status_text,
                     tool_name,
                     duration_ms as f64 / 1000.0
                 );
+
+                if verbose || !success {
+                    // Show result preview (or full error)
+                    let result_str = if let Some(s) = result.as_str() {
+                        s.to_string()
+                    } else if let Some(err) = result.get("error") {
+                        format!("Error: {}", err.as_str().unwrap_or("unknown"))
+                    } else if let Some(content) = result.get("content") {
+                        if let Some(s) = content.as_str() {
+                            truncate(s, 100)
+                        } else {
+                            truncate(&content.to_string(), 100)
+                        }
+                    } else {
+                        truncate(&result.to_string(), 100)
+                    };
+
+                    if !result_str.is_empty() {
+                        if verbose {
+                            println!("│      Result:");
+                            for line in result_str.lines().take(10) {
+                                println!("│        {}", truncate(line, 55));
+                            }
+                            if result_str.lines().count() > 10 {
+                                println!(
+                                    "│        ... ({} more lines)",
+                                    result_str.lines().count() - 10
+                                );
+                            }
+                        } else if !success {
+                            // Always show errors even in non-verbose mode
+                            println!("│      {}", truncate(&result_str, 55));
+                        }
+                    }
+                }
             }
             "final_result" => {
+                println!("│                                                              │");
+                println!("└──────────────────────────────────────────────────────────────┘");
                 println!();
-                println!("==============================================================");
-                println!("                         RESULT                              ");
-                println!("==============================================================");
+
+                println!("╔══════════════════════════════════════════════════════════════╗");
+                println!("║                          RESULT                              ║");
+                println!("╚══════════════════════════════════════════════════════════════╝");
                 println!();
 
                 // Extract the answer
                 if let Some(result) = update.as_final_result() {
                     if let Some(answer) = result.result.as_str() {
                         println!("{}", answer);
+                    } else {
+                        println!("{}", result.result);
                     }
                     println!();
-                    println!("--------------------------------------------------------------");
-                    println!("Performance:");
-                    println!("  Total time: {:.1}s", start.elapsed().as_secs_f64());
-                    println!("  Tool calls: {}", tool_call_count);
-                    if result.metadata.total_tokens > 0 {
-                        println!("  Tokens used: {}", result.metadata.total_tokens);
+
+                    // Show metadata
+                    println!("┌─ Execution Summary ─────────────────────────────────────────┐");
+                    println!(
+                        "│ Total time: {:<49} │",
+                        format!("{:.2}s", start.elapsed().as_secs_f64())
+                    );
+                    println!("│ Tool calls: {:<49} │", tool_call_count);
+
+                    // Extract iterations from metadata extra
+                    let extra = &result.metadata.extra;
+                    if let Some(iterations) = extra.get("iterations") {
+                        println!(
+                            "│ LLM iterations: {:<45} │",
+                            iterations.as_u64().unwrap_or(0)
+                        );
                     }
+                    if let Some(incomplete) = extra.get("incomplete") {
+                        if incomplete.as_bool().unwrap_or(false) {
+                            let reason = extra
+                                .get("reason")
+                                .and_then(|r| r.as_str())
+                                .unwrap_or("unknown");
+                            println!("│ ⚠ Incomplete: {:<47} │", reason);
+                        }
+                    }
+
+                    if result.metadata.total_tokens > 0 {
+                        println!("│ Tokens used: {:<48} │", result.metadata.total_tokens);
+                    }
+                    println!(
+                        "│ Duration (agent): {:<43} │",
+                        format!("{}ms", result.metadata.duration_ms)
+                    );
+                    println!("└──────────────────────────────────────────────────────────────┘");
                 }
             }
-            _ => {
-                // Log unknown events at debug level
-                log::debug!("Unknown event: {}", update.event_type);
+            other => {
+                // Show unknown events in verbose mode
+                if verbose {
+                    println!("│ [{}] {}", other, truncate(&update.message, 45));
+                }
             }
         }
     }
