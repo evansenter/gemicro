@@ -128,12 +128,33 @@ impl AgentUpdate {
         }
     }
 
+    /// Check if this is a final_result event.
+    ///
+    /// Uses the canonical `EVENT_FINAL_RESULT` constant for comparison,
+    /// avoiding string literal typos.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use gemicro_core::{AgentUpdate, ResultMetadata};
+    /// use serde_json::json;
+    ///
+    /// let update = AgentUpdate::final_result(json!("answer"), ResultMetadata::new(100, 0, 500));
+    /// assert!(update.is_final_result());
+    ///
+    /// let custom = AgentUpdate::custom("other_event", "msg", json!({}));
+    /// assert!(!custom.is_final_result());
+    /// ```
+    pub fn is_final_result(&self) -> bool {
+        self.event_type == EVENT_FINAL_RESULT
+    }
+
     /// Typed accessor for final_result events
     ///
     /// Returns `None` if this is not a final_result event
     /// or if the data doesn't match the expected schema.
     pub fn as_final_result(&self) -> Option<FinalResult> {
-        if self.event_type == "final_result" {
+        if self.is_final_result() {
             serde_json::from_value(self.data.clone()).ok().or_else(|| {
                 log::warn!("Failed to parse final_result data: {:?}", self.data);
                 None
@@ -155,6 +176,40 @@ pub struct FinalResult {
     /// The agent's output - can be any JSON value (string, object, array, or null).
     pub result: serde_json::Value,
     pub metadata: ResultMetadata,
+}
+
+impl FinalResult {
+    /// Deserialize the result to a specific type.
+    ///
+    /// This is the generic accessor for structured results. For primitive types,
+    /// use the underlying `serde_json::Value` methods directly (e.g., `.result.as_str()`).
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use gemicro_core::{AgentUpdate, ResultMetadata};
+    /// use serde::Deserialize;
+    /// use serde_json::json;
+    ///
+    /// #[derive(Debug, Deserialize, PartialEq)]
+    /// struct MyOutput {
+    ///     summary: String,
+    ///     score: f64,
+    /// }
+    ///
+    /// let update = AgentUpdate::final_result(
+    ///     json!({"summary": "Test", "score": 0.95}),
+    ///     ResultMetadata::new(100, 0, 500),
+    /// );
+    ///
+    /// let result = update.as_final_result().unwrap();
+    /// let output: MyOutput = result.result_as().unwrap();
+    /// assert_eq!(output.summary, "Test");
+    /// assert_eq!(output.score, 0.95);
+    /// ```
+    pub fn result_as<T: serde::de::DeserializeOwned>(&self) -> Result<T, serde_json::Error> {
+        serde_json::from_value(self.result.clone())
+    }
 }
 
 /// Metadata about the overall result.
@@ -348,5 +403,54 @@ mod tests {
         let result = update.as_final_result().unwrap();
         assert!(result.metadata.extra.is_object());
         assert!(result.metadata.extra.as_object().unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_is_final_result() {
+        let final_result =
+            AgentUpdate::final_result(json!("Answer"), ResultMetadata::new(100, 0, 5000));
+        assert!(final_result.is_final_result());
+
+        let custom = AgentUpdate::custom("other_event", "Message", json!({}));
+        assert!(!custom.is_final_result());
+    }
+
+    #[test]
+    fn test_result_as_string() {
+        let update =
+            AgentUpdate::final_result(json!("The answer"), ResultMetadata::new(100, 0, 5000));
+        let result = update.as_final_result().unwrap();
+
+        let answer: String = result.result_as().unwrap();
+        assert_eq!(answer, "The answer");
+    }
+
+    #[test]
+    fn test_result_as_structured() {
+        #[derive(Debug, serde::Deserialize, PartialEq)]
+        struct Output {
+            summary: String,
+            score: f64,
+        }
+
+        let update = AgentUpdate::final_result(
+            json!({"summary": "Test summary", "score": 0.95}),
+            ResultMetadata::new(100, 0, 5000),
+        );
+        let result = update.as_final_result().unwrap();
+
+        let output: Output = result.result_as().unwrap();
+        assert_eq!(output.summary, "Test summary");
+        assert_eq!(output.score, 0.95);
+    }
+
+    #[test]
+    fn test_result_as_error_on_mismatch() {
+        let update = AgentUpdate::final_result(json!(42), ResultMetadata::new(100, 0, 5000));
+        let result = update.as_final_result().unwrap();
+
+        // Trying to deserialize a number as a String should fail
+        let res: Result<String, _> = result.result_as();
+        assert!(res.is_err());
     }
 }

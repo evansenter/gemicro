@@ -697,7 +697,7 @@ mod tests {
         assert_eq!(collected.len(), 3);
         assert!(collected[0].as_ref().unwrap().event_type == "step_1");
         assert!(collected[1].as_ref().unwrap().event_type == "step_2");
-        assert!(collected[2].as_ref().unwrap().event_type == "final_result");
+        assert!(collected[2].as_ref().unwrap().is_final_result());
     }
 
     /// Verifies that events after final_result still pass through (with warning logged).
@@ -787,7 +787,7 @@ mod tests {
         }
 
         assert_eq!(collected.len(), 1);
-        assert!(collected[0].as_ref().unwrap().event_type == "final_result");
+        assert!(collected[0].as_ref().unwrap().is_final_result());
     }
 
     /// Verifies the EVENT_FINAL_RESULT constant matches the expected value.
@@ -829,9 +829,9 @@ mod tests {
         // All events should still pass through (graceful degradation)
         assert_eq!(collected.len(), 4);
         assert!(collected[0].as_ref().unwrap().event_type == "step_1");
-        assert!(collected[1].as_ref().unwrap().event_type == "final_result");
-        assert!(collected[2].as_ref().unwrap().event_type == "final_result");
-        assert!(collected[3].as_ref().unwrap().event_type == "final_result");
+        assert!(collected[1].as_ref().unwrap().is_final_result());
+        assert!(collected[2].as_ref().unwrap().is_final_result());
+        assert!(collected[3].as_ref().unwrap().is_final_result());
         // Note: Warnings are logged for collected[2] and collected[3] but we can't easily verify logs
     }
 

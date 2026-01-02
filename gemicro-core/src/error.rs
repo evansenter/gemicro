@@ -62,6 +62,70 @@ pub enum AgentError {
     Other(String),
 }
 
+impl AgentError {
+    /// Check if this error is retriable (transient failures).
+    ///
+    /// Returns `true` for errors that might succeed on retry:
+    /// - Timeouts (agent-level or LLM-level)
+    /// - Rate limits
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use gemicro_core::AgentError;
+    ///
+    /// let timeout = AgentError::Timeout {
+    ///     elapsed_ms: 5000,
+    ///     timeout_ms: 3000,
+    ///     phase: "synthesis".into(),
+    /// };
+    /// assert!(timeout.is_retriable());
+    ///
+    /// let cancelled = AgentError::Cancelled;
+    /// assert!(!cancelled.is_retriable());
+    /// ```
+    pub fn is_retriable(&self) -> bool {
+        matches!(
+            self,
+            AgentError::Timeout { .. }
+                | AgentError::Llm(LlmError::RateLimit(_))
+                | AgentError::Llm(LlmError::Timeout(_))
+        )
+    }
+
+    /// Check if this is a timeout error.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use gemicro_core::AgentError;
+    ///
+    /// let timeout = AgentError::Timeout {
+    ///     elapsed_ms: 5000,
+    ///     timeout_ms: 3000,
+    ///     phase: "synthesis".into(),
+    /// };
+    /// assert!(timeout.is_timeout());
+    /// ```
+    pub fn is_timeout(&self) -> bool {
+        matches!(self, AgentError::Timeout { .. })
+    }
+
+    /// Check if execution was cancelled.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use gemicro_core::AgentError;
+    ///
+    /// let cancelled = AgentError::Cancelled;
+    /// assert!(cancelled.is_cancelled());
+    /// ```
+    pub fn is_cancelled(&self) -> bool {
+        matches!(self, AgentError::Cancelled)
+    }
+}
+
 /// Errors that can occur in the LLM client
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -194,5 +258,33 @@ mod tests {
             "Expected LlmError::GenAi, got {:?}",
             llm_err
         );
+    }
+
+    // Tests for AgentError query methods
+    #[rstest]
+    #[case::timeout(AgentError::Timeout { elapsed_ms: 5000, timeout_ms: 3000, phase: "test".into() }, true)]
+    #[case::llm_rate_limit(AgentError::Llm(LlmError::RateLimit("quota exceeded".into())), true)]
+    #[case::llm_timeout(AgentError::Llm(LlmError::Timeout(5000)), true)]
+    #[case::cancelled(AgentError::Cancelled, false)]
+    #[case::parse_failed(AgentError::ParseFailed("bad format".into()), false)]
+    #[case::other(AgentError::Other("some error".into()), false)]
+    fn test_is_retriable(#[case] error: AgentError, #[case] expected: bool) {
+        assert_eq!(error.is_retriable(), expected);
+    }
+
+    #[rstest]
+    #[case::timeout(AgentError::Timeout { elapsed_ms: 5000, timeout_ms: 3000, phase: "test".into() }, true)]
+    #[case::cancelled(AgentError::Cancelled, false)]
+    #[case::parse_failed(AgentError::ParseFailed("bad format".into()), false)]
+    fn test_is_timeout(#[case] error: AgentError, #[case] expected: bool) {
+        assert_eq!(error.is_timeout(), expected);
+    }
+
+    #[rstest]
+    #[case::cancelled(AgentError::Cancelled, true)]
+    #[case::timeout(AgentError::Timeout { elapsed_ms: 5000, timeout_ms: 3000, phase: "test".into() }, false)]
+    #[case::parse_failed(AgentError::ParseFailed("bad format".into()), false)]
+    fn test_is_cancelled(#[case] error: AgentError, #[case] expected: bool) {
+        assert_eq!(error.is_cancelled(), expected);
     }
 }

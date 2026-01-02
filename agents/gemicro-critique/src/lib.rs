@@ -792,13 +792,13 @@ impl CritiqueAgent {
             // Skip intermediate events; wait for final_result which contains full CritiqueOutput
             // Use as_final_result() for type-safe access to the result field
             if let Some(final_result) = update.as_final_result() {
-                let output: CritiqueOutput =
-                    serde_json::from_value(final_result.result).map_err(|e| {
-                        AgentError::ParseFailed(format!(
-                            "Failed to parse CritiqueOutput from final_result: {}",
-                            e
-                        ))
-                    })?;
+                // Use result_as<T>() for ergonomic typed deserialization
+                let output = final_result.result_as::<CritiqueOutput>().map_err(|e| {
+                    AgentError::ParseFailed(format!(
+                        "Failed to parse CritiqueOutput from final_result: {}",
+                        e
+                    ))
+                })?;
                 return Ok(output);
             }
         }
