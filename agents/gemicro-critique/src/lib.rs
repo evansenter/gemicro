@@ -800,17 +800,16 @@ impl CritiqueAgent {
         while let Some(result) = stream.next().await {
             let update = result?;
             // Skip intermediate events; wait for final_result which contains full CritiqueOutput
-            if update.event_type == gemicro_core::EVENT_FINAL_RESULT {
-                if let Some(answer) = update.data.get("answer") {
-                    let output: CritiqueOutput =
-                        serde_json::from_value(answer.clone()).map_err(|e| {
-                            AgentError::ParseFailed(format!(
-                                "Failed to parse CritiqueOutput from final_result: {}",
-                                e
-                            ))
-                        })?;
-                    return Ok(output);
-                }
+            // Use as_final_result() for type-safe access to the result field
+            if let Some(final_result) = update.as_final_result() {
+                let output: CritiqueOutput =
+                    serde_json::from_value(final_result.result).map_err(|e| {
+                        AgentError::ParseFailed(format!(
+                            "Failed to parse CritiqueOutput from final_result: {}",
+                            e
+                        ))
+                    })?;
+                return Ok(output);
             }
         }
 
