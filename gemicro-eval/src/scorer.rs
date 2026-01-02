@@ -208,6 +208,13 @@ impl Scorer for LlmJudgeScorer {
         use gemicro_core::{Agent, AgentContext};
         use gemicro_critique::{CritiqueAgent, CritiqueConfig, CritiqueCriteria, CritiqueInput};
 
+        // Handle empty predicted strings: an empty answer is always incorrect (score 0.0).
+        // CritiqueAgent validates that content is non-empty and would return an error,
+        // but for evaluation purposes, empty predictions should score 0.0, not NaN.
+        if predicted.trim().is_empty() {
+            return 0.0;
+        }
+
         // Create critique agent with ground truth criteria
         let agent = CritiqueAgent::new(CritiqueConfig::default()).expect("default config is valid");
         let input = CritiqueInput::new(predicted).with_criteria(CritiqueCriteria::GroundTruth {
