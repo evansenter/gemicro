@@ -134,7 +134,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
 
     // Execute and stream updates
-    println!("┌─ Execution ─────────────────────────────────────────────────┐");
+    println!("─── Execution ───");
+    println!();
     let start = Instant::now();
     let stream = agent.execute(&query, context);
     futures_util::pin_mut!(stream);
@@ -146,13 +147,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         match update.event_type.as_str() {
             "developer_started" => {
-                println!("│ ▶ Agent started                                             │");
+                println!("▶ Agent started");
                 if let Some(q) = update.data.get("query") {
                     if verbose {
-                        println!(
-                            "│   Query: {:<52} │",
-                            truncate(q.as_str().unwrap_or(""), 52)
-                        );
+                        println!("  Query: {}", truncate(q.as_str().unwrap_or(""), 80));
                     }
                 }
             }
@@ -162,31 +160,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let call_id = update.data["call_id"].as_str().unwrap_or("?");
                 let args = update.data.get("arguments").unwrap_or(&Value::Null);
 
-                // Format args preview
+                // Format args preview - show full paths
                 let args_preview = if let Some(path) = args["path"].as_str() {
                     path.to_string()
                 } else if let Some(pattern) = args["pattern"].as_str() {
                     pattern.to_string()
                 } else {
-                    truncate(&args.to_string(), 40)
+                    truncate(&args.to_string(), 60)
                 };
 
-                println!("│                                                              │");
-                // Format: 🔧 [NN] tool_name args_preview
-                // Width: 62 chars inside box, minus "🔧 [NN] " (9 chars) = 53 for tool+args
-                let tool_line = format!(
+                println!();
+                println!(
                     "🔧 [{:>2}] {} {}",
                     tool_call_count,
                     tool_name,
-                    truncate(&args_preview, 40)
+                    args_preview  // No truncation for paths
                 );
-                println!("│ {:<60} │", truncate(&tool_line, 60));
 
                 if verbose {
-                    println!("│      Call ID: {:<47} │", truncate(call_id, 47));
-                    println!("│      Arguments:");
+                    println!("     Call ID: {}", call_id);
+                    println!("     Arguments:");
                     for line in format_json(args, true).lines() {
-                        println!("│        {}", line);
+                        println!("       {}", line);
                     }
                 }
             }
@@ -199,15 +194,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let status_icon = if success { "✓" } else { "✗" };
                 let status_text = if success { "OK" } else { "FAILED" };
 
-                // Format: ✓ OK tool_name (Xs)
-                let result_line = format!(
-                    "{} {} {} ({:.2}s)",
+                println!(
+                    "   {} {} {} ({:.2}s)",
                     status_icon,
                     status_text,
                     tool_name,
                     duration_ms as f64 / 1000.0
                 );
-                println!("│    {:<56} │", result_line);
 
                 if verbose || !success {
                     // Show result preview (or full error)
@@ -227,26 +220,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     if !result_str.is_empty() {
                         if verbose {
-                            println!("│      Result:");
+                            println!("     Result:");
                             for line in result_str.lines().take(10) {
-                                println!("│        {}", truncate(line, 55));
+                                println!("       {}", truncate(line, 80));
                             }
                             if result_str.lines().count() > 10 {
                                 println!(
-                                    "│        ... ({} more lines)",
+                                    "       ... ({} more lines)",
                                     result_str.lines().count() - 10
                                 );
                             }
                         } else if !success {
                             // Always show errors even in non-verbose mode
-                            println!("│      {}", truncate(&result_str, 55));
+                            println!("     {}", truncate(&result_str, 80));
                         }
                     }
                 }
             }
             "final_result" => {
-                println!("│                                                              │");
-                println!("└──────────────────────────────────────────────────────────────┘");
+                println!();
                 println!();
 
                 println!("╔══════════════════════════════════════════════════════════════╗");
