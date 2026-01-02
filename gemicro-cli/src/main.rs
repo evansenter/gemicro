@@ -12,7 +12,10 @@ use anyhow::{bail, Context, Result};
 use clap::Parser;
 use display::{IndicatifRenderer, Renderer};
 use futures_util::StreamExt;
-use gemicro_core::{enforce_final_result_contract, Agent, AgentContext, AgentError, LlmClient};
+use gemicro_core::{
+    enforce_final_result_contract, Agent, AgentContext, AgentError, Coordination, HubCoordination,
+    LlmClient,
+};
 use gemicro_deep_research::DeepResearchAgent;
 use repl::Session;
 use std::sync::atomic::{AtomicU8, Ordering};
@@ -107,6 +110,25 @@ async fn run_research(args: &cli::Args, query: &str) -> Result<()> {
     let mut tracker = agent.create_tracker();
     let mut renderer = IndicatifRenderer::new(args.plain);
 
+    // Connect to event bus if URL provided
+    let mut coordination = if let Some(ref url) = args.event_bus_url {
+        match HubCoordination::connect(url, "gemicro-cli").await {
+            Ok(coord) => {
+                log::info!("Connected to event bus at {}", url);
+                Some(coord)
+            }
+            Err(e) => {
+                log::warn!(
+                    "Failed to connect to event bus: {} - continuing without coordination",
+                    e
+                );
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     // Set up interrupt handling with AtomicU8 for cross-thread visibility.
     // Signal handler writes, main loop reads. Uses SeqCst for simplicity.
     // 0 = no interrupt, 1 = first interrupt (graceful), 2+ = force exit
@@ -146,48 +168,106 @@ async fn run_research(args: &cli::Args, query: &str) -> Result<()> {
     // Track if we were interrupted
     let mut interrupted = false;
 
-    // Consume stream
-    while let Some(result) = stream.next().await {
-        // Check if interrupted at start of each iteration
-        if is_interrupted() {
-            interrupted = true;
-            break;
-        }
-
-        match result {
-            Ok(update) => {
-                // Check again before processing (reduces latency to respond to interrupt)
-                if is_interrupted() {
-                    interrupted = true;
-                    break;
-                }
-
-                // Update tracker with the event
-                tracker.handle_event(&update);
-
-                // Update renderer with current status
-                renderer
-                    .on_status(tracker.as_ref())
-                    .context("Renderer status update failed")?;
-
-                // Check if complete
-                if tracker.is_complete() {
-                    renderer
-                        .on_complete(tracker.as_ref())
-                        .context("Renderer completion failed")?;
-                }
-            }
-            Err(AgentError::Cancelled) => {
-                // Cancellation is not an error - treat as interrupt
+    // Consume stream, optionally with coordination
+    if let Some(ref mut coord) = coordination {
+        // With coordination: use select! to interleave external events
+        loop {
+            if is_interrupted() {
                 interrupted = true;
                 break;
             }
-            Err(e) => {
-                signal_task.abort();
-                if let Err(finish_err) = renderer.finish() {
-                    log::warn!("Failed to clean up renderer during error: {}", finish_err);
+
+            tokio::select! {
+                // Agent stream has priority (biased) to avoid starving agent events
+                biased;
+
+                result = stream.next() => {
+                    match result {
+                        Some(Ok(update)) => {
+                            if is_interrupted() {
+                                interrupted = true;
+                                break;
+                            }
+
+                            tracker.handle_event(&update);
+                            renderer
+                                .on_status(tracker.as_ref())
+                                .context("Renderer status update failed")?;
+
+                            if tracker.is_complete() {
+                                renderer
+                                    .on_complete(tracker.as_ref())
+                                    .context("Renderer completion failed")?;
+                                break;
+                            }
+                        }
+                        Some(Err(AgentError::Cancelled)) => {
+                            interrupted = true;
+                            break;
+                        }
+                        Some(Err(e)) => {
+                            signal_task.abort();
+                            if let Err(finish_err) = renderer.finish() {
+                                log::warn!("Failed to clean up renderer during error: {}", finish_err);
+                            }
+                            return Err(format_agent_error(e));
+                        }
+                        None => break, // Stream exhausted
+                    }
                 }
-                return Err(format_agent_error(e));
+
+                event = coord.recv_event() => {
+                    if let Some(external_event) = event {
+                        // Display external event inline
+                        let source = external_event.source_session.as_deref().unwrap_or("unknown");
+                        eprintln!(
+                            "\n  [{}] {} (from: {})\n",
+                            external_event.event_type,
+                            external_event.payload,
+                            source
+                        );
+                    }
+                    // If recv_event returns None, coordination closed - continue with agent only
+                }
+            }
+        }
+    } else {
+        // Without coordination: simple stream consumption
+        while let Some(result) = stream.next().await {
+            if is_interrupted() {
+                interrupted = true;
+                break;
+            }
+
+            match result {
+                Ok(update) => {
+                    if is_interrupted() {
+                        interrupted = true;
+                        break;
+                    }
+
+                    tracker.handle_event(&update);
+                    renderer
+                        .on_status(tracker.as_ref())
+                        .context("Renderer status update failed")?;
+
+                    if tracker.is_complete() {
+                        renderer
+                            .on_complete(tracker.as_ref())
+                            .context("Renderer completion failed")?;
+                    }
+                }
+                Err(AgentError::Cancelled) => {
+                    interrupted = true;
+                    break;
+                }
+                Err(e) => {
+                    signal_task.abort();
+                    if let Err(finish_err) = renderer.finish() {
+                        log::warn!("Failed to clean up renderer during error: {}", finish_err);
+                    }
+                    return Err(format_agent_error(e));
+                }
             }
         }
     }

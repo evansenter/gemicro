@@ -6,9 +6,10 @@
 use crate::metrics::ExecutionMetrics;
 use futures_util::StreamExt;
 use gemicro_core::{
-    enforce_final_result_contract, Agent, AgentContext, AgentError, AgentUpdate, ExecutionTracking,
-    LlmClient, LlmConfig, Trajectory, TrajectoryBuilder,
+    enforce_final_result_contract, Agent, AgentContext, AgentError, AgentUpdate, Coordination,
+    ExecutionTracking, ExternalEvent, LlmClient, LlmConfig, Trajectory, TrajectoryBuilder,
 };
+use serde_json::json;
 use std::time::Instant;
 
 /// Headless agent runner for programmatic execution.
@@ -109,6 +110,123 @@ impl AgentRunner {
             tracker.handle_event(&update);
             if let Some(msg) = tracker.status_message() {
                 on_status(tracker.as_ref(), msg);
+            }
+        }
+
+        Ok(ExecutionMetrics::from_tracker(
+            tracker.as_ref(),
+            start.elapsed(),
+        ))
+    }
+
+    /// Execute an agent with optional event coordination.
+    ///
+    /// When `coordination` is provided, this method uses `tokio::select!` to
+    /// interleave external events from the event bus with agent updates. External
+    /// events are converted to `AgentUpdate` instances with `event_type = "external_event"`.
+    ///
+    /// # Arguments
+    ///
+    /// * `agent` - The agent to execute
+    /// * `query` - The user's query
+    /// * `context` - Agent context with LLM client
+    /// * `coordination` - Optional event bus coordination for real-time events
+    /// * `on_update` - Callback receiving all updates (agent + external)
+    ///
+    /// # Event Handling
+    ///
+    /// External events are wrapped as `AgentUpdate::custom("external_event", ...)` with
+    /// the full event data in the JSON payload. The callback receives both agent events
+    /// and external events in interleaved order.
+    ///
+    /// # Example
+    ///
+    /// ```text
+    /// use gemicro_runner::AgentRunner;
+    /// use gemicro_core::{Agent, AgentContext, HubCoordination};
+    ///
+    /// async fn example(agent: &dyn Agent, context: AgentContext) -> Result<(), Box<dyn std::error::Error>> {
+    ///     let runner = AgentRunner::new();
+    ///
+    ///     // Connect to event bus (optional)
+    ///     let coord = HubCoordination::connect("http://localhost:8765", "my-session").await.ok();
+    ///     let coord_boxed = coord.map(|c| Box::new(c) as Box<dyn Coordination>);
+    ///
+    ///     let metrics = runner.execute_with_events(
+    ///         agent,
+    ///         "query",
+    ///         context,
+    ///         coord_boxed,
+    ///         |update| {
+    ///             match update.event_type.as_str() {
+    ///                 "external_event" => println!("External: {}", update.message),
+    ///                 _ => println!("Agent: {}", update.message),
+    ///             }
+    ///         },
+    ///     ).await?;
+    ///     Ok(())
+    /// }
+    /// ```
+    pub async fn execute_with_events<F>(
+        &self,
+        agent: &dyn Agent,
+        query: &str,
+        context: AgentContext,
+        coordination: Option<Box<dyn Coordination>>,
+        mut on_update: F,
+    ) -> Result<ExecutionMetrics, AgentError>
+    where
+        F: FnMut(&AgentUpdate),
+    {
+        let mut tracker = agent.create_tracker();
+        let stream = agent.execute(query, context);
+        let stream = enforce_final_result_contract(stream);
+        futures_util::pin_mut!(stream);
+        let start = Instant::now();
+
+        // If no coordination, fall back to simple stream consumption
+        let Some(mut coord) = coordination else {
+            while let Some(result) = stream.next().await {
+                let update = result?;
+                tracker.handle_event(&update);
+                on_update(&update);
+            }
+            return Ok(ExecutionMetrics::from_tracker(
+                tracker.as_ref(),
+                start.elapsed(),
+            ));
+        };
+
+        // With coordination, use select! to interleave events
+        loop {
+            tokio::select! {
+                // Agent stream has priority (biased) to avoid starving agent events
+                biased;
+
+                result = stream.next() => {
+                    match result {
+                        Some(Ok(update)) => {
+                            tracker.handle_event(&update);
+                            on_update(&update);
+                            // Check if agent completed
+                            if tracker.is_complete() {
+                                break;
+                            }
+                        }
+                        Some(Err(e)) => return Err(e),
+                        None => break, // Stream exhausted
+                    }
+                }
+
+                event = coord.recv_event() => {
+                    if let Some(external_event) = event {
+                        // Convert external event to AgentUpdate
+                        let update = external_event_to_update(&external_event);
+                        // Don't pass to tracker (external events don't affect agent state)
+                        on_update(&update);
+                    }
+                    // If recv_event returns None, coordination is closed - continue with agent only
+                }
             }
         }
 
@@ -220,6 +338,31 @@ impl Default for AgentRunner {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Event type for external events injected from coordination.
+pub const EVENT_EXTERNAL: &str = "external_event";
+
+/// Convert an ExternalEvent to an AgentUpdate for stream injection.
+fn external_event_to_update(event: &ExternalEvent) -> AgentUpdate {
+    let message = format!(
+        "[{}] {} (from: {})",
+        event.event_type,
+        event.payload,
+        event.source_session.as_deref().unwrap_or("unknown")
+    );
+
+    AgentUpdate::custom(
+        EVENT_EXTERNAL,
+        message,
+        json!({
+            "id": event.id,
+            "event_type": event.event_type,
+            "payload": event.payload,
+            "channel": event.channel,
+            "source_session": event.source_session,
+        }),
+    )
 }
 
 #[cfg(test)]
@@ -366,5 +509,63 @@ mod tests {
         // MockAgent doesn't make LLM calls, so steps should be empty
         // (In real tests with actual agents, steps would be populated)
         assert_eq!(trajectory.steps.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_runner_execute_with_events_no_coordination() {
+        let runner = AgentRunner::new();
+        let agent = MockAgent::new(create_successful_events());
+        let context = create_mock_context();
+
+        let updates = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let updates_clone = updates.clone();
+
+        let metrics = runner
+            .execute_with_events(&agent, "query", context, None, move |update| {
+                updates_clone
+                    .lock()
+                    .unwrap()
+                    .push(update.event_type.clone());
+            })
+            .await
+            .unwrap();
+
+        let events = updates.lock().unwrap();
+        // Should have received all agent events
+        assert_eq!(events.len(), 6);
+        assert_eq!(events[0], "decomposition_started");
+        assert_eq!(events[5], "final_result");
+
+        // Metrics should reflect final result
+        assert_eq!(metrics.total_tokens, 100);
+        assert_eq!(metrics.final_answer, Some("Final answer".to_string()));
+    }
+
+    #[test]
+    fn test_external_event_to_update() {
+        let event = ExternalEvent::new(42, "task_completed", "Feature X done", "all")
+            .with_source("happy-tiger");
+
+        let update = external_event_to_update(&event);
+
+        assert_eq!(update.event_type, EVENT_EXTERNAL);
+        assert!(update.message.contains("[task_completed]"));
+        assert!(update.message.contains("Feature X done"));
+        assert!(update.message.contains("happy-tiger"));
+
+        // Check data contains original event info
+        assert_eq!(update.data["id"], 42);
+        assert_eq!(update.data["event_type"], "task_completed");
+        assert_eq!(update.data["payload"], "Feature X done");
+    }
+
+    #[test]
+    fn test_external_event_to_update_unknown_source() {
+        let event = ExternalEvent::new(1, "message", "Hello", "repo:gemicro");
+
+        let update = external_event_to_update(&event);
+
+        assert!(update.message.contains("unknown"));
+        assert_eq!(update.data["source_session"], serde_json::Value::Null);
     }
 }
