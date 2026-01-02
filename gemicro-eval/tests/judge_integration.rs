@@ -2,8 +2,7 @@
 //!
 //! These tests require a valid GEMINI_API_KEY environment variable.
 
-use futures_util::StreamExt;
-use gemicro_core::{Agent, AgentContext, LlmClient, LlmConfig};
+use gemicro_core::{AgentContext, LlmClient, LlmConfig};
 use gemicro_critique::{CritiqueAgent, CritiqueConfig, CritiqueCriteria, CritiqueInput};
 use std::time::Duration;
 
@@ -32,38 +31,30 @@ async fn test_critique_ground_truth_correct_answer() {
 
     let client = create_test_client(&api_key);
     let context = AgentContext::new(client);
-
     let agent = CritiqueAgent::new(CritiqueConfig::default()).unwrap();
 
     // Test: Correct answer
     let input = CritiqueInput::new("Paris").with_criteria(CritiqueCriteria::GroundTruth {
         expected: "The capital of France is Paris".into(),
     });
-    let query = input.to_query();
 
-    let stream = agent.execute(&query, context);
-    futures_util::pin_mut!(stream);
+    // Use the typed critique() helper
+    let output = agent
+        .critique(&input, context)
+        .await
+        .expect("Critique should not fail");
 
-    let mut found_result = false;
-    while let Some(update) = stream.next().await {
-        let update = update.expect("Critique should not fail");
-        println!("[{}] {}", update.event_type, update.message);
+    println!(
+        "Verdict: {} (score: {:.2})",
+        output.verdict,
+        output.to_score()
+    );
 
-        if update.event_type == "critique_result" {
-            found_result = true;
-            let verdict = update.data["verdict"].as_str();
-
-            println!("  Verdict: {:?}", verdict);
-
-            assert!(
-                verdict == Some("Pass") || verdict == Some("PassWithWarnings"),
-                "Paris should pass for 'capital of France', got: {:?}",
-                verdict
-            );
-        }
-    }
-
-    assert!(found_result, "Should have received critique_result event");
+    assert!(
+        output.verdict.is_passing(),
+        "Paris should pass for 'capital of France', got: {}",
+        output.verdict
+    );
 }
 
 #[tokio::test]
@@ -76,37 +67,29 @@ async fn test_critique_ground_truth_incorrect_answer() {
 
     let client = create_test_client(&api_key);
     let context = AgentContext::new(client);
-
     let agent = CritiqueAgent::new(CritiqueConfig::default()).unwrap();
 
     // Test: Incorrect answer
     let input = CritiqueInput::new("London").with_criteria(CritiqueCriteria::GroundTruth {
         expected: "The capital of France is Paris".into(),
     });
-    let query = input.to_query();
 
-    let stream = agent.execute(&query, context);
-    futures_util::pin_mut!(stream);
+    let output = agent
+        .critique(&input, context)
+        .await
+        .expect("Critique should not fail");
 
-    let mut found_result = false;
-    while let Some(update) = stream.next().await {
-        let update = update.expect("Critique should not fail");
+    println!(
+        "London as capital of France - Verdict: {} (score: {:.2})",
+        output.verdict,
+        output.to_score()
+    );
 
-        if update.event_type == "critique_result" {
-            found_result = true;
-            let verdict = update.data["verdict"].as_str();
-
-            println!("London as capital of France - Verdict: {:?}", verdict);
-
-            assert!(
-                verdict == Some("NeedsRevision") || verdict == Some("Reject"),
-                "London should fail for 'capital of France', got: {:?}",
-                verdict
-            );
-        }
-    }
-
-    assert!(found_result, "Should have received critique_result event");
+    assert!(
+        !output.verdict.is_passing(),
+        "London should fail for 'capital of France', got: {}",
+        output.verdict
+    );
 }
 
 #[tokio::test]
@@ -119,7 +102,6 @@ async fn test_critique_ground_truth_semantic_equivalence() {
 
     let client = create_test_client(&api_key);
     let context = AgentContext::new(client);
-
     let agent = CritiqueAgent::new(CritiqueConfig::default()).unwrap();
 
     // Test: Semantically equivalent but differently worded
@@ -128,28 +110,21 @@ async fn test_critique_ground_truth_semantic_equivalence() {
             expected: "Romeo and Juliet was written by Shakespeare".into(),
         },
     );
-    let query = input.to_query();
 
-    let stream = agent.execute(&query, context);
-    futures_util::pin_mut!(stream);
+    let output = agent
+        .critique(&input, context)
+        .await
+        .expect("Critique should not fail");
 
-    let mut found_result = false;
-    while let Some(update) = stream.next().await {
-        let update = update.expect("Critique should not fail");
+    println!(
+        "Semantic equivalence test - Verdict: {} (score: {:.2})",
+        output.verdict,
+        output.to_score()
+    );
 
-        if update.event_type == "critique_result" {
-            found_result = true;
-            let verdict = update.data["verdict"].as_str();
-
-            println!("Semantic equivalence test - Verdict: {:?}", verdict);
-
-            assert!(
-                verdict == Some("Pass") || verdict == Some("PassWithWarnings"),
-                "Semantically equivalent answers should pass, got: {:?}",
-                verdict
-            );
-        }
-    }
-
-    assert!(found_result, "Should have received critique_result event");
+    assert!(
+        output.verdict.is_passing(),
+        "Semantically equivalent answers should pass, got: {}",
+        output.verdict
+    );
 }

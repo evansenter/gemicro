@@ -204,8 +204,7 @@ impl Scorer for CritiqueScorer {
     }
 
     fn score(&self, predicted: &str, ground_truth: &str) -> f64 {
-        use futures_util::StreamExt;
-        use gemicro_core::{Agent, AgentContext};
+        use gemicro_core::AgentContext;
         use gemicro_critique::{CritiqueAgent, CritiqueConfig, CritiqueCriteria, CritiqueInput};
 
         // Handle empty predicted strings: an empty answer is always incorrect (score 0.0).
@@ -226,44 +225,13 @@ impl Scorer for CritiqueScorer {
         // Panics if called outside a tokio multi-threaded runtime.
         tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
-                let stream = agent.execute(&input.to_query(), context);
-                futures_util::pin_mut!(stream);
-
-                while let Some(result) = stream.next().await {
-                    match result {
-                        Ok(update) => {
-                            if update.event_type == "critique_result" {
-                                // Extract verdict and convert to score
-                                match update.data.get("verdict") {
-                                    Some(value) => match value.as_str() {
-                                        Some("Pass") => return 1.0,
-                                        Some("PassWithWarnings") => return 0.75,
-                                        Some("NeedsRevision") => return 0.25,
-                                        Some("Reject") => return 0.0,
-                                        _ => {
-                                            log::error!(
-                                                "Critique 'verdict' has unexpected value: {:?}",
-                                                value
-                                            );
-                                            return f64::NAN;
-                                        }
-                                    },
-                                    None => {
-                                        log::error!("Critique result missing 'verdict' field");
-                                        return f64::NAN;
-                                    }
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            log::error!("Critique failed: {:?}", e);
-                            return f64::NAN;
-                        }
+                match agent.critique(&input, context).await {
+                    Ok(output) => output.to_score(),
+                    Err(e) => {
+                        log::error!("Critique failed: {:?}", e);
+                        f64::NAN
                     }
                 }
-                // Stream ended without producing a critique_result
-                log::error!("Critique did not produce a result");
-                f64::NAN
             })
         })
     }
