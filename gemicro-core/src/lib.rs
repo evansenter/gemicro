@@ -59,7 +59,10 @@ pub mod utils;
 // Re-export public API - core infrastructure only
 pub use agent::{
     enforce_final_result_contract, remaining_time, timeout_error, with_timeout_and_cancellation,
-    Agent, AgentContext, AgentStream, ExecutionContext, ExecutionId, EVENT_FINAL_RESULT,
+    Agent, AgentContext, AgentStream, ExecutionContext, ExecutionId, OrchestrationConfig,
+    OrchestrationError, OrchestrationGuard, OrchestrationState, DEFAULT_GLOBAL_MAX_CONCURRENT,
+    DEFAULT_MAX_DEPTH, DEFAULT_PER_PARENT_MAX_CONCURRENT, DEFAULT_TOTAL_TIMEOUT_SECS,
+    EVENT_FINAL_RESULT,
 };
 pub use config::{GemicroConfig, LlmConfig, MODEL};
 pub use error::{AgentError, GemicroError, LlmError};
