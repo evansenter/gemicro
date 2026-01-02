@@ -122,71 +122,6 @@ pub enum UserContent {
 }
 
 // ============================================================================
-// ExternalEvent
-// ============================================================================
-
-/// External event from event bus (for cross-agent coordination).
-///
-/// Used with [`EventInterceptor`](super::EventInterceptor) to filter, transform,
-/// or deny events from external sources before they're processed by an agent.
-///
-/// # Example
-///
-/// ```
-/// use gemicro_core::interceptor::ExternalEvent;
-///
-/// let event = ExternalEvent::new(
-///     42,
-///     "task_completed",
-///     "Task X finished successfully",
-///     "repo:gemicro",
-/// );
-/// assert_eq!(event.event_type, "task_completed");
-/// ```
-#[derive(Debug, Clone, PartialEq)]
-#[non_exhaustive]
-pub struct ExternalEvent {
-    /// Unique event ID from the event bus.
-    pub id: u64,
-
-    /// Type of event (e.g., "task_completed", "help_needed").
-    pub event_type: String,
-
-    /// Event payload/message.
-    pub payload: String,
-
-    /// Channel the event was received on.
-    pub channel: String,
-
-    /// Source session that published the event, if known.
-    pub source_session: Option<String>,
-}
-
-impl ExternalEvent {
-    /// Create a new external event.
-    pub fn new(
-        id: u64,
-        event_type: impl Into<String>,
-        payload: impl Into<String>,
-        channel: impl Into<String>,
-    ) -> Self {
-        Self {
-            id,
-            event_type: event_type.into(),
-            payload: payload.into(),
-            channel: channel.into(),
-            source_session: None,
-        }
-    }
-
-    /// Set the source session.
-    pub fn with_source_session(mut self, session: impl Into<String>) -> Self {
-        self.source_session = Some(session.into());
-        self
-    }
-}
-
-// ============================================================================
 // Tests
 // ============================================================================
 
@@ -235,22 +170,5 @@ mod tests {
 
         assert_eq!(msg1, msg2);
         assert_ne!(msg1, msg3);
-    }
-
-    #[test]
-    fn test_external_event_new() {
-        let event = ExternalEvent::new(1, "test_event", "payload", "channel:test");
-        assert_eq!(event.id, 1);
-        assert_eq!(event.event_type, "test_event");
-        assert_eq!(event.payload, "payload");
-        assert_eq!(event.channel, "channel:test");
-        assert_eq!(event.source_session, None);
-    }
-
-    #[test]
-    fn test_external_event_with_source() {
-        let event =
-            ExternalEvent::new(1, "test", "payload", "channel").with_source_session("session-123");
-        assert_eq!(event.source_session, Some("session-123".to_string()));
     }
 }
