@@ -26,6 +26,7 @@
 //! ```
 
 use async_trait::async_trait;
+use chrono::Utc;
 use colored::Colorize;
 use gemicro_core::interceptor::{InterceptDecision, InterceptError, Interceptor, ToolCall};
 use gemicro_core::tool::ToolResult;
@@ -40,9 +41,19 @@ static LOUD_WIRE_ENABLED: OnceLock<bool> = OnceLock::new();
 /// Tool call counter for correlating invocations with results
 static TOOL_COUNTER: AtomicUsize = AtomicUsize::new(1);
 
-/// Map from ToolCall pointer address to tool ID for correlation.
+/// Map from ToolCall pointer address to sequential invocation ID for correlation.
+///
 /// This handles concurrent tool execution where multiple intercept() calls
-/// happen before their corresponding observe() calls.
+/// happen before their corresponding observe() calls. The "tool ID" is a
+/// sequential counter (1, 2, 3...) for visual log correlation, NOT related
+/// to tool registration or tool definitions.
+///
+/// # Note on Dynamic Tools
+///
+/// This map tracks individual tool *invocations*, not tool *registrations*.
+/// If tools are added/removed from the ToolRegistry at runtime, this logging
+/// mechanism continues to work correctly - each invocation gets a fresh ID
+/// regardless of when the underlying tool was registered.
 static TOOL_ID_MAP: OnceLock<RwLock<HashMap<usize, usize>>> = OnceLock::new();
 
 /// Get the tool ID correlation map.
@@ -50,7 +61,12 @@ fn tool_id_map() -> &'static RwLock<HashMap<usize, usize>> {
     TOOL_ID_MAP.get_or_init(|| RwLock::new(HashMap::new()))
 }
 
-/// Store a tool ID for later correlation in observe().
+/// Store a sequential invocation ID for later correlation in observe().
+///
+/// Uses pointer address as key - this is safe because:
+/// 1. The ToolCall reference lives from intercept() through observe()
+/// 2. We remove the entry in retrieve_tool_id() to prevent memory leaks
+/// 3. Fallback in retrieve_tool_id() handles any edge cases
 fn store_tool_id(input: &ToolCall, tool_id: usize) {
     let key = input as *const ToolCall as usize;
     if let Ok(mut map) = tool_id_map().write() {
@@ -81,58 +97,9 @@ fn next_tool_id() -> usize {
     TOOL_COUNTER.fetch_add(1, Ordering::Relaxed)
 }
 
-/// Format the current timestamp for log output.
+/// Format the current timestamp for log output (ISO 8601 UTC).
 fn timestamp() -> String {
-    let now = std::time::SystemTime::now();
-    let duration = now
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    let secs = duration.as_secs();
-
-    // Convert to human-readable format (simplified UTC)
-    let days_since_epoch = secs / 86400;
-    let secs_today = secs % 86400;
-    let hours = secs_today / 3600;
-    let minutes = (secs_today % 3600) / 60;
-    let seconds = secs_today % 60;
-
-    // Calculate year/month/day from days since epoch (1970-01-01)
-    let mut remaining_days = days_since_epoch as i64;
-    let mut year = 1970;
-
-    loop {
-        let days_in_year = if is_leap_year(year) { 366 } else { 365 };
-        if remaining_days < days_in_year {
-            break;
-        }
-        remaining_days -= days_in_year;
-        year += 1;
-    }
-
-    let (month, day) = day_of_year_to_month_day(remaining_days as u32 + 1, is_leap_year(year));
-
-    format!("{year:04}-{month:02}-{day:02}T{hours:02}:{minutes:02}:{seconds:02}Z")
-}
-
-fn is_leap_year(year: i64) -> bool {
-    (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
-}
-
-fn day_of_year_to_month_day(day_of_year: u32, leap: bool) -> (u32, u32) {
-    let days_in_months: [u32; 12] = if leap {
-        [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    } else {
-        [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    };
-
-    let mut remaining = day_of_year;
-    for (i, &days) in days_in_months.iter().enumerate() {
-        if remaining <= days {
-            return (i as u32 + 1, remaining);
-        }
-        remaining -= days;
-    }
-    (12, 31) // Fallback
+    Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
 }
 
 /// Log prefix with timestamp and tool ID (for invocations).

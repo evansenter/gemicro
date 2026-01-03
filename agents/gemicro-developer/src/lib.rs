@@ -162,6 +162,156 @@ fn maybe_emit_context_usage(
     })
 }
 
+/// Build denial results for tool calls that were rejected.
+///
+/// Used when a batch is denied - we send back error results to the LLM
+/// so it knows the tools weren't executed.
+fn build_denial_results(
+    function_calls: &[OwnedFunctionCallInfo],
+    reason: &str,
+) -> Vec<InteractionContent> {
+    function_calls
+        .iter()
+        .map(|fc| {
+            let call_id = fc.id.as_deref().unwrap_or("unknown");
+            function_result_content(
+                fc.name.clone(),
+                call_id.to_string(),
+                json!({ "error": reason }),
+            )
+        })
+        .collect()
+}
+
+/// Result of batch approval with events to emit.
+#[derive(Debug)]
+pub(crate) struct BatchApprovalResult {
+    /// Whether the batch was approved for execution.
+    pub approved: bool,
+    /// Whether to review each tool individually (only when approved=true).
+    pub review_individually: bool,
+    /// Events to emit for this approval decision.
+    pub events: Vec<AgentUpdate>,
+}
+
+/// Handle batch approval and return result with events.
+///
+/// This encapsulates the batch confirmation logic and event generation,
+/// making the main execute loop cleaner.
+fn handle_batch_approval(approval: BatchApproval, batch_len: usize) -> BatchApprovalResult {
+    match approval {
+        BatchApproval::Approved => BatchApprovalResult {
+            approved: true,
+            review_individually: false,
+            events: vec![AgentUpdate::custom(
+                events::EVENT_BATCH_APPROVED,
+                "Batch approved",
+                json!({ "total": batch_len }),
+            )],
+        },
+        BatchApproval::Denied => BatchApprovalResult {
+            approved: false,
+            review_individually: false,
+            events: vec![AgentUpdate::custom(
+                events::EVENT_BATCH_DENIED,
+                "Batch denied by user",
+                json!({ "total": batch_len }),
+            )],
+        },
+        BatchApproval::ReviewIndividually => BatchApprovalResult {
+            approved: true,
+            review_individually: true,
+            events: vec![AgentUpdate::custom(
+                events::EVENT_BATCH_REVIEW_INDIVIDUALLY,
+                "User chose per-tool review",
+                json!({ "total": batch_len }),
+            )],
+        },
+        // Handle future BatchApproval variants - deny as safe default
+        _ => {
+            log::warn!("Unknown BatchApproval variant, denying batch");
+            BatchApprovalResult {
+                approved: false,
+                review_individually: false,
+                events: vec![AgentUpdate::custom(
+                    events::EVENT_BATCH_DENIED,
+                    "Batch denied (unknown approval type)",
+                    json!({ "total": batch_len }),
+                )],
+            }
+        }
+    }
+}
+
+/// Result of executing a single tool.
+///
+/// Note: This helper is primarily for testing. In the main execute loop,
+/// the started event must be yielded BEFORE execution, while this helper
+/// assumes execution has already completed.
+#[derive(Debug)]
+#[cfg(test)]
+pub(crate) struct ToolExecutionResult {
+    /// The function result content to send back to LLM.
+    pub function_result: InteractionContent,
+    /// Event emitted when tool started.
+    pub started_event: AgentUpdate,
+    /// Event emitted when tool completed.
+    pub completed_event: AgentUpdate,
+    /// Whether the tool executed successfully.
+    pub success: bool,
+}
+
+/// Execute a single tool and return result with events.
+///
+/// Note: This helper is primarily for testing. In the main execute loop,
+/// the started event must be yielded BEFORE execution (while this helper
+/// assumes execution has already completed), so the timing doesn't align.
+#[cfg(test)]
+pub(crate) fn execute_tool_sync_result(
+    tool_name: &str,
+    call_id: &str,
+    arguments: &serde_json::Value,
+    result: Result<gemicro_core::tool::ToolResult, ToolError>,
+    duration: std::time::Duration,
+) -> ToolExecutionResult {
+    let started_event = AgentUpdate::custom(
+        events::EVENT_TOOL_CALL_STARTED,
+        format!("Calling tool: {}", tool_name),
+        json!({
+            "tool_name": tool_name,
+            "call_id": call_id,
+            "arguments": arguments,
+        }),
+    );
+
+    let (result_json, success) = match &result {
+        Ok(r) => (r.content.clone(), true),
+        Err(e) => (json!({ "error": e.to_string() }), false),
+    };
+
+    let completed_event = AgentUpdate::custom(
+        events::EVENT_TOOL_RESULT,
+        format!("Tool {} completed", tool_name),
+        json!({
+            "tool_name": tool_name,
+            "call_id": call_id,
+            "result": result_json,
+            "success": success,
+            "duration_ms": duration.as_millis() as u64,
+        }),
+    );
+
+    let function_result =
+        function_result_content(tool_name.to_string(), call_id.to_string(), result_json);
+
+    ToolExecutionResult {
+        function_result,
+        started_event,
+        completed_event,
+        success,
+    }
+}
+
 /// Developer agent with explicit function calling loop.
 ///
 /// Provides real-time tool execution events for CLI display.
@@ -346,45 +496,13 @@ impl Agent for DeveloperAgent {
                         }),
                     );
 
-                    // Get batch confirmation
+                    // Get batch confirmation and handle result
                     let approval = confirmation_handler.confirm_batch(&batch).await;
-                    match approval {
-                        BatchApproval::Approved => {
-                            yield AgentUpdate::custom(
-                                events::EVENT_BATCH_APPROVED,
-                                "Batch approved",
-                                json!({ "total": batch.len() }),
-                            );
-                            (true, false)
-                        }
-                        BatchApproval::Denied => {
-                            yield AgentUpdate::custom(
-                                events::EVENT_BATCH_DENIED,
-                                "Batch denied by user",
-                                json!({ "total": batch.len() }),
-                            );
-                            (false, false)
-                        }
-                        BatchApproval::ReviewIndividually => {
-                            yield AgentUpdate::custom(
-                                events::EVENT_BATCH_REVIEW_INDIVIDUALLY,
-                                "User chose per-tool review",
-                                json!({ "total": batch.len() }),
-                            );
-                            // Proceed but do individual confirmations for each tool
-                            (true, true)
-                        }
-                        // Handle future BatchApproval variants - deny as safe default
-                        _ => {
-                            log::warn!("Unknown BatchApproval variant, denying batch");
-                            yield AgentUpdate::custom(
-                                events::EVENT_BATCH_DENIED,
-                                "Batch denied (unknown approval type)",
-                                json!({ "total": batch.len() }),
-                            );
-                            (false, false)
-                        }
+                    let batch_result = handle_batch_approval(approval, batch.len());
+                    for event in batch_result.events {
+                        yield event;
                     }
+                    (batch_result.approved, batch_result.review_individually)
                 } else {
                     // No batch confirmation needed
                     (true, false)
@@ -392,17 +510,8 @@ impl Agent for DeveloperAgent {
 
                 if !batch_approved {
                     // User denied the batch - send denial results back to LLM
-                    let denial_results: Vec<InteractionContent> = function_calls_to_process
-                        .iter()
-                        .map(|fc| {
-                            let call_id = fc.id.as_deref().unwrap_or("unknown");
-                            function_result_content(
-                                fc.name.clone(),
-                                call_id.to_string(),
-                                json!({ "error": "User denied batch execution" }),
-                            )
-                        })
-                        .collect();
+                    let denial_results =
+                        build_denial_results(&function_calls_to_process, "User denied batch execution");
 
                     // Send denial back to LLM and continue loop
                     // Type-state pattern: with_previous_interaction changes builder type
@@ -599,5 +708,281 @@ impl Agent for DeveloperAgent {
 
     fn create_tracker(&self) -> Box<dyn ExecutionTracking> {
         Box::new(DefaultTracker::default())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gemicro_core::tool::ToolResult;
+    use serde_json::json;
+    use std::time::Duration;
+
+    // =========================================================================
+    // Tests for build_denial_results
+    // =========================================================================
+
+    #[test]
+    fn test_build_denial_results_single_call() {
+        let calls = vec![OwnedFunctionCallInfo {
+            name: "bash".to_string(),
+            id: Some("call_123".to_string()),
+            args: json!({"command": "rm -rf /"}),
+            thought_signature: None,
+        }];
+
+        let results = build_denial_results(&calls, "User denied execution");
+
+        assert_eq!(results.len(), 1);
+        // Verify it's a FunctionResult content type
+        if let InteractionContent::FunctionResult {
+            name,
+            call_id,
+            result,
+        } = &results[0]
+        {
+            assert_eq!(name, "bash");
+            assert_eq!(call_id, "call_123");
+            assert_eq!(result, &json!({"error": "User denied execution"}));
+        } else {
+            panic!("Expected FunctionResult content");
+        }
+    }
+
+    #[test]
+    fn test_build_denial_results_multiple_calls() {
+        let calls = vec![
+            OwnedFunctionCallInfo {
+                name: "file_write".to_string(),
+                id: Some("call_1".to_string()),
+                args: json!({"path": "/etc/passwd"}),
+                thought_signature: None,
+            },
+            OwnedFunctionCallInfo {
+                name: "bash".to_string(),
+                id: Some("call_2".to_string()),
+                args: json!({"command": "echo test"}),
+                thought_signature: None,
+            },
+        ];
+
+        let results = build_denial_results(&calls, "Batch denied");
+
+        assert_eq!(results.len(), 2);
+        // Check both are FunctionResult
+        for (i, result) in results.iter().enumerate() {
+            if let InteractionContent::FunctionResult {
+                name: _,
+                call_id,
+                result,
+            } = result
+            {
+                assert_eq!(result, &json!({"error": "Batch denied"}));
+                assert_eq!(call_id, &format!("call_{}", i + 1));
+            } else {
+                panic!("Expected FunctionResult content at index {}", i);
+            }
+        }
+    }
+
+    #[test]
+    fn test_build_denial_results_missing_id() {
+        let calls = vec![OwnedFunctionCallInfo {
+            name: "glob".to_string(),
+            id: None, // No ID provided
+            args: json!({"pattern": "*.rs"}),
+            thought_signature: None,
+        }];
+
+        let results = build_denial_results(&calls, "Denied");
+
+        assert_eq!(results.len(), 1);
+        if let InteractionContent::FunctionResult {
+            name: _,
+            call_id,
+            result: _,
+        } = &results[0]
+        {
+            assert_eq!(call_id, "unknown"); // Falls back to "unknown"
+        } else {
+            panic!("Expected FunctionResult content");
+        }
+    }
+
+    // =========================================================================
+    // Tests for handle_batch_approval
+    // =========================================================================
+
+    #[test]
+    fn test_handle_batch_approval_approved() {
+        let result = handle_batch_approval(BatchApproval::Approved, 5);
+
+        assert!(result.approved);
+        assert!(!result.review_individually);
+        assert_eq!(result.events.len(), 1);
+        assert_eq!(result.events[0].event_type, events::EVENT_BATCH_APPROVED);
+        assert_eq!(result.events[0].data["total"], 5);
+    }
+
+    #[test]
+    fn test_handle_batch_approval_denied() {
+        let result = handle_batch_approval(BatchApproval::Denied, 3);
+
+        assert!(!result.approved);
+        assert!(!result.review_individually);
+        assert_eq!(result.events.len(), 1);
+        assert_eq!(result.events[0].event_type, events::EVENT_BATCH_DENIED);
+        assert_eq!(result.events[0].data["total"], 3);
+    }
+
+    #[test]
+    fn test_handle_batch_approval_review_individually() {
+        let result = handle_batch_approval(BatchApproval::ReviewIndividually, 7);
+
+        assert!(result.approved); // Execution proceeds, but one-by-one
+        assert!(result.review_individually);
+        assert_eq!(result.events.len(), 1);
+        assert_eq!(
+            result.events[0].event_type,
+            events::EVENT_BATCH_REVIEW_INDIVIDUALLY
+        );
+        assert_eq!(result.events[0].data["total"], 7);
+    }
+
+    // =========================================================================
+    // Tests for execute_tool_sync_result
+    // =========================================================================
+
+    #[test]
+    fn test_execute_tool_sync_result_success() {
+        let tool_result = ToolResult::json(json!({"files": ["a.rs", "b.rs"]}));
+
+        let result = execute_tool_sync_result(
+            "glob",
+            "call_abc",
+            &json!({"pattern": "*.rs"}),
+            Ok(tool_result),
+            Duration::from_millis(42),
+        );
+
+        assert!(result.success);
+
+        // Check started event
+        assert_eq!(
+            result.started_event.event_type,
+            events::EVENT_TOOL_CALL_STARTED
+        );
+        assert_eq!(result.started_event.data["tool_name"], "glob");
+        assert_eq!(result.started_event.data["call_id"], "call_abc");
+
+        // Check completed event
+        assert_eq!(result.completed_event.event_type, events::EVENT_TOOL_RESULT);
+        assert_eq!(result.completed_event.data["success"], true);
+        assert_eq!(result.completed_event.data["duration_ms"], 42);
+
+        // Check function result
+        if let InteractionContent::FunctionResult {
+            name,
+            call_id,
+            result,
+        } = &result.function_result
+        {
+            assert_eq!(name, "glob");
+            assert_eq!(call_id, "call_abc");
+            assert_eq!(result, &json!({"files": ["a.rs", "b.rs"]}));
+        } else {
+            panic!("Expected FunctionResult content");
+        }
+    }
+
+    #[test]
+    fn test_execute_tool_sync_result_error() {
+        let error = ToolError::ExecutionFailed("Command timed out".to_string());
+
+        let result = execute_tool_sync_result(
+            "bash",
+            "call_xyz",
+            &json!({"command": "sleep 1000"}),
+            Err(error),
+            Duration::from_millis(5000),
+        );
+
+        assert!(!result.success);
+
+        // Check completed event shows failure
+        assert_eq!(result.completed_event.data["success"], false);
+
+        // Check function result contains error
+        if let InteractionContent::FunctionResult {
+            name,
+            call_id: _,
+            result,
+        } = &result.function_result
+        {
+            assert_eq!(name, "bash");
+            // Error message should be in the content
+            let error_str = result["error"].as_str().unwrap();
+            assert!(error_str.contains("Command timed out"));
+        } else {
+            panic!("Expected FunctionResult content");
+        }
+    }
+
+    #[test]
+    fn test_execute_tool_sync_result_confirmation_denied() {
+        let error = ToolError::ConfirmationDenied("file_write".to_string());
+
+        let result = execute_tool_sync_result(
+            "file_write",
+            "call_denied",
+            &json!({"path": "/etc/passwd"}),
+            Err(error),
+            Duration::from_millis(0),
+        );
+
+        assert!(!result.success);
+
+        // Error should indicate denial
+        if let InteractionContent::FunctionResult {
+            name: _,
+            call_id: _,
+            result,
+        } = &result.function_result
+        {
+            let error_str = result["error"].as_str().unwrap();
+            assert!(error_str.contains("file_write"));
+        } else {
+            panic!("Expected FunctionResult content");
+        }
+    }
+
+    // =========================================================================
+    // Tests for DeveloperConfig
+    // =========================================================================
+
+    #[test]
+    fn test_developer_config_default() {
+        let config = DeveloperConfig::default();
+        assert!(config.validate().is_ok());
+        assert_eq!(config.max_iterations, 50);
+        assert!(config.approval_batching);
+    }
+
+    #[test]
+    fn test_developer_config_zero_iterations_invalid() {
+        let config = DeveloperConfig {
+            max_iterations: 0,
+            ..Default::default()
+        };
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_developer_config_builder() {
+        let config = DeveloperConfig::default()
+            .with_max_iterations(100)
+            .with_approval_batching(false);
+        assert_eq!(config.max_iterations, 100);
+        assert!(!config.approval_batching);
     }
 }

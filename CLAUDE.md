@@ -67,6 +67,8 @@ export GEMINI_API_KEY="your-api-key"  # Required for integration tests and examp
 LOUD_WIRE=1 cargo run -p gemicro-developer --example developer
 ```
 
+For application-level tool debugging, `gemicro-audit-log` provides structured logging of tool calls and results without the low-level HTTP traffic. Use both together: LOUD_WIRE for API-level issues, AuditLog for tool execution flow.
+
 ## CLI Quick Reference
 
 ```bash

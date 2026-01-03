@@ -204,6 +204,9 @@ impl BatchSummary {
     }
 }
 
+// NOTE: This Display impl is intentionally minimal (plain text, no colors).
+// If it evolves to include presentation concerns (colors, terminal width,
+// formatting options), move it to gemicro-cli instead.
 impl std::fmt::Display for BatchSummary {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{} tool call(s)", self.total)?;
@@ -257,31 +260,62 @@ pub trait BatchConfirmationHandler: ConfirmationHandler {
     async fn confirm_batch(&self, batch: &ToolBatch) -> BatchApproval;
 }
 
-/// Default batch confirmation behavior: fall back to individual confirmations.
+/// Fallback for [`BatchConfirmationHandler`] implementations without batch-level UI.
 ///
-/// This helper function can be used by BatchConfirmationHandler implementations
-/// that want the default fallback behavior.
+/// When a batch of tools needs confirmation (e.g., "file_write x3, bash x2"),
+/// implementations have two options:
 ///
-/// # Important
+/// 1. **Batch-level confirmation**: Show one prompt like "Approve all 5 tools?"
+///    (requires custom batch UI)
+/// 2. **Individual confirmations**: Ask about each tool one-by-one
 ///
-/// This function short-circuits on the first denial. If multiple tools require
-/// confirmation and an earlier one is approved but a later one is denied, the
-/// function returns `Denied`. The earlier approvals are not executed since the
-/// entire batch is rejected. This is intentional: batches are all-or-nothing.
+/// This helper implements option 2 - it iterates through tools requiring
+/// confirmation and calls `handler.confirm()` for each.
+///
+/// # Arguments
+///
+/// * `handler` - The confirmation handler to delegate individual confirmations to
+/// * `batch` - The batch of pending tool calls
+/// * `short_circuit` - If `true` (default), returns `Denied` on first denial.
+///   If `false`, asks about all tools before returning (useful for showing
+///   the user everything upfront).
+///
+/// # Example
+///
+/// ```ignore
+/// impl BatchConfirmationHandler for MySimpleHandler {
+///     async fn confirm_batch(&self, batch: &ToolBatch) -> BatchApproval {
+///         // No batch-level UI, fall back to individual confirmations
+///         default_batch_confirm(&self.confirmation_handler, batch, true).await
+///     }
+/// }
+/// ```
 pub async fn default_batch_confirm<H: ConfirmationHandler + ?Sized>(
     handler: &H,
     batch: &ToolBatch,
+    short_circuit: bool,
 ) -> BatchApproval {
+    let mut any_denied = false;
+
     for call in batch.confirmation_required() {
         let message = call.confirmation_message().unwrap_or("Execute tool?");
-        if !handler
+        let approved = handler
             .confirm(call.tool_name(), message, call.arguments())
-            .await
-        {
-            return BatchApproval::Denied;
+            .await;
+
+        if !approved {
+            if short_circuit {
+                return BatchApproval::Denied;
+            }
+            any_denied = true;
         }
     }
-    BatchApproval::Approved
+
+    if any_denied {
+        BatchApproval::Denied
+    } else {
+        BatchApproval::Approved
+    }
 }
 
 #[cfg(test)]
@@ -442,7 +476,7 @@ mod tests {
     #[async_trait::async_trait]
     impl BatchConfirmationHandler for TrackingHandler {
         async fn confirm_batch(&self, batch: &ToolBatch) -> BatchApproval {
-            default_batch_confirm(self, batch).await
+            default_batch_confirm(self, batch, true).await
         }
     }
 

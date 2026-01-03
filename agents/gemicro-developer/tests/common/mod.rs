@@ -126,6 +126,6 @@ impl ConfirmationHandler for TestConfirmationHandler {
 impl BatchConfirmationHandler for TestConfirmationHandler {
     async fn confirm_batch(&self, batch: &ToolBatch) -> BatchApproval {
         // Use default behavior: falls back to individual confirms
-        default_batch_confirm(self, batch).await
+        default_batch_confirm(self, batch, true).await
     }
 }

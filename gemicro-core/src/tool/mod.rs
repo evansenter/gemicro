@@ -173,14 +173,14 @@ impl ConfirmationHandler for AutoDeny {
 #[async_trait]
 impl BatchConfirmationHandler for AutoApprove {
     async fn confirm_batch(&self, batch: &ToolBatch) -> BatchApproval {
-        batch::default_batch_confirm(self, batch).await
+        batch::default_batch_confirm(self, batch, true).await
     }
 }
 
 #[async_trait]
 impl BatchConfirmationHandler for AutoDeny {
     async fn confirm_batch(&self, batch: &ToolBatch) -> BatchApproval {
-        batch::default_batch_confirm(self, batch).await
+        batch::default_batch_confirm(self, batch, true).await
     }
 }
 
@@ -188,7 +188,7 @@ impl BatchConfirmationHandler for AutoDeny {
 #[async_trait]
 impl BatchConfirmationHandler for dyn ConfirmationHandler {
     async fn confirm_batch(&self, batch: &ToolBatch) -> BatchApproval {
-        batch::default_batch_confirm(self, batch).await
+        batch::default_batch_confirm(self, batch, true).await
     }
 }
 
@@ -196,7 +196,7 @@ impl BatchConfirmationHandler for dyn ConfirmationHandler {
 #[async_trait]
 impl BatchConfirmationHandler for dyn ConfirmationHandler + Send + Sync {
     async fn confirm_batch(&self, batch: &ToolBatch) -> BatchApproval {
-        batch::default_batch_confirm(self, batch).await
+        batch::default_batch_confirm(self, batch, true).await
     }
 }
 
