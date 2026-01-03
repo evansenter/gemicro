@@ -351,6 +351,11 @@ impl Agent for DeveloperAgent {
                             (false, false)
                         }
                         BatchApproval::ReviewIndividually => {
+                            yield AgentUpdate::custom(
+                                events::EVENT_BATCH_REVIEW_INDIVIDUALLY,
+                                "User chose per-tool review",
+                                json!({ "total": batch.len() }),
+                            );
                             // Proceed but do individual confirmations for each tool
                             (true, true)
                         }

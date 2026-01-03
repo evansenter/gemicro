@@ -128,6 +128,9 @@ impl ToolBatch {
     }
 
     /// Get a summary of the batch for display.
+    ///
+    /// Tool counts are in FIFO order - tools appear in the order they
+    /// were first encountered in the batch.
     pub fn summary(&self) -> BatchSummary {
         let total = self.calls.len();
         let requires_confirmation = self
@@ -136,13 +139,16 @@ impl ToolBatch {
             .filter(|c| c.requires_confirmation())
             .count();
 
-        let tool_counts = self
-            .calls
-            .iter()
-            .fold(std::collections::HashMap::new(), |mut acc, c| {
-                *acc.entry(c.tool_name().to_string()).or_insert(0usize) += 1;
-                acc
-            });
+        // Build tool counts in FIFO order (first occurrence order)
+        let mut tool_counts: Vec<(String, usize)> = Vec::new();
+        for call in &self.calls {
+            let name = call.tool_name();
+            if let Some(entry) = tool_counts.iter_mut().find(|(n, _)| n == name) {
+                entry.1 += 1;
+            } else {
+                tool_counts.push((name.to_string(), 1));
+            }
+        }
 
         BatchSummary::new(total, requires_confirmation, tool_counts)
     }
@@ -161,16 +167,19 @@ pub struct BatchSummary {
     total: usize,
     /// Number that require confirmation.
     requires_confirmation: usize,
-    /// Count by tool name.
-    tool_counts: std::collections::HashMap<String, usize>,
+    /// Count by tool name, in FIFO order (first occurrence order).
+    tool_counts: Vec<(String, usize)>,
 }
 
 impl BatchSummary {
     /// Create a new batch summary.
+    ///
+    /// The `tool_counts` Vec should be in FIFO order - tools appear in the
+    /// order they were first encountered in the batch.
     pub fn new(
         total: usize,
         requires_confirmation: usize,
-        tool_counts: std::collections::HashMap<String, usize>,
+        tool_counts: Vec<(String, usize)>,
     ) -> Self {
         Self {
             total,
@@ -189,8 +198,8 @@ impl BatchSummary {
         self.requires_confirmation
     }
 
-    /// Get the tool counts.
-    pub fn tool_counts(&self) -> &std::collections::HashMap<String, usize> {
+    /// Get the tool counts in FIFO order (first occurrence order).
+    pub fn tool_counts(&self) -> &[(String, usize)] {
         &self.tool_counts
     }
 }
@@ -203,6 +212,7 @@ impl std::fmt::Display for BatchSummary {
             write!(f, " - {} require confirmation", self.requires_confirmation)?;
         }
 
+        // Tool counts are already in FIFO order from summary()
         let tools: Vec<String> = self
             .tool_counts
             .iter()
@@ -375,12 +385,18 @@ mod tests {
         let summary = batch.summary();
         assert_eq!(summary.total(), 3);
         assert_eq!(summary.requires_confirmation(), 1);
-        assert_eq!(summary.tool_counts().get("file_read"), Some(&2));
-        assert_eq!(summary.tool_counts().get("file_write"), Some(&1));
+
+        // Tool counts are in FIFO order (first occurrence order)
+        let counts = summary.tool_counts();
+        assert_eq!(counts.len(), 2);
+        assert_eq!(counts[0], ("file_read".to_string(), 2));
+        assert_eq!(counts[1], ("file_write".to_string(), 1));
 
         let text = summary.to_string();
         assert!(text.contains("3 tool call(s)"));
         assert!(text.contains("1 require confirmation"));
+        // Verify FIFO order in display: file_read appears before file_write
+        assert!(text.contains("[file_readx2, file_write]"));
     }
 
     #[test]
