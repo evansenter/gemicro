@@ -13,6 +13,8 @@ gemicro-core = { path = "../../gemicro-core" }
 async-trait.workspace = true
 serde_json.workspace = true
 log.workspace = true
+colored = "2"
+colored_json = "4"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "macros"] }
