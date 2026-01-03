@@ -30,14 +30,44 @@ use colored::Colorize;
 use gemicro_core::interceptor::{InterceptDecision, InterceptError, Interceptor, ToolCall};
 use gemicro_core::tool::ToolResult;
 use serde_json::Value;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::OnceLock;
+use std::sync::{OnceLock, RwLock};
 
 /// Cached check for whether LOUD_WIRE is enabled
 static LOUD_WIRE_ENABLED: OnceLock<bool> = OnceLock::new();
 
 /// Tool call counter for correlating invocations with results
 static TOOL_COUNTER: AtomicUsize = AtomicUsize::new(1);
+
+/// Map from ToolCall pointer address to tool ID for correlation.
+/// This handles concurrent tool execution where multiple intercept() calls
+/// happen before their corresponding observe() calls.
+static TOOL_ID_MAP: OnceLock<RwLock<HashMap<usize, usize>>> = OnceLock::new();
+
+/// Get the tool ID correlation map.
+fn tool_id_map() -> &'static RwLock<HashMap<usize, usize>> {
+    TOOL_ID_MAP.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+/// Store a tool ID for later correlation in observe().
+fn store_tool_id(input: &ToolCall, tool_id: usize) {
+    let key = input as *const ToolCall as usize;
+    if let Ok(mut map) = tool_id_map().write() {
+        map.insert(key, tool_id);
+    }
+}
+
+/// Retrieve and remove the tool ID stored during intercept().
+/// Falls back to current counter - 1 if lookup fails.
+fn retrieve_tool_id(input: &ToolCall) -> usize {
+    let key = input as *const ToolCall as usize;
+    tool_id_map()
+        .write()
+        .ok()
+        .and_then(|mut map| map.remove(&key))
+        .unwrap_or_else(|| TOOL_COUNTER.load(Ordering::Relaxed).saturating_sub(1))
+}
 
 /// Check if LOUD_WIRE debugging is enabled.
 ///
@@ -225,6 +255,8 @@ impl Interceptor<ToolCall, ToolResult> for AuditLog {
     ) -> Result<InterceptDecision<ToolCall>, InterceptError> {
         if is_loud_wire() {
             let tool_id = next_tool_id();
+            // Store tool_id for correlation with observe() - handles concurrent execution
+            store_tool_id(input, tool_id);
             Self::log_loud_invoke(tool_id, input);
         } else {
             log::info!(
@@ -238,8 +270,8 @@ impl Interceptor<ToolCall, ToolResult> for AuditLog {
 
     async fn observe(&self, input: &ToolCall, output: &ToolResult) -> Result<(), InterceptError> {
         if is_loud_wire() {
-            // Use current counter value for correlation (not incrementing)
-            let tool_id = TOOL_COUNTER.load(Ordering::Relaxed).saturating_sub(1);
+            // Retrieve the tool_id stored during intercept() - handles concurrent execution
+            let tool_id = retrieve_tool_id(input);
             Self::log_loud_result(tool_id, input, output);
         } else {
             let content_preview = match &output.content {

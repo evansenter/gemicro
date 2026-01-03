@@ -235,6 +235,7 @@ impl std::fmt::Display for BatchSummary {
 
 /// Result of batch confirmation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum BatchApproval {
     /// All tools approved for execution.
     Approved,

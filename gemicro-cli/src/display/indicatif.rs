@@ -299,7 +299,7 @@ impl Renderer for IndicatifRenderer {
                 // Context usage update - update spinner with usage info
                 let percent = event
                     .data
-                    .get("percent")
+                    .get("usage_percent")
                     .and_then(|v| v.as_f64())
                     .unwrap_or(0.0);
                 let level = event

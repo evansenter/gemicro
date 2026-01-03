@@ -135,6 +135,33 @@ fn check_context_level_change(
     }
 }
 
+/// Build a context usage event if the level has changed.
+///
+/// Updates `last_context_level` in place and returns an event to yield if needed.
+fn maybe_emit_context_usage(
+    context_usage: &ContextUsage,
+    last_context_level: &mut ContextLevel,
+) -> Option<AgentUpdate> {
+    check_context_level_change(context_usage, *last_context_level).map(|new_level| {
+        *last_context_level = new_level;
+        AgentUpdate::custom(
+            events::EVENT_CONTEXT_USAGE,
+            format!(
+                "Context usage: {:.1}% ({})",
+                context_usage.usage_percent(),
+                new_level
+            ),
+            json!({
+                "tokens_used": context_usage.tokens_used(),
+                "context_window": context_usage.context_window(),
+                "usage_percent": context_usage.usage_percent(),
+                "level": new_level.to_string(),
+                "remaining": context_usage.remaining(),
+            }),
+        )
+    })
+}
+
 /// Developer agent with explicit function calling loop.
 ///
 /// Provides real-time tool execution events for CLI display.
@@ -265,19 +292,8 @@ impl Agent for DeveloperAgent {
                     // Track context usage
                     if let Some(tokens) = gemicro_core::extract_total_tokens(&response) {
                         context_usage.add_tokens(tokens);
-                        if let Some(new_level) = check_context_level_change(&context_usage, last_context_level) {
-                            last_context_level = new_level;
-                            yield AgentUpdate::custom(
-                                events::EVENT_CONTEXT_USAGE,
-                                format!("Context usage: {:.1}% ({})", context_usage.usage_percent(), new_level),
-                                json!({
-                                    "tokens_used": context_usage.tokens_used(),
-                                    "context_window": context_usage.context_window(),
-                                    "usage_percent": context_usage.usage_percent(),
-                                    "level": new_level.to_string(),
-                                    "remaining": context_usage.remaining(),
-                                }),
-                            );
+                        if let Some(event) = maybe_emit_context_usage(&context_usage, &mut last_context_level) {
+                            yield event;
                         }
                     }
 
@@ -358,6 +374,16 @@ impl Agent for DeveloperAgent {
                             // Proceed but do individual confirmations for each tool
                             (true, true)
                         }
+                        // Handle future BatchApproval variants - deny as safe default
+                        _ => {
+                            log::warn!("Unknown BatchApproval variant, denying batch");
+                            yield AgentUpdate::custom(
+                                events::EVENT_BATCH_DENIED,
+                                "Batch denied (unknown approval type)",
+                                json!({ "total": batch.len() }),
+                            );
+                            (false, false)
+                        }
                     }
                 } else {
                     // No batch confirmation needed
@@ -410,19 +436,8 @@ impl Agent for DeveloperAgent {
                     // Track context usage
                     if let Some(tokens) = gemicro_core::extract_total_tokens(&denial_response) {
                         context_usage.add_tokens(tokens);
-                        if let Some(new_level) = check_context_level_change(&context_usage, last_context_level) {
-                            last_context_level = new_level;
-                            yield AgentUpdate::custom(
-                                events::EVENT_CONTEXT_USAGE,
-                                format!("Context usage: {:.1}% ({})", context_usage.usage_percent(), new_level),
-                                json!({
-                                    "tokens_used": context_usage.tokens_used(),
-                                    "context_window": context_usage.context_window(),
-                                    "usage_percent": context_usage.usage_percent(),
-                                    "level": new_level.to_string(),
-                                    "remaining": context_usage.remaining(),
-                                }),
-                            );
+                        if let Some(event) = maybe_emit_context_usage(&context_usage, &mut last_context_level) {
+                            yield event;
                         }
                     }
 
@@ -557,19 +572,8 @@ impl Agent for DeveloperAgent {
                 // Track context usage
                 if let Some(tokens) = gemicro_core::extract_total_tokens(&follow_up_response) {
                     context_usage.add_tokens(tokens);
-                    if let Some(new_level) = check_context_level_change(&context_usage, last_context_level) {
-                        last_context_level = new_level;
-                        yield AgentUpdate::custom(
-                            events::EVENT_CONTEXT_USAGE,
-                            format!("Context usage: {:.1}% ({})", context_usage.usage_percent(), new_level),
-                            json!({
-                                "tokens_used": context_usage.tokens_used(),
-                                "context_window": context_usage.context_window(),
-                                "usage_percent": context_usage.usage_percent(),
-                                "level": new_level.to_string(),
-                                "remaining": context_usage.remaining(),
-                            }),
-                        );
+                    if let Some(event) = maybe_emit_context_usage(&context_usage, &mut last_context_level) {
+                        yield event;
                     }
                 }
 
