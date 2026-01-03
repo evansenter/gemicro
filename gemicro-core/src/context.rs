@@ -119,6 +119,7 @@ impl ContextUsage {
 
 /// Context usage level.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[non_exhaustive]
 pub enum ContextLevel {
     /// Usage is within normal limits.
     Normal,
