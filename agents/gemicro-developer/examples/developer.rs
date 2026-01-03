@@ -6,17 +6,19 @@
 //! Or with a custom query:
 //!   GEMINI_API_KEY=your_key cargo run -p gemicro-developer --example developer -- "List files in src/"
 //!
-//! For verbose output (full tool args/results):
-//!   VERBOSE=1 GEMINI_API_KEY=your_key cargo run -p gemicro-developer --example developer
+//! For full wire-level debugging (API traffic + tool args/results):
+//!   LOUD_WIRE=1 GEMINI_API_KEY=your_key cargo run -p gemicro-developer --example developer
 //!
 //! Press Ctrl+C to cancel gracefully.
 
 use futures_util::StreamExt;
+use gemicro_bash::Bash;
 use gemicro_core::tool::{AutoApprove, ToolRegistry};
 use gemicro_core::{Agent, AgentContext, LlmClient, LlmConfig, MODEL};
 use gemicro_developer::{DeveloperAgent, DeveloperConfig};
 use gemicro_file_read::FileRead;
 use gemicro_glob::Glob;
+use gemicro_grep::Grep;
 use serde_json::Value;
 use std::env;
 use std::sync::Arc;
@@ -32,20 +34,8 @@ fn truncate(s: &str, max_len: usize) -> String {
     }
 }
 
-/// Format JSON for display, either compact or pretty based on verbosity.
-fn format_json(value: &Value, verbose: bool) -> String {
-    if verbose {
-        serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
-    } else {
-        value.to_string()
-    }
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Check for verbose mode
-    let verbose = env::var("VERBOSE").is_ok();
-
     // Get API key from environment
     let api_key = env::var("GEMINI_API_KEY").expect(
         "GEMINI_API_KEY environment variable not set.\n\
@@ -72,7 +62,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("│ Max iterations: {:<45} │", 50);
     println!("│ LLM timeout: {:<48} │", "60s");
     println!("│ Temperature: {:<48} │", 0.7);
-    println!("│ Verbose: {:<52} │", if verbose { "yes" } else { "no" });
     println!("└──────────────────────────────────────────────────────────────┘");
     println!();
 
@@ -94,10 +83,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    // Create tool registry with read-only tools for this demo
+    // Create tool registry with tools for this demo
+    // Note: Bash requires confirmation (handled by AutoApprove for demos)
     let mut tools = ToolRegistry::new();
     tools.register(FileRead);
     tools.register(Glob);
+    tools.register(Grep);
+    tools.register(Bash);
 
     // Show registered tools
     println!("┌─ Registered Tools ──────────────────────────────────────────┐");
@@ -108,7 +100,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
 
     // Create LLM client
-    let genai_client = rust_genai::Client::builder(api_key).build();
+    let genai_client = rust_genai::Client::builder(api_key).build()?;
     let llm_config = LlmConfig::default()
         .with_timeout(Duration::from_secs(60))
         .with_max_tokens(4096)
@@ -148,16 +140,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         match update.event_type.as_str() {
             "developer_started" => {
                 println!("▶ Agent started");
-                if let Some(q) = update.data.get("query") {
-                    if verbose {
-                        println!("  Query: {}", truncate(q.as_str().unwrap_or(""), 80));
-                    }
-                }
             }
             "tool_call_started" => {
                 tool_call_count += 1;
                 let tool_name = update.data["tool_name"].as_str().unwrap_or("unknown");
-                let call_id = update.data["call_id"].as_str().unwrap_or("?");
                 let args = update.data.get("arguments").unwrap_or(&Value::Null);
 
                 // Format args preview - show full paths
@@ -170,20 +156,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 };
 
                 println!();
-                println!(
-                    "🔧 [{:>2}] {} {}",
-                    tool_call_count,
-                    tool_name,
-                    args_preview // No truncation for paths
-                );
-
-                if verbose {
-                    println!("     Call ID: {}", call_id);
-                    println!("     Arguments:");
-                    for line in format_json(args, true).lines() {
-                        println!("       {}", line);
-                    }
-                }
+                println!("🔧 [{:>2}] {} {}", tool_call_count, tool_name, args_preview);
+                // Full args/results available via LOUD_WIRE=1
             }
             "tool_result" => {
                 let tool_name = update.data["tool_name"].as_str().unwrap_or("unknown");
@@ -202,39 +176,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     duration_ms as f64 / 1000.0
                 );
 
-                if verbose || !success {
-                    // Show result preview (or full error)
-                    let result_str = if let Some(s) = result.as_str() {
-                        s.to_string()
-                    } else if let Some(err) = result.get("error") {
+                // Show errors inline (full results available via LOUD_WIRE=1)
+                if !success {
+                    let error_str = if let Some(err) = result.get("error") {
                         format!("Error: {}", err.as_str().unwrap_or("unknown"))
                     } else if let Some(content) = result.get("content") {
-                        if let Some(s) = content.as_str() {
-                            truncate(s, 100)
-                        } else {
-                            truncate(&content.to_string(), 100)
-                        }
+                        truncate(content.as_str().unwrap_or(&content.to_string()), 80)
                     } else {
-                        truncate(&result.to_string(), 100)
+                        truncate(&result.to_string(), 80)
                     };
-
-                    if !result_str.is_empty() {
-                        if verbose {
-                            println!("     Result:");
-                            for line in result_str.lines().take(10) {
-                                println!("       {}", truncate(line, 80));
-                            }
-                            if result_str.lines().count() > 10 {
-                                println!(
-                                    "       ... ({} more lines)",
-                                    result_str.lines().count() - 10
-                                );
-                            }
-                        } else if !success {
-                            // Always show errors even in non-verbose mode
-                            println!("     {}", truncate(&result_str, 80));
-                        }
-                    }
+                    println!("     {}", error_str);
                 }
             }
             "final_result" => {
@@ -291,11 +242,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     println!("└──────────────────────────────────────────────────────────────┘");
                 }
             }
-            other => {
-                // Show unknown events in verbose mode
-                if verbose {
-                    println!("│ [{}] {}", other, truncate(&update.message, 45));
-                }
+            _ => {
+                // Unknown events are silently ignored
+                // (full event stream available via LOUD_WIRE=1)
             }
         }
     }

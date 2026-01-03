@@ -11,7 +11,9 @@ fn get_api_key() -> Option<String> {
 }
 
 fn create_test_client(api_key: &str) -> LlmClient {
-    let genai_client = rust_genai::Client::builder(api_key.to_string()).build();
+    let genai_client = rust_genai::Client::builder(api_key.to_string())
+        .build()
+        .unwrap();
     let config = LlmConfig::default()
         .with_timeout(Duration::from_secs(30))
         .with_max_tokens(1024)

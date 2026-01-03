@@ -51,7 +51,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("📡 Streaming response:\n");
     println!("─────────────────────────────────────────────");
 
-    let genai_client = rust_genai::Client::builder(api_key).build();
+    let genai_client = rust_genai::Client::builder(api_key).build()?;
     let mut stream = genai_client
         .interaction()
         .with_model(MODEL)

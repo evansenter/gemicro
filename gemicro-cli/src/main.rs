@@ -73,7 +73,9 @@ async fn main() -> Result<()> {
 
 /// Run the interactive REPL
 async fn run_interactive(args: &cli::Args) -> Result<()> {
-    let genai_client = rust_genai::Client::builder(args.api_key.clone()).build();
+    let genai_client = rust_genai::Client::builder(args.api_key.clone())
+        .build()
+        .context("Failed to create Gemini client")?;
     let llm = LlmClient::new(genai_client, args.llm_config());
 
     let mut session = Session::new(llm, args.plain);
@@ -111,7 +113,9 @@ async fn run_research(args: &cli::Args, query: &str) -> Result<()> {
     let cancellation_token = CancellationToken::new();
 
     // Create LLM client and context with cancellation support
-    let genai_client = rust_genai::Client::builder(args.api_key.clone()).build();
+    let genai_client = rust_genai::Client::builder(args.api_key.clone())
+        .build()
+        .context("Failed to create Gemini client")?;
     let llm = LlmClient::new(genai_client, args.llm_config());
     let context = AgentContext::new_with_cancellation(llm, cancellation_token.clone());
 

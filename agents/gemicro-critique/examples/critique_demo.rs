@@ -19,7 +19,9 @@ use std::env;
 use std::time::Duration;
 
 fn create_llm_client(api_key: &str) -> LlmClient {
-    let genai_client = rust_genai::Client::builder(api_key.to_string()).build();
+    let genai_client = rust_genai::Client::builder(api_key.to_string())
+        .build()
+        .unwrap();
     LlmClient::new(
         genai_client,
         LlmConfig::default()

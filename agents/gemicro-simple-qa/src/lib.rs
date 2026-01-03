@@ -18,7 +18,7 @@
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! let agent = SimpleQaAgent::new(SimpleQaConfig::default())?;
 //!
-//! let genai = rust_genai::Client::builder("api-key".to_string()).build();
+//! let genai = rust_genai::Client::builder("api-key".to_string()).build()?;
 //! let context = AgentContext::new(LlmClient::new(genai, LlmConfig::default()));
 //!
 //! let stream = agent.execute("What is Rust?", context);
@@ -164,7 +164,7 @@ impl SimpleQaConfig {
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// let agent = SimpleQaAgent::new(SimpleQaConfig::default())?;
 ///
-/// let genai = rust_genai::Client::builder("api-key".to_string()).build();
+/// let genai = rust_genai::Client::builder("api-key".to_string()).build()?;
 /// let context = AgentContext::new(LlmClient::new(genai, LlmConfig::default()));
 ///
 /// let stream = agent.execute("What is Rust?", context);

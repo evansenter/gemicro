@@ -3,7 +3,7 @@
 //! Provides [`GemicroToolService`] which implements rust-genai's `ToolService` trait,
 //! enabling gemicro tools to work with `create_with_auto_functions()`.
 
-use super::{ConfirmationHandler, ToolCallableAdapter, ToolRegistry, ToolResult, ToolSet};
+use super::{BatchConfirmationHandler, ToolCallableAdapter, ToolRegistry, ToolResult, ToolSet};
 use crate::interceptor::{InterceptorChain, ToolCall};
 use rust_genai::{CallableFunction, ToolService};
 use std::sync::Arc;
@@ -11,7 +11,7 @@ use std::sync::Arc;
 /// Gemicro's implementation of rust-genai's [`ToolService`].
 ///
 /// Combines [`ToolRegistry`] with [`ToolSet`] filtering and optional
-/// [`ConfirmationHandler`] for dangerous tools.
+/// [`BatchConfirmationHandler`] for dangerous tools.
 ///
 /// The registry starts **empty** - consumers register their own tools.
 /// This keeps gemicro-core generic and avoids auto-importing tools.
@@ -44,7 +44,7 @@ use std::sync::Arc;
 pub struct GemicroToolService {
     registry: Arc<ToolRegistry>,
     filter: ToolSet,
-    confirmation_handler: Option<Arc<dyn ConfirmationHandler>>,
+    confirmation_handler: Option<Arc<dyn BatchConfirmationHandler>>,
     interceptors: Option<Arc<InterceptorChain<ToolCall, ToolResult>>>,
 }
 
@@ -106,7 +106,7 @@ impl GemicroToolService {
     /// let service = GemicroToolService::new(Arc::new(registry))
     ///     .with_confirmation_handler(Arc::new(AutoApprove));
     /// ```
-    pub fn with_confirmation_handler(mut self, handler: Arc<dyn ConfirmationHandler>) -> Self {
+    pub fn with_confirmation_handler(mut self, handler: Arc<dyn BatchConfirmationHandler>) -> Self {
         self.confirmation_handler = Some(handler);
         self
     }
@@ -174,7 +174,9 @@ impl ToolService for GemicroToolService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tool::{AutoApprove, AutoDeny, Tool, ToolError, ToolResult};
+    use crate::tool::{
+        AutoApprove, AutoDeny, BatchConfirmationHandler, Tool, ToolError, ToolResult,
+    };
     use async_trait::async_trait;
     use serde_json::{json, Value};
 
@@ -256,7 +258,7 @@ mod tests {
     #[test]
     fn test_service_with_confirmation_handler() {
         let registry = Arc::new(ToolRegistry::new());
-        let handler: Arc<dyn ConfirmationHandler> = Arc::new(AutoApprove);
+        let handler: Arc<dyn BatchConfirmationHandler> = Arc::new(AutoApprove);
 
         let service = GemicroToolService::new(registry).with_confirmation_handler(handler);
 

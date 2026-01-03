@@ -410,7 +410,9 @@ mod tests {
         // Note: In real tests, you'd use a proper test helper
         use gemicro_core::{LlmClient, LlmConfig};
 
-        let genai_client = rust_genai::Client::builder("test-key".to_string()).build();
+        let genai_client = rust_genai::Client::builder("test-key".to_string())
+            .build()
+            .unwrap();
         let llm = LlmClient::new(genai_client, LlmConfig::default());
         AgentContext::new(llm)
     }
@@ -480,7 +482,9 @@ mod tests {
     async fn test_runner_execute_with_trajectory() {
         let runner = AgentRunner::new();
         let agent = MockAgent::new(create_successful_events());
-        let genai_client = rust_genai::Client::builder("test-key".to_string()).build();
+        let genai_client = rust_genai::Client::builder("test-key".to_string())
+            .build()
+            .unwrap();
         let llm_config = LlmConfig::default();
 
         let (metrics, trajectory) = runner

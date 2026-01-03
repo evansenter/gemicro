@@ -15,7 +15,7 @@
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! let agent = EchoAgent;
 //!
-//! let genai = rust_genai::Client::builder("unused".to_string()).build();
+//! let genai = rust_genai::Client::builder("unused".to_string()).build()?;
 //! let context = AgentContext::new(LlmClient::new(genai, LlmConfig::default()));
 //!
 //! let stream = agent.execute("Hello, world!", context);
@@ -97,7 +97,9 @@ mod tests {
     async fn test_echo_output() {
         let agent = EchoAgent;
 
-        let genai = rust_genai::Client::builder("unused".to_string()).build();
+        let genai = rust_genai::Client::builder("unused".to_string())
+            .build()
+            .unwrap();
         let context = AgentContext::new(LlmClient::new(genai, LlmConfig::default()));
 
         let stream = agent.execute("Hello, world!", context);
@@ -122,7 +124,9 @@ mod tests {
     async fn test_zero_tokens() {
         let agent = EchoAgent;
 
-        let genai = rust_genai::Client::builder("unused".to_string()).build();
+        let genai = rust_genai::Client::builder("unused".to_string())
+            .build()
+            .unwrap();
         let context = AgentContext::new(LlmClient::new(genai, LlmConfig::default()));
 
         let stream = agent.execute("test", context);

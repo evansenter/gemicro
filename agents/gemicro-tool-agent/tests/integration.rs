@@ -324,7 +324,9 @@ async fn test_streaming_function_calling_with_hooks() {
         .with_confirmation_handler(confirmation);
 
     // Create streaming interaction
-    let genai_client = rust_genai::Client::builder(api_key.to_string()).build();
+    let genai_client = rust_genai::Client::builder(api_key.to_string())
+        .build()
+        .unwrap();
     let mut stream = genai_client
         .interaction()
         .with_model(MODEL)

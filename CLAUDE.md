@@ -59,6 +59,16 @@ cargo run -p gemicro-deep-research --example deep_research
 export GEMINI_API_KEY="your-api-key"  # Required for integration tests and examples
 ```
 
+### Debugging rust-genai
+
+```bash
+# Enable LOUD_WIRE to see full HTTP request/response bodies for Gemini API calls
+# Useful for debugging tool declarations, system instructions, and model responses
+LOUD_WIRE=1 cargo run -p gemicro-developer --example developer
+```
+
+For application-level tool debugging, `gemicro-audit-log` provides structured logging of tool calls and results without the low-level HTTP traffic. Use both together: LOUD_WIRE for API-level issues, AuditLog for tool execution flow.
+
 ## CLI Quick Reference
 
 ```bash

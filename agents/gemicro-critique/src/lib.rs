@@ -766,7 +766,7 @@ impl CritiqueAgent {
     ///         expected: "Paris".into()
     ///     });
     ///
-    /// # let genai_client = rust_genai::Client::builder("key".to_string()).build();
+    /// # let genai_client = rust_genai::Client::builder("key".to_string()).build().unwrap();
     /// # let llm = LlmClient::new(genai_client, LlmConfig::default());
     /// let context = AgentContext::new(llm);
     /// let output = agent.critique(&input, context).await?;
