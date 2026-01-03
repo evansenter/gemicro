@@ -241,7 +241,7 @@ impl Agent for DeveloperAgent {
                                 .interaction()
                                 .with_model(MODEL)
                                 .with_functions(function_declarations.clone())
-                                .with_store_enabled()
+                                .with_store(true)
                                 .with_previous_interaction(prev_id)
                                 .create()
                                 .await
@@ -254,7 +254,7 @@ impl Agent for DeveloperAgent {
                                 .with_model(MODEL)
                                 .with_system_instruction(&system_prompt)
                                 .with_functions(function_declarations.clone())
-                                .with_store_enabled()
+                                .with_store(true)
                                 .with_text(&query)
                                 .create()
                                 .await
@@ -271,8 +271,8 @@ impl Agent for DeveloperAgent {
                                 events::EVENT_CONTEXT_USAGE,
                                 format!("Context usage: {:.1}% ({})", context_usage.usage_percent(), new_level),
                                 json!({
-                                    "tokens_used": context_usage.tokens_used,
-                                    "context_window": context_usage.context_window,
+                                    "tokens_used": context_usage.tokens_used(),
+                                    "context_window": context_usage.context_window(),
                                     "usage_percent": context_usage.usage_percent(),
                                     "level": new_level.to_string(),
                                     "remaining": context_usage.remaining(),
@@ -318,14 +318,14 @@ impl Agent for DeveloperAgent {
                         events::EVENT_BATCH_PLAN,
                         format!("Batch plan: {}", summary),
                         json!({
-                            "total": summary.total,
-                            "requires_confirmation": summary.requires_confirmation,
-                            "tool_counts": summary.tool_counts,
-                            "calls": batch.calls.iter().map(|c| json!({
-                                "call_id": c.call_id,
-                                "tool_name": c.tool_name,
-                                "requires_confirmation": c.requires_confirmation,
-                                "confirmation_message": c.confirmation_message,
+                            "total": summary.total(),
+                            "requires_confirmation": summary.requires_confirmation(),
+                            "tool_counts": summary.tool_counts(),
+                            "calls": batch.iter().map(|c| json!({
+                                "call_id": c.call_id(),
+                                "tool_name": c.tool_name(),
+                                "requires_confirmation": c.requires_confirmation(),
+                                "confirmation_message": c.confirmation_message(),
                             })).collect::<Vec<_>>(),
                         }),
                     );
@@ -401,8 +401,8 @@ impl Agent for DeveloperAgent {
                                 events::EVENT_CONTEXT_USAGE,
                                 format!("Context usage: {:.1}% ({})", context_usage.usage_percent(), new_level),
                                 json!({
-                                    "tokens_used": context_usage.tokens_used,
-                                    "context_window": context_usage.context_window,
+                                    "tokens_used": context_usage.tokens_used(),
+                                    "context_window": context_usage.context_window(),
                                     "usage_percent": context_usage.usage_percent(),
                                     "level": new_level.to_string(),
                                     "remaining": context_usage.remaining(),
@@ -522,15 +522,17 @@ impl Agent for DeveloperAgent {
                 // knows about available tools from the interaction that triggered the call.
                 // System instruction is also inherited from the first turn.
                 // Invariant: we have a previous_interaction_id because we got here by processing
-                // function calls from a prior response.
-                let prev_id = previous_interaction_id
-                    .as_ref()
-                    .expect("invariant: must have previous_interaction_id after processing function calls");
+                // function calls from a prior response. If this is ever None, it's a bug.
+                let prev_id = previous_interaction_id.as_ref().ok_or_else(|| {
+                    AgentError::Other(
+                        "previous_interaction_id was None after processing function calls".into(),
+                    )
+                })?;
 
                 let follow_up_response: InteractionResponse = genai_client
                     .interaction()
                     .with_model(MODEL)
-                    .with_store_enabled()
+                    .with_store(true)
                     .with_previous_interaction(prev_id)
                     .with_content(function_results)
                     .create()
@@ -546,8 +548,8 @@ impl Agent for DeveloperAgent {
                             events::EVENT_CONTEXT_USAGE,
                             format!("Context usage: {:.1}% ({})", context_usage.usage_percent(), new_level),
                             json!({
-                                "tokens_used": context_usage.tokens_used,
-                                "context_window": context_usage.context_window,
+                                "tokens_used": context_usage.tokens_used(),
+                                "context_window": context_usage.context_window(),
                                 "usage_percent": context_usage.usage_percent(),
                                 "level": new_level.to_string(),
                                 "remaining": context_usage.remaining(),

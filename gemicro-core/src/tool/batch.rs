@@ -8,17 +8,45 @@ use serde_json::Value;
 
 /// A pending tool call waiting for batch approval.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct PendingToolCall {
     /// Unique identifier for this call.
-    pub call_id: String,
+    call_id: String,
     /// Name of the tool to execute.
-    pub tool_name: String,
+    tool_name: String,
     /// Arguments for the tool.
-    pub arguments: Value,
+    arguments: Value,
     /// Whether this tool requires confirmation.
-    pub requires_confirmation: bool,
+    requires_confirmation: bool,
     /// Human-readable description of what the tool will do.
-    pub confirmation_message: Option<String>,
+    confirmation_message: Option<String>,
+}
+
+impl PendingToolCall {
+    /// Get the call ID.
+    pub fn call_id(&self) -> &str {
+        &self.call_id
+    }
+
+    /// Get the tool name.
+    pub fn tool_name(&self) -> &str {
+        &self.tool_name
+    }
+
+    /// Get the arguments.
+    pub fn arguments(&self) -> &Value {
+        &self.arguments
+    }
+
+    /// Check if this call requires confirmation.
+    pub fn requires_confirmation(&self) -> bool {
+        self.requires_confirmation
+    }
+
+    /// Get the confirmation message, if any.
+    pub fn confirmation_message(&self) -> Option<&str> {
+        self.confirmation_message.as_deref()
+    }
 }
 
 impl PendingToolCall {
@@ -47,9 +75,22 @@ impl PendingToolCall {
 
 /// A batch of pending tool calls for approval.
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct ToolBatch {
     /// The pending tool calls in this batch.
-    pub calls: Vec<PendingToolCall>,
+    calls: Vec<PendingToolCall>,
+}
+
+impl ToolBatch {
+    /// Get read-only access to the calls.
+    pub fn calls(&self) -> &[PendingToolCall] {
+        &self.calls
+    }
+
+    /// Iterate over the calls.
+    pub fn iter(&self) -> impl Iterator<Item = &PendingToolCall> {
+        self.calls.iter()
+    }
 }
 
 impl ToolBatch {
@@ -75,14 +116,14 @@ impl ToolBatch {
 
     /// Check if any call in the batch requires confirmation.
     pub fn requires_confirmation(&self) -> bool {
-        self.calls.iter().any(|c| c.requires_confirmation)
+        self.calls.iter().any(|c| c.requires_confirmation())
     }
 
     /// Get only the calls that require confirmation.
     pub fn confirmation_required(&self) -> Vec<&PendingToolCall> {
         self.calls
             .iter()
-            .filter(|c| c.requires_confirmation)
+            .filter(|c| c.requires_confirmation())
             .collect()
     }
 
@@ -92,22 +133,18 @@ impl ToolBatch {
         let requires_confirmation = self
             .calls
             .iter()
-            .filter(|c| c.requires_confirmation)
+            .filter(|c| c.requires_confirmation())
             .count();
 
         let tool_counts = self
             .calls
             .iter()
             .fold(std::collections::HashMap::new(), |mut acc, c| {
-                *acc.entry(c.tool_name.clone()).or_insert(0usize) += 1;
+                *acc.entry(c.tool_name().to_string()).or_insert(0usize) += 1;
                 acc
             });
 
-        BatchSummary {
-            total,
-            requires_confirmation,
-            tool_counts,
-        }
+        BatchSummary::new(total, requires_confirmation, tool_counts)
     }
 
     /// Clear the batch.
@@ -118,13 +155,44 @@ impl ToolBatch {
 
 /// Summary of a tool batch for display.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct BatchSummary {
     /// Total number of tool calls.
-    pub total: usize,
+    total: usize,
     /// Number that require confirmation.
-    pub requires_confirmation: usize,
+    requires_confirmation: usize,
     /// Count by tool name.
-    pub tool_counts: std::collections::HashMap<String, usize>,
+    tool_counts: std::collections::HashMap<String, usize>,
+}
+
+impl BatchSummary {
+    /// Create a new batch summary.
+    pub fn new(
+        total: usize,
+        requires_confirmation: usize,
+        tool_counts: std::collections::HashMap<String, usize>,
+    ) -> Self {
+        Self {
+            total,
+            requires_confirmation,
+            tool_counts,
+        }
+    }
+
+    /// Get the total number of tool calls.
+    pub fn total(&self) -> usize {
+        self.total
+    }
+
+    /// Get the number of calls that require confirmation.
+    pub fn requires_confirmation(&self) -> usize {
+        self.requires_confirmation
+    }
+
+    /// Get the tool counts.
+    pub fn tool_counts(&self) -> &std::collections::HashMap<String, usize> {
+        &self.tool_counts
+    }
 }
 
 impl std::fmt::Display for BatchSummary {
@@ -194,12 +262,9 @@ pub async fn default_batch_confirm<H: ConfirmationHandler + ?Sized>(
     batch: &ToolBatch,
 ) -> BatchApproval {
     for call in batch.confirmation_required() {
-        let message = call
-            .confirmation_message
-            .as_deref()
-            .unwrap_or("Execute tool?");
+        let message = call.confirmation_message().unwrap_or("Execute tool?");
         if !handler
-            .confirm(&call.tool_name, message, &call.arguments)
+            .confirm(call.tool_name(), message, call.arguments())
             .await
         {
             return BatchApproval::Denied;
@@ -219,26 +284,39 @@ mod tests {
     #[test]
     fn test_pending_tool_call() {
         let call = PendingToolCall::new("call-1", "file_read", json!({"path": "/tmp/test.txt"}));
-        assert_eq!(call.call_id, "call-1");
-        assert_eq!(call.tool_name, "file_read");
-        assert!(!call.requires_confirmation);
+        assert_eq!(call.call_id(), "call-1");
+        assert_eq!(call.tool_name(), "file_read");
+        assert!(!call.requires_confirmation());
     }
 
     #[test]
     fn test_pending_tool_call_with_confirmation() {
-        let call = PendingToolCall {
-            call_id: "call-2".into(),
-            tool_name: "file_write".into(),
-            arguments: json!({"path": "/tmp/out.txt", "content": "hello"}),
-            requires_confirmation: true,
-            confirmation_message: Some("Write to /tmp/out.txt?".into()),
-        };
-
-        assert!(call.requires_confirmation);
-        assert_eq!(
-            call.confirmation_message,
-            Some("Write to /tmp/out.txt?".into())
+        let call = make_pending_call_with_confirmation(
+            "call-2",
+            "file_write",
+            json!({"path": "/tmp/out.txt", "content": "hello"}),
+            "Write to /tmp/out.txt?",
         );
+
+        assert!(call.requires_confirmation());
+        assert_eq!(call.confirmation_message(), Some("Write to /tmp/out.txt?"));
+    }
+
+    /// Test helper: create a pending call that requires confirmation.
+    fn make_pending_call_with_confirmation(
+        call_id: &str,
+        tool_name: &str,
+        arguments: Value,
+        message: &str,
+    ) -> PendingToolCall {
+        // Use internal struct construction for test helpers only
+        PendingToolCall {
+            call_id: call_id.into(),
+            tool_name: tool_name.into(),
+            arguments,
+            requires_confirmation: true,
+            confirmation_message: Some(message.into()),
+        }
     }
 
     #[test]
@@ -247,13 +325,12 @@ mod tests {
         assert!(batch.is_empty());
 
         batch.push(PendingToolCall::new("1", "file_read", json!({})));
-        batch.push(PendingToolCall {
-            call_id: "2".into(),
-            tool_name: "file_write".into(),
-            arguments: json!({}),
-            requires_confirmation: true,
-            confirmation_message: Some("Write to file?".into()),
-        });
+        batch.push(make_pending_call_with_confirmation(
+            "2",
+            "file_write",
+            json!({}),
+            "Write to file?",
+        ));
 
         assert_eq!(batch.len(), 2);
         assert!(batch.requires_confirmation());
@@ -288,19 +365,18 @@ mod tests {
         let mut batch = ToolBatch::new();
         batch.push(PendingToolCall::new("1", "file_read", json!({})));
         batch.push(PendingToolCall::new("2", "file_read", json!({})));
-        batch.push(PendingToolCall {
-            call_id: "3".into(),
-            tool_name: "file_write".into(),
-            arguments: json!({}),
-            requires_confirmation: true,
-            confirmation_message: None,
-        });
+        batch.push(make_pending_call_with_confirmation(
+            "3",
+            "file_write",
+            json!({}),
+            "Write file",
+        ));
 
         let summary = batch.summary();
-        assert_eq!(summary.total, 3);
-        assert_eq!(summary.requires_confirmation, 1);
-        assert_eq!(summary.tool_counts.get("file_read"), Some(&2));
-        assert_eq!(summary.tool_counts.get("file_write"), Some(&1));
+        assert_eq!(summary.total(), 3);
+        assert_eq!(summary.requires_confirmation(), 1);
+        assert_eq!(summary.tool_counts().get("file_read"), Some(&2));
+        assert_eq!(summary.tool_counts().get("file_write"), Some(&1));
 
         let text = summary.to_string();
         assert!(text.contains("3 tool call(s)"));
@@ -360,20 +436,18 @@ mod tests {
         let handler = TrackingHandler::new(true);
 
         let mut batch = ToolBatch::new();
-        batch.push(PendingToolCall {
-            call_id: "1".into(),
-            tool_name: "bash".into(),
-            arguments: json!({"command": "ls"}),
-            requires_confirmation: true,
-            confirmation_message: Some("Run: ls".into()),
-        });
-        batch.push(PendingToolCall {
-            call_id: "2".into(),
-            tool_name: "file_write".into(),
-            arguments: json!({}),
-            requires_confirmation: true,
-            confirmation_message: Some("Write file".into()),
-        });
+        batch.push(make_pending_call_with_confirmation(
+            "1",
+            "bash",
+            json!({"command": "ls"}),
+            "Run: ls",
+        ));
+        batch.push(make_pending_call_with_confirmation(
+            "2",
+            "file_write",
+            json!({}),
+            "Write file",
+        ));
 
         let result = handler.confirm_batch(&batch).await;
         assert_eq!(result, BatchApproval::Approved);
@@ -386,20 +460,18 @@ mod tests {
         let handler = TrackingHandler::new(false);
 
         let mut batch = ToolBatch::new();
-        batch.push(PendingToolCall {
-            call_id: "1".into(),
-            tool_name: "bash".into(),
-            arguments: json!({}),
-            requires_confirmation: true,
-            confirmation_message: Some("Run command".into()),
-        });
-        batch.push(PendingToolCall {
-            call_id: "2".into(),
-            tool_name: "file_write".into(),
-            arguments: json!({}),
-            requires_confirmation: true,
-            confirmation_message: Some("Write file".into()),
-        });
+        batch.push(make_pending_call_with_confirmation(
+            "1",
+            "bash",
+            json!({}),
+            "Run command",
+        ));
+        batch.push(make_pending_call_with_confirmation(
+            "2",
+            "file_write",
+            json!({}),
+            "Write file",
+        ));
 
         let result = handler.confirm_batch(&batch).await;
         assert_eq!(result, BatchApproval::Denied);
@@ -414,13 +486,12 @@ mod tests {
 
         let mut batch = ToolBatch::new();
         batch.push(PendingToolCall::new("1", "file_read", json!({}))); // No confirm
-        batch.push(PendingToolCall {
-            call_id: "2".into(),
-            tool_name: "file_write".into(),
-            arguments: json!({}),
-            requires_confirmation: true,
-            confirmation_message: Some("Write file".into()),
-        });
+        batch.push(make_pending_call_with_confirmation(
+            "2",
+            "file_write",
+            json!({}),
+            "Write file",
+        ));
         batch.push(PendingToolCall::new("3", "glob", json!({}))); // No confirm
 
         let result = handler.confirm_batch(&batch).await;
@@ -450,13 +521,12 @@ mod tests {
         let handler = AutoApprove;
 
         let mut batch = ToolBatch::new();
-        batch.push(PendingToolCall {
-            call_id: "1".into(),
-            tool_name: "bash".into(),
-            arguments: json!({}),
-            requires_confirmation: true,
-            confirmation_message: Some("Run command".into()),
-        });
+        batch.push(make_pending_call_with_confirmation(
+            "1",
+            "bash",
+            json!({}),
+            "Run command",
+        ));
 
         let result = handler.confirm_batch(&batch).await;
         assert_eq!(result, BatchApproval::Approved);
@@ -468,13 +538,12 @@ mod tests {
         let handler = AutoDeny;
 
         let mut batch = ToolBatch::new();
-        batch.push(PendingToolCall {
-            call_id: "1".into(),
-            tool_name: "bash".into(),
-            arguments: json!({}),
-            requires_confirmation: true,
-            confirmation_message: Some("Run command".into()),
-        });
+        batch.push(make_pending_call_with_confirmation(
+            "1",
+            "bash",
+            json!({}),
+            "Run command",
+        ));
 
         let result = handler.confirm_batch(&batch).await;
         assert_eq!(result, BatchApproval::Denied);
@@ -529,13 +598,12 @@ mod tests {
         let handler = CustomBatchHandler::new(BatchApproval::Approved, false);
 
         let mut batch = ToolBatch::new();
-        batch.push(PendingToolCall {
-            call_id: "1".into(),
-            tool_name: "bash".into(),
-            arguments: json!({}),
-            requires_confirmation: true,
-            confirmation_message: Some("Run".into()),
-        });
+        batch.push(make_pending_call_with_confirmation(
+            "1",
+            "bash",
+            json!({}),
+            "Run",
+        ));
 
         let result = handler.confirm_batch(&batch).await;
         assert_eq!(result, BatchApproval::Approved);
@@ -548,13 +616,12 @@ mod tests {
         let handler = CustomBatchHandler::new(BatchApproval::Denied, true);
 
         let mut batch = ToolBatch::new();
-        batch.push(PendingToolCall {
-            call_id: "1".into(),
-            tool_name: "bash".into(),
-            arguments: json!({}),
-            requires_confirmation: true,
-            confirmation_message: Some("Run".into()),
-        });
+        batch.push(make_pending_call_with_confirmation(
+            "1",
+            "bash",
+            json!({}),
+            "Run",
+        ));
 
         let result = handler.confirm_batch(&batch).await;
         assert_eq!(result, BatchApproval::Denied);
@@ -566,13 +633,12 @@ mod tests {
         let handler = CustomBatchHandler::new(BatchApproval::ReviewIndividually, true);
 
         let mut batch = ToolBatch::new();
-        batch.push(PendingToolCall {
-            call_id: "1".into(),
-            tool_name: "bash".into(),
-            arguments: json!({}),
-            requires_confirmation: true,
-            confirmation_message: Some("Run".into()),
-        });
+        batch.push(make_pending_call_with_confirmation(
+            "1",
+            "bash",
+            json!({}),
+            "Run",
+        ));
 
         let result = handler.confirm_batch(&batch).await;
         assert_eq!(result, BatchApproval::ReviewIndividually);
@@ -587,13 +653,12 @@ mod tests {
         let handler: Arc<dyn ConfirmationHandler> = Arc::new(AutoApprove);
 
         let mut batch = ToolBatch::new();
-        batch.push(PendingToolCall {
-            call_id: "1".into(),
-            tool_name: "bash".into(),
-            arguments: json!({}),
-            requires_confirmation: true,
-            confirmation_message: Some("Run".into()),
-        });
+        batch.push(make_pending_call_with_confirmation(
+            "1",
+            "bash",
+            json!({}),
+            "Run",
+        ));
 
         // Deref coercion: Arc<dyn ConfirmationHandler> -> dyn ConfirmationHandler
         // BatchConfirmationHandler is implemented for dyn ConfirmationHandler + Send + Sync

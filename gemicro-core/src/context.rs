@@ -11,13 +11,31 @@ pub const DEFAULT_WARNING_THRESHOLD: f32 = 0.80;
 
 /// Tracks token usage throughout an agent session.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ContextUsage {
     /// Cumulative tokens used so far.
-    pub tokens_used: u32,
+    tokens_used: u32,
     /// Maximum context window size.
-    pub context_window: u32,
+    context_window: u32,
     /// Threshold percentage at which to warn (0.0 to 1.0).
-    pub warning_threshold: f32,
+    warning_threshold: f32,
+}
+
+impl ContextUsage {
+    /// Get cumulative tokens used so far.
+    pub fn tokens_used(&self) -> u32 {
+        self.tokens_used
+    }
+
+    /// Get the context window size.
+    pub fn context_window(&self) -> u32 {
+        self.context_window
+    }
+
+    /// Get the warning threshold (0.0 to 1.0).
+    pub fn warning_threshold(&self) -> f32 {
+        self.warning_threshold
+    }
 }
 
 impl Default for ContextUsage {
@@ -100,7 +118,7 @@ impl ContextUsage {
 }
 
 /// Context usage level.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ContextLevel {
     /// Usage is within normal limits.
     Normal,
@@ -127,8 +145,8 @@ mod tests {
     #[test]
     fn test_default_context_usage() {
         let usage = ContextUsage::default();
-        assert_eq!(usage.tokens_used, 0);
-        assert_eq!(usage.context_window, DEFAULT_CONTEXT_WINDOW);
+        assert_eq!(usage.tokens_used(), 0);
+        assert_eq!(usage.context_window(), DEFAULT_CONTEXT_WINDOW);
         assert_eq!(usage.usage_ratio(), 0.0);
         assert!(!usage.is_warning());
     }
@@ -137,9 +155,9 @@ mod tests {
     fn test_add_tokens() {
         let mut usage = ContextUsage::default();
         usage.add_tokens(100);
-        assert_eq!(usage.tokens_used, 100);
+        assert_eq!(usage.tokens_used(), 100);
         usage.add_tokens(200);
-        assert_eq!(usage.tokens_used, 300);
+        assert_eq!(usage.tokens_used(), 300);
     }
 
     #[test]
@@ -184,8 +202,15 @@ mod tests {
     fn test_saturating_add() {
         let mut usage = ContextUsage::new().with_context_window(100);
         usage.add_tokens(u32::MAX);
-        assert_eq!(usage.tokens_used, u32::MAX);
+        assert_eq!(usage.tokens_used(), u32::MAX);
         usage.add_tokens(1); // Should not overflow
-        assert_eq!(usage.tokens_used, u32::MAX);
+        assert_eq!(usage.tokens_used(), u32::MAX);
+    }
+
+    #[test]
+    fn test_context_level_ordering() {
+        assert!(ContextLevel::Normal < ContextLevel::Warning);
+        assert!(ContextLevel::Warning < ContextLevel::Critical);
+        assert!(ContextLevel::Normal < ContextLevel::Critical);
     }
 }
