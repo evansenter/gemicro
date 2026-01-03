@@ -31,7 +31,12 @@ pub struct DeveloperConfig {
     /// These files (e.g., CLAUDE.md) provide project-specific context that gets
     /// appended to the system prompt. First found file is used.
     ///
-    /// Default: `["./CLAUDE.md", "~/.claude/CLAUDE.md"]`
+    /// Default: `[]` (empty - system prompt is self-contained for tool guidance)
+    ///
+    /// Configure this to load project-specific context when needed:
+    /// ```ignore
+    /// config.with_di_paths(vec![PathBuf::from("./CLAUDE.md")])
+    /// ```
     pub di_paths: Vec<PathBuf>,
 
     /// Maximum iterations (LLM turns) before forcing completion.
@@ -53,12 +58,10 @@ impl Default for DeveloperConfig {
             system_prompt: DEFAULT_SYSTEM_PROMPT.to_string(),
             tool_filter: ToolSet::All,
             timeout: DEFAULT_TIMEOUT,
-            di_paths: vec![
-                PathBuf::from("./CLAUDE.md"),
-                dirs::home_dir()
-                    .map(|h| h.join(".claude/CLAUDE.md"))
-                    .unwrap_or_else(|| PathBuf::from("~/.claude/CLAUDE.md")),
-            ],
+            // Empty by default: the system prompt is self-contained for tool guidance.
+            // Users can configure di_paths to load project-specific context (e.g., CLAUDE.md)
+            // when needed. This avoids loading unrelated context meant for human users.
+            di_paths: vec![],
             max_iterations: 50,
             approval_batching: true,
         }
