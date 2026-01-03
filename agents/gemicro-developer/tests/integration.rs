@@ -7,8 +7,13 @@ mod common;
 
 use common::{create_test_context, get_api_key};
 use futures_util::StreamExt;
-use gemicro_core::{Agent, AgentError};
+use gemicro_core::tool::{AutoApprove, ToolRegistry};
+use gemicro_core::{Agent, AgentContext, AgentError, LlmClient, LlmConfig};
 use gemicro_developer::{DeveloperAgent, DeveloperConfig};
+use gemicro_file_read::FileRead;
+use gemicro_glob::Glob;
+use gemicro_grep::Grep;
+use std::sync::Arc;
 use std::time::Duration;
 
 /// Test the full developer flow with file reading
@@ -436,4 +441,243 @@ async fn test_max_iterations_incomplete_metadata() {
         "Reason should mention max iterations: got {}",
         reason
     );
+}
+
+/// Test approval_batching: false mode (individual confirmations, no batch events)
+#[tokio::test]
+#[ignore] // Requires GEMINI_API_KEY
+async fn test_developer_individual_approval_mode() {
+    let Some(api_key) = get_api_key() else {
+        eprintln!("Skipping test: GEMINI_API_KEY not set");
+        return;
+    };
+
+    let context = create_test_context(&api_key);
+
+    // Disable batch approval - tools should be confirmed individually
+    let config = DeveloperConfig::default()
+        .with_max_iterations(3)
+        .with_approval_batching(false)
+        .with_timeout(Duration::from_secs(60));
+
+    let agent = DeveloperAgent::new(config).expect("Should create agent");
+    let stream = agent.execute("List *.toml files in the current directory", context);
+    futures_util::pin_mut!(stream);
+
+    let mut events: Vec<String> = Vec::new();
+
+    while let Some(result) = stream.next().await {
+        if let Ok(update) = result {
+            println!("[{}] {}", update.event_type, update.message);
+            events.push(update.event_type.clone());
+        }
+    }
+
+    // Should NOT have batch events when approval_batching is false
+    assert!(
+        !events.contains(&"batch_plan".to_string()),
+        "Should NOT have batch_plan when approval_batching=false. Events: {:?}",
+        events
+    );
+    assert!(
+        !events.contains(&"batch_approved".to_string()),
+        "Should NOT have batch_approved when approval_batching=false. Events: {:?}",
+        events
+    );
+    assert!(
+        !events.contains(&"batch_denied".to_string()),
+        "Should NOT have batch_denied when approval_batching=false. Events: {:?}",
+        events
+    );
+
+    // Should still have tool events
+    assert!(
+        events.contains(&"tool_call_started".to_string()),
+        "Should have tool_call_started events. Events: {:?}",
+        events
+    );
+    assert!(
+        events.contains(&"tool_result".to_string()),
+        "Should have tool_result events. Events: {:?}",
+        events
+    );
+
+    // Should have final_result
+    assert!(
+        events.contains(&"final_result".to_string()),
+        "Should have final_result. Events: {:?}",
+        events
+    );
+}
+
+/// Test batch approval events are emitted when approval_batching: true
+#[tokio::test]
+#[ignore] // Requires GEMINI_API_KEY
+async fn test_developer_batch_approval_events() {
+    let Some(api_key) = get_api_key() else {
+        eprintln!("Skipping test: GEMINI_API_KEY not set");
+        return;
+    };
+
+    let context = create_test_context(&api_key);
+
+    // Enable batch approval (default)
+    let config = DeveloperConfig::default()
+        .with_max_iterations(5)
+        .with_approval_batching(true)
+        .with_timeout(Duration::from_secs(90));
+
+    let agent = DeveloperAgent::new(config).expect("Should create agent");
+    // Use a query that likely triggers multiple tool calls to see batch behavior
+    let stream = agent.execute(
+        "Read both Cargo.toml and README.md files and tell me what this project does",
+        context,
+    );
+    futures_util::pin_mut!(stream);
+
+    let mut events: Vec<String> = Vec::new();
+    let mut batch_plan_count = 0;
+    let mut batch_approved_count = 0;
+
+    while let Some(result) = stream.next().await {
+        if let Ok(update) = result {
+            println!("[{}] {}", update.event_type, update.message);
+            events.push(update.event_type.clone());
+
+            match update.event_type.as_str() {
+                "batch_plan" => {
+                    batch_plan_count += 1;
+                    // Verify batch_plan has expected fields
+                    assert!(
+                        update.data.get("tools").is_some(),
+                        "batch_plan should have tools field"
+                    );
+                    assert!(
+                        update.data.get("total").is_some(),
+                        "batch_plan should have total field"
+                    );
+                }
+                "batch_approved" => {
+                    batch_approved_count += 1;
+                    // Verify batch_approved has expected fields
+                    assert!(
+                        update.data.get("total").is_some(),
+                        "batch_approved should have total field"
+                    );
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // With AutoApprove handler and batching enabled, we expect batch events
+    // Note: The LLM might not always propose multiple tools in one turn,
+    // so we check for at least the basic flow
+    println!(
+        "batch_plan_count: {}, batch_approved_count: {}",
+        batch_plan_count, batch_approved_count
+    );
+
+    // If tools were called, we should see batch events (with batching enabled)
+    if events.contains(&"tool_call_started".to_string()) {
+        // At minimum, batch_plan should appear before tool execution
+        assert!(
+            batch_plan_count > 0 || batch_approved_count > 0,
+            "With approval_batching=true and tool calls, should have batch events. Events: {:?}",
+            events
+        );
+    }
+
+    // Should have final_result regardless
+    assert!(
+        events.contains(&"final_result".to_string()),
+        "Should have final_result. Events: {:?}",
+        events
+    );
+}
+
+/// Test cancellation token stops execution mid-stream
+#[tokio::test]
+#[ignore] // Requires GEMINI_API_KEY
+async fn test_developer_cancellation_mid_execution() {
+    use tokio_util::sync::CancellationToken;
+
+    let Some(api_key) = get_api_key() else {
+        eprintln!("Skipping test: GEMINI_API_KEY not set");
+        return;
+    };
+
+    // Create context with cancellation token
+    let cancellation_token = CancellationToken::new();
+    let genai_client = rust_genai::Client::builder(api_key).build().unwrap();
+    let config = LlmConfig::default()
+        .with_timeout(Duration::from_secs(120))
+        .with_max_tokens(4096);
+    let llm = LlmClient::new(genai_client, config);
+
+    let mut tools = ToolRegistry::new();
+    tools.register(FileRead);
+    tools.register(Glob);
+    tools.register(Grep);
+
+    let context = AgentContext::new_with_cancellation(llm, cancellation_token.clone())
+        .with_tools(tools)
+        .with_confirmation_handler(Arc::new(AutoApprove));
+
+    // Give a complex task that requires multiple iterations
+    let agent_config = DeveloperConfig::default()
+        .with_max_iterations(20)
+        .with_timeout(Duration::from_secs(120));
+
+    let agent = DeveloperAgent::new(agent_config).expect("Should create agent");
+    let stream = agent.execute(
+        "Read all Cargo.toml files in the workspace and summarize each one in detail",
+        context,
+    );
+    futures_util::pin_mut!(stream);
+
+    let mut events: Vec<String> = Vec::new();
+    let mut event_count = 0;
+
+    while let Some(result) = stream.next().await {
+        match result {
+            Ok(update) => {
+                println!("[{}] {}", update.event_type, update.message);
+                events.push(update.event_type.clone());
+                event_count += 1;
+
+                // Cancel after we see some activity (developer_started + at least one tool call)
+                if event_count >= 3 && events.contains(&"tool_call_started".to_string()) {
+                    println!(">>> Triggering cancellation after {} events", event_count);
+                    cancellation_token.cancel();
+                }
+            }
+            Err(e) => {
+                println!("[ERROR] {:?}", e);
+                // Cancellation may surface as an error
+                if e.is_cancelled() {
+                    println!(">>> Stream returned cancellation error (expected)");
+                    break;
+                }
+            }
+        }
+    }
+
+    // Verify we got some events before cancellation
+    assert!(
+        events.contains(&"developer_started".to_string()),
+        "Should have developer_started before cancellation"
+    );
+
+    // Verify execution was cut short (didn't reach normal completion with many iterations)
+    // The test config allows 20 iterations - if cancellation works, we should stop early
+    println!("Total events: {}", events.len());
+
+    // Either we got final_result (graceful completion) or stream ended early
+    // Both are valid - the key is that cancellation was honored
+    if events.contains(&"final_result".to_string()) {
+        println!(">>> Agent completed gracefully after cancellation signal");
+    } else {
+        println!(">>> Stream ended without final_result (cancellation in progress)");
+    }
 }

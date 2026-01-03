@@ -304,4 +304,88 @@ mod tests {
         let id2 = next_tool_id();
         assert!(id2 > id1, "Tool IDs should increment");
     }
+
+    #[test]
+    fn test_tool_id_correlation_store_retrieve() {
+        // Test that store_tool_id and retrieve_tool_id work correctly
+        let call1 = ToolCall::new("tool_a", json!({"arg": "value1"}));
+        let call2 = ToolCall::new("tool_b", json!({"arg": "value2"}));
+        let call3 = ToolCall::new("tool_c", json!({"arg": "value3"}));
+
+        // Store IDs for multiple concurrent calls (simulating parallel intercept())
+        store_tool_id(&call1, 100);
+        store_tool_id(&call2, 101);
+        store_tool_id(&call3, 102);
+
+        // Retrieve in different order (simulating observe() completing out of order)
+        let id2 = retrieve_tool_id(&call2);
+        let id1 = retrieve_tool_id(&call1);
+        let id3 = retrieve_tool_id(&call3);
+
+        // Each should get back its correct ID
+        assert_eq!(id1, 100, "call1 should retrieve ID 100");
+        assert_eq!(id2, 101, "call2 should retrieve ID 101");
+        assert_eq!(id3, 102, "call3 should retrieve ID 102");
+    }
+
+    #[test]
+    fn test_tool_id_correlation_cleanup() {
+        // Test that retrieve_tool_id removes the entry from the map
+        let call = ToolCall::new("cleanup_test", json!({}));
+        let stored_id = 99999; // Use a distinctive ID
+
+        store_tool_id(&call, stored_id);
+
+        // Verify the entry exists in the map
+        let key = &call as *const ToolCall as usize;
+        {
+            let map = tool_id_map().read().unwrap();
+            assert!(
+                map.contains_key(&key),
+                "Entry should exist before retrieval"
+            );
+        }
+
+        // First retrieval should get the stored ID and remove it
+        let retrieved = retrieve_tool_id(&call);
+        assert_eq!(retrieved, stored_id, "Should retrieve the stored ID");
+
+        // Verify the entry was removed from the map
+        {
+            let map = tool_id_map().read().unwrap();
+            assert!(
+                !map.contains_key(&key),
+                "Entry should be removed after retrieval"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_intercept_observe_correlation() {
+        // Test full intercept -> observe flow for multiple concurrent calls
+        let interceptor = AuditLog;
+
+        // Create multiple tool calls
+        let calls: Vec<ToolCall> = (0..5)
+            .map(|i| ToolCall::new(&format!("concurrent_tool_{}", i), json!({"index": i})))
+            .collect();
+
+        // Intercept all (simulating parallel tool execution start)
+        for call in &calls {
+            let decision = interceptor.intercept(call).await.unwrap();
+            assert_eq!(decision, InterceptDecision::Allow);
+        }
+
+        // Observe in reverse order (simulating out-of-order completion)
+        for call in calls.iter().rev() {
+            let result = ToolResult::text("completed");
+            let res = interceptor.observe(call, &result).await;
+            assert!(res.is_ok(), "observe should succeed for {}", call.name);
+        }
+
+        // Map should be empty after all retrievals (verify cleanup)
+        // Note: We can't check exact emptiness due to other tests, but the
+        // important thing is the flow completed without panics
+        let _map = tool_id_map().read().unwrap();
+    }
 }
