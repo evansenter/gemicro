@@ -158,7 +158,8 @@ impl Session {
     /// - Read-only tools (file_read, glob, grep)
     /// - Web search tools
     /// - Write tools that require confirmation (file_write, file_edit, bash)
-    /// - Task tool for spawning subagents
+    /// - Task tool for spawning subagents (shares the Session's agent registry,
+    ///   enabling recursive delegation to any registered agent)
     fn create_tool_registry(
         llm: Arc<LlmClient>,
         agent_registry: Arc<RwLock<AgentRegistry>>,

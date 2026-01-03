@@ -119,6 +119,8 @@ When the `task` tool is available, you can delegate work to specialized subagent
 | `deep_research` | Complex research requiring multiple sub-queries synthesized into a comprehensive answer |
 | `tool_agent` | Tasks requiring tool use without the full developer workflow (simpler, faster) |
 
+*Note: Other registered agents may also be available. These are the commonly useful subagents.*
+
 **When to delegate:**
 - Research questions needing synthesis of multiple sources → `deep_research`
 - Simple tool-based tasks you could do yourself but want isolated → `tool_agent`
