@@ -54,7 +54,8 @@ use gemicro_core::{
     LlmError, ResultMetadata, MODEL,
 };
 use rust_genai::{
-    function_result_content, FunctionDeclaration, InteractionContent, OwnedFunctionCallInfo,
+    function_result_content, FunctionDeclaration, InteractionContent, InteractionResponse,
+    OwnedFunctionCallInfo,
 };
 use serde_json::json;
 use std::sync::Arc;
@@ -212,28 +213,35 @@ impl Agent for DeveloperAgent {
                     // Process pending function calls from previous iteration
                     std::mem::take(&mut pending_function_calls)
                 } else {
-                    // No pending calls - make initial LLM request
-                    let mut builder = genai_client
-                        .interaction()
-                        .with_model(MODEL)
-                        .with_system_instruction(&system_prompt)
-                        .with_functions(function_declarations.clone())
-                        .with_store(true);
-
-                    // Add conversation context if we have it
-                    if let Some(prev_id) = &previous_interaction_id {
-                        builder = builder.with_previous_interaction(prev_id);
-                    }
-
-                    // First iteration gets the user query
-                    if iteration == 1 {
-                        builder = builder.with_text(&query);
-                    }
-
-                    let response = builder
-                        .create()
-                        .await
-                        .map_err(|e| AgentError::Llm(LlmError::GenAi(e)))?;
+                    // No pending calls - make LLM request
+                    // Type-state pattern: FirstTurn vs Chained builders are different types
+                    let response: InteractionResponse = match &previous_interaction_id {
+                        Some(prev_id) => {
+                            // Subsequent turns: chain to previous interaction
+                            genai_client
+                                .interaction()
+                                .with_model(MODEL)
+                                .with_functions(function_declarations.clone())
+                                .with_store_enabled()
+                                .with_previous_interaction(prev_id)
+                                .create()
+                                .await
+                                .map_err(|e| AgentError::Llm(LlmError::GenAi(e)))?
+                        }
+                        None => {
+                            // First turn: set system instruction and user query
+                            genai_client
+                                .interaction()
+                                .with_model(MODEL)
+                                .with_system_instruction(&system_prompt)
+                                .with_functions(function_declarations.clone())
+                                .with_store_enabled()
+                                .with_text(&query)
+                                .create()
+                                .await
+                                .map_err(|e| AgentError::Llm(LlmError::GenAi(e)))?
+                        }
+                    };
 
                     let calls = response.function_calls();
 
@@ -341,20 +349,21 @@ impl Agent for DeveloperAgent {
                 // SECTION 2b: Send Results to LLM and Check for More Calls
                 // ─────────────────────────────────────────────────────────────
 
-                let mut result_builder = genai_client
+                // Function result returns don't need tools re-sent - the model already
+                // knows about available tools from the interaction that triggered the call.
+                // System instruction is also inherited from the first turn.
+                // Invariant: we have a previous_interaction_id because we got here by processing
+                // function calls from a prior response.
+                let prev_id = previous_interaction_id
+                    .as_ref()
+                    .expect("invariant: must have previous_interaction_id after processing function calls");
+
+                let follow_up_response: InteractionResponse = genai_client
                     .interaction()
                     .with_model(MODEL)
-                    .with_system_instruction(&system_prompt)
-                    .with_functions(function_declarations.clone())
-                    .with_store(true)
-                    .with_content(function_results);
-
-                if let Some(prev_id) = &previous_interaction_id {
-                    result_builder = result_builder.with_previous_interaction(prev_id);
-                }
-
-                // Make the follow-up call with function results
-                let follow_up_response = result_builder
+                    .with_store_enabled()
+                    .with_previous_interaction(prev_id)
+                    .with_content(function_results)
                     .create()
                     .await
                     .map_err(|e| AgentError::Llm(LlmError::GenAi(e)))?;
