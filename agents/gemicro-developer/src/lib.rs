@@ -241,7 +241,7 @@ impl Agent for DeveloperAgent {
                                 .interaction()
                                 .with_model(MODEL)
                                 .with_functions(function_declarations.clone())
-                                .with_store(true)
+                                .with_store_enabled()
                                 .with_previous_interaction(prev_id)
                                 .create()
                                 .await
@@ -254,7 +254,7 @@ impl Agent for DeveloperAgent {
                                 .with_model(MODEL)
                                 .with_system_instruction(&system_prompt)
                                 .with_functions(function_declarations.clone())
-                                .with_store(true)
+                                .with_store_enabled()
                                 .with_text(&query)
                                 .create()
                                 .await
@@ -375,22 +375,33 @@ impl Agent for DeveloperAgent {
                         .collect();
 
                     // Send denial back to LLM and continue loop
-                    let mut denial_builder = genai_client
-                        .interaction()
-                        .with_model(MODEL)
-                        .with_system_instruction(&system_prompt)
-                        .with_functions(function_declarations.clone())
-                        .with_store(true)
-                        .with_content(denial_results);
-
-                    if let Some(prev_id) = &previous_interaction_id {
-                        denial_builder = denial_builder.with_previous_interaction(prev_id);
-                    }
-
-                    let denial_response = denial_builder
-                        .create()
-                        .await
-                        .map_err(|e| AgentError::Llm(LlmError::GenAi(e)))?;
+                    // Type-state pattern: with_previous_interaction changes builder type
+                    let denial_response: InteractionResponse = match &previous_interaction_id {
+                        Some(prev_id) => {
+                            genai_client
+                                .interaction()
+                                .with_model(MODEL)
+                                .with_functions(function_declarations.clone())
+                                .with_store_enabled()
+                                .with_previous_interaction(prev_id)
+                                .with_content(denial_results)
+                                .create()
+                                .await
+                                .map_err(|e| AgentError::Llm(LlmError::GenAi(e)))?
+                        }
+                        None => {
+                            genai_client
+                                .interaction()
+                                .with_model(MODEL)
+                                .with_system_instruction(&system_prompt)
+                                .with_functions(function_declarations.clone())
+                                .with_store_enabled()
+                                .with_content(denial_results)
+                                .create()
+                                .await
+                                .map_err(|e| AgentError::Llm(LlmError::GenAi(e)))?
+                        }
+                    };
 
                     // Track context usage
                     if let Some(tokens) = gemicro_core::extract_total_tokens(&denial_response) {
@@ -532,7 +543,7 @@ impl Agent for DeveloperAgent {
                 let follow_up_response: InteractionResponse = genai_client
                     .interaction()
                     .with_model(MODEL)
-                    .with_store(true)
+                    .with_store_enabled()
                     .with_previous_interaction(prev_id)
                     .with_content(function_results)
                     .create()
