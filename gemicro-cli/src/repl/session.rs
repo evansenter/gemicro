@@ -842,7 +842,9 @@ mod tests {
     #[test]
     fn test_session_stale_detection_fresh() {
         // A fresh session should not be stale
-        let genai_client = rust_genai::Client::builder("test-key".to_string()).build();
+        let genai_client = rust_genai::Client::builder("test-key".to_string())
+            .build()
+            .unwrap();
         let llm = LlmClient::new(genai_client, LlmConfig::default());
         let session = Session::new(llm, false);
 
@@ -852,7 +854,9 @@ mod tests {
 
     #[test]
     fn test_session_initial_token_count() {
-        let genai_client = rust_genai::Client::builder("test-key".to_string()).build();
+        let genai_client = rust_genai::Client::builder("test-key".to_string())
+            .build()
+            .unwrap();
         let llm = LlmClient::new(genai_client, LlmConfig::default());
         let session = Session::new(llm, false);
 
@@ -979,7 +983,9 @@ mod tests {
         let cancel_token_clone = cancellation_token.clone();
 
         // Create agent context
-        let genai_client = rust_genai::Client::builder("test-key".to_string()).build();
+        let genai_client = rust_genai::Client::builder("test-key".to_string())
+            .build()
+            .unwrap();
         let llm = LlmClient::new(genai_client, LlmConfig::default());
         let context = AgentContext::new_with_cancellation(llm, cancellation_token);
 
@@ -1074,7 +1080,9 @@ mod tests {
         }
 
         // Execute the stream
-        let genai_client = rust_genai::Client::builder("test-key".to_string()).build();
+        let genai_client = rust_genai::Client::builder("test-key".to_string())
+            .build()
+            .unwrap();
         let llm = LlmClient::new(genai_client, LlmConfig::default());
         let context = AgentContext::new(llm);
 
@@ -1123,7 +1131,9 @@ mod tests {
         let cancellation_token = CancellationToken::new();
         let cancel_token_clone = cancellation_token.clone();
 
-        let genai_client = rust_genai::Client::builder("test-key".to_string()).build();
+        let genai_client = rust_genai::Client::builder("test-key".to_string())
+            .build()
+            .unwrap();
         let llm = LlmClient::new(genai_client, LlmConfig::default());
         let context = AgentContext::new_with_cancellation(llm, cancellation_token);
 
@@ -1239,7 +1249,9 @@ mod tests {
         let cancellation_token = CancellationToken::new();
         cancellation_token.cancel();
 
-        let genai_client = rust_genai::Client::builder("test-key".to_string()).build();
+        let genai_client = rust_genai::Client::builder("test-key".to_string())
+            .build()
+            .unwrap();
         let llm = LlmClient::new(genai_client, LlmConfig::default());
         let context = AgentContext::new_with_cancellation(llm, cancellation_token);
 
@@ -1276,7 +1288,9 @@ mod tests {
     async fn test_normal_completion_without_cancellation() {
         let mock_agent = MockCancellableAgent::new(3);
 
-        let genai_client = rust_genai::Client::builder("test-key".to_string()).build();
+        let genai_client = rust_genai::Client::builder("test-key".to_string())
+            .build()
+            .unwrap();
         let llm = LlmClient::new(genai_client, LlmConfig::default());
         let context = AgentContext::new(llm);
 

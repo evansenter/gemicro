@@ -41,7 +41,7 @@ pub const DEFAULT_MAX_DEPTH: usize = 3;
 /// use std::sync::Arc;
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let genai_client = rust_genai::Client::builder("api-key".to_string()).build();
+/// let genai_client = rust_genai::Client::builder("api-key".to_string()).build()?;
 /// let llm = LlmClient::new(genai_client, LlmConfig::default());
 /// let registry = Arc::new(AgentRegistry::new());
 /// let task = Task::new(registry, Arc::new(llm));
@@ -628,7 +628,9 @@ mod tests {
     }
 
     fn create_test_llm() -> Arc<LlmClient> {
-        let genai_client = rust_genai::Client::builder("test-key".to_string()).build();
+        let genai_client = rust_genai::Client::builder("test-key".to_string())
+            .build()
+            .unwrap();
         Arc::new(LlmClient::new(
             genai_client,
             gemicro_core::LlmConfig::default(),

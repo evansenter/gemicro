@@ -24,7 +24,7 @@
 //! use futures_util::StreamExt;
 //!
 //! # async fn example() -> Result<(), gemicro_core::AgentError> {
-//! let genai_client = rust_genai::Client::builder("your-api-key".to_string()).build();
+//! # let genai_client = rust_genai::Client::builder("your-api-key".to_string()).build().unwrap();
 //! let llm = LlmClient::new(genai_client, LlmConfig::default());
 //! let context = AgentContext::new(llm);
 //!
