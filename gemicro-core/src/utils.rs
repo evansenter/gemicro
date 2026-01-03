@@ -28,9 +28,7 @@ use rust_genai::InteractionResponse;
 /// ```
 pub fn extract_total_tokens(response: &InteractionResponse) -> Option<u32> {
     // Delegate to rust-genai's native method, converting i32 to u32
-    response
-        .total_tokens()
-        .and_then(|t| u32::try_from(t).ok())
+    response.total_tokens().and_then(|t| u32::try_from(t).ok())
 }
 
 /// Truncate text to a maximum character count, adding ellipsis if needed.
