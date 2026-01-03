@@ -23,6 +23,10 @@ gemicro-file-read = { path = "../../tools/gemicro-file-read" }
 gemicro-glob = { path = "../../tools/gemicro-glob" }
 gemicro-grep = { path = "../../tools/gemicro-grep" }
 gemicro-bash = { path = "../../tools/gemicro-bash" }
+gemicro-task = { path = "../../tools/gemicro-task" }
+gemicro-runner = { path = "../../gemicro-runner" }
+gemicro-deep-research = { path = "../gemicro-deep-research" }
+gemicro-tool-agent = { path = "../gemicro-tool-agent" }
 tokio-util = { workspace = true }
 textwrap = "0.16"
 async-trait = { workspace = true }
