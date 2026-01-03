@@ -367,7 +367,7 @@ mod tests {
 
         // Create multiple tool calls
         let calls: Vec<ToolCall> = (0..5)
-            .map(|i| ToolCall::new(&format!("concurrent_tool_{}", i), json!({"index": i})))
+            .map(|i| ToolCall::new(format!("concurrent_tool_{i}"), json!({"index": i})))
             .collect();
 
         // Intercept all (simulating parallel tool execution start)
