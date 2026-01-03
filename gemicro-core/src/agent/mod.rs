@@ -67,7 +67,7 @@ pub use subagent::{SubagentConfig, DEFAULT_SUBAGENT_TIMEOUT_SECS};
 
 use crate::error::AgentError;
 use crate::llm::LlmClient;
-use crate::tool::{ConfirmationHandler, Tool, ToolRegistry};
+use crate::tool::{BatchConfirmationHandler, Tool, ToolRegistry};
 use crate::tracking::ExecutionTracking;
 use crate::update::AgentUpdate;
 
@@ -194,8 +194,11 @@ pub struct AgentContext {
     /// will call this handler before execution. If the handler returns `false`,
     /// the tool invocation is denied.
     ///
+    /// Supports batch confirmations via [`BatchConfirmationHandler::confirm_batch`]
+    /// for agents that present multiple tool calls at once for approval.
+    ///
     /// If not set, tools requiring confirmation will be denied by default.
-    pub confirmation_handler: Option<Arc<dyn ConfirmationHandler>>,
+    pub confirmation_handler: Option<Arc<dyn BatchConfirmationHandler>>,
 
     /// Execution context for tracking parent-child agent relationships.
     ///
@@ -277,8 +280,9 @@ impl AgentContext {
     /// Add a confirmation handler for tools that require user approval.
     ///
     /// Tools that return `true` from [`Tool::requires_confirmation`] will
-    /// call this handler before execution.
-    pub fn with_confirmation_handler(mut self, handler: Arc<dyn ConfirmationHandler>) -> Self {
+    /// call this handler before execution. Handlers also support batch approval
+    /// via [`BatchConfirmationHandler::confirm_batch`].
+    pub fn with_confirmation_handler(mut self, handler: Arc<dyn BatchConfirmationHandler>) -> Self {
         self.confirmation_handler = Some(handler);
         self
     }
@@ -697,7 +701,7 @@ mod tests {
         assert_eq!(collected.len(), 3);
         assert!(collected[0].as_ref().unwrap().event_type == "step_1");
         assert!(collected[1].as_ref().unwrap().event_type == "step_2");
-        assert!(collected[2].as_ref().unwrap().event_type == "final_result");
+        assert!(collected[2].as_ref().unwrap().is_final_result());
     }
 
     /// Verifies that events after final_result still pass through (with warning logged).
@@ -787,7 +791,7 @@ mod tests {
         }
 
         assert_eq!(collected.len(), 1);
-        assert!(collected[0].as_ref().unwrap().event_type == "final_result");
+        assert!(collected[0].as_ref().unwrap().is_final_result());
     }
 
     /// Verifies the EVENT_FINAL_RESULT constant matches the expected value.
@@ -829,9 +833,9 @@ mod tests {
         // All events should still pass through (graceful degradation)
         assert_eq!(collected.len(), 4);
         assert!(collected[0].as_ref().unwrap().event_type == "step_1");
-        assert!(collected[1].as_ref().unwrap().event_type == "final_result");
-        assert!(collected[2].as_ref().unwrap().event_type == "final_result");
-        assert!(collected[3].as_ref().unwrap().event_type == "final_result");
+        assert!(collected[1].as_ref().unwrap().is_final_result());
+        assert!(collected[2].as_ref().unwrap().is_final_result());
+        assert!(collected[3].as_ref().unwrap().is_final_result());
         // Note: Warnings are logged for collected[2] and collected[3] but we can't easily verify logs
     }
 

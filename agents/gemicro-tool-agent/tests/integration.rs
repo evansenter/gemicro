@@ -48,7 +48,7 @@ async fn test_tool_agent_calculator() {
                     tool_complete_data = Some(update.data.clone());
                 }
 
-                if update.event_type == "final_result" {
+                if update.is_final_result() {
                     if let Some(result) = update.as_final_result() {
                         final_answer = result.result.as_str().unwrap_or("").to_string();
                     }
@@ -159,7 +159,7 @@ async fn test_tool_agent_complex_math() {
         match result {
             Ok(update) => {
                 println!("[{}] {}", update.event_type, update.message);
-                if update.event_type == "final_result" {
+                if update.is_final_result() {
                     if let Some(result) = update.as_final_result() {
                         final_answer = result.result.as_str().unwrap_or("").to_string();
                     }
@@ -207,7 +207,7 @@ async fn test_tool_agent_current_datetime() {
         match result {
             Ok(update) => {
                 println!("[{}] {}", update.event_type, update.message);
-                if update.event_type == "final_result" {
+                if update.is_final_result() {
                     if let Some(result) = update.as_final_result() {
                         final_answer = result.result.as_str().unwrap_or("").to_string();
                     }
@@ -250,7 +250,7 @@ async fn test_tool_agent_multiple_tools() {
         match result {
             Ok(update) => {
                 println!("[{}] {}", update.event_type, update.message);
-                if update.event_type == "final_result" {
+                if update.is_final_result() {
                     if let Some(result) = update.as_final_result() {
                         final_answer = result.result.as_str().unwrap_or("").to_string();
                     }
@@ -324,7 +324,9 @@ async fn test_streaming_function_calling_with_hooks() {
         .with_confirmation_handler(confirmation);
 
     // Create streaming interaction
-    let genai_client = rust_genai::Client::builder(api_key.to_string()).build();
+    let genai_client = rust_genai::Client::builder(api_key.to_string())
+        .build()
+        .unwrap();
     let mut stream = genai_client
         .interaction()
         .with_model(MODEL)

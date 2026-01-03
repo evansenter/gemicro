@@ -6,9 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Gemicro is a CLI agent exploration platform for experimenting with AI agent implementation patterns, powered by the Gemini API via the rust-genai library.
 
-**Key Architecture**: 24-crate workspace with layered dependencies (5 agent crates in `agents/`, 10 tool crates in `tools/`, 5 hook crates in `hooks/`)
+**Key Architecture**: 24-crate workspace with layered dependencies (6 agent crates in `agents/`, 10 tool crates in `tools/`, 5 hook crates in `hooks/`)
 
 **Current Status**: Core implementation complete. Remaining work tracked in [GitHub Issues](https://github.com/evansenter/gemicro/issues).
+
+**README Maintenance**: When adding new cross-cutting features (observability, error handling, security, etc.), update the "Cross-Cutting Concerns" table in `README.md` to document what Gemicro provides vs DIY approaches.
 
 ## Versioning Philosophy
 
@@ -56,6 +58,16 @@ cargo run -p gemicro-deep-research --example deep_research
 ```bash
 export GEMINI_API_KEY="your-api-key"  # Required for integration tests and examples
 ```
+
+### Debugging rust-genai
+
+```bash
+# Enable LOUD_WIRE to see full HTTP request/response bodies for Gemini API calls
+# Useful for debugging tool declarations, system instructions, and model responses
+LOUD_WIRE=1 cargo run -p gemicro-developer --example developer
+```
+
+For application-level tool debugging, `gemicro-audit-log` provides structured logging of tool calls and results without the low-level HTTP traffic. Use both together: LOUD_WIRE for API-level issues, AuditLog for tool execution flow.
 
 ## CLI Quick Reference
 

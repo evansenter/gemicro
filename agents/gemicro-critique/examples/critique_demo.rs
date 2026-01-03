@@ -10,17 +10,18 @@
 //! Run with:
 //!   GEMINI_API_KEY=your_key cargo run -p gemicro-critique --example critique_demo
 
-use futures_util::StreamExt;
 use gemicro_core::{AgentContext, LlmClient, LlmConfig};
 use gemicro_critique::{
-    CritiqueAgent, CritiqueConfig, CritiqueContext, CritiqueCriteria, CritiqueInput,
-    CritiqueVerdict,
+    CritiqueAgent, CritiqueConfig, CritiqueContext, CritiqueCriteria, CritiqueFinding,
+    CritiqueInput, CritiqueVerdict,
 };
 use std::env;
 use std::time::Duration;
 
 fn create_llm_client(api_key: &str) -> LlmClient {
-    let genai_client = rust_genai::Client::builder(api_key.to_string()).build();
+    let genai_client = rust_genai::Client::builder(api_key.to_string())
+        .build()
+        .unwrap();
     LlmClient::new(
         genai_client,
         LlmConfig::default()
@@ -72,11 +73,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
 
         print!("  {} ... ", description);
-        let result = run_critique(&agent, &input, context).await?;
+        let output = agent.critique(&input, context).await?;
         println!(
             "{} (confidence: {:.0}%)",
-            verdict_icon(result.verdict),
-            result.confidence * 100.0
+            verdict_display(output.verdict),
+            output.confidence * 100.0
         );
     }
     println!();
@@ -119,14 +120,14 @@ fn hash_password(password: &str) -> String {
             .with_criteria(CritiqueCriteria::Specification { spec: spec.into() });
 
         print!("  {} ... ", description);
-        let result = run_critique(&agent, &input, context).await?;
+        let output = agent.critique(&input, context).await?;
         println!(
             "{} (retry: {})",
-            verdict_icon(result.verdict),
-            if result.should_retry { "yes" } else { "no" }
+            verdict_display(output.verdict),
+            if output.should_retry { "yes" } else { "no" }
         );
-        if !result.suggestions.is_empty() {
-            println!("    Suggestions: {}", result.suggestions.join("; "));
+        if !output.suggestions.is_empty() {
+            println!("    Suggestions: {}", output.suggestions.join("; "));
         }
     }
     println!();
@@ -161,15 +162,13 @@ fn hash_password(password: &str) -> String {
         .with_criteria(CritiqueCriteria::Checklist { items: checklist });
 
     print!("  API response validation ... ");
-    let result = run_critique(&agent, &input, context).await?;
+    let output = agent.critique(&input, context).await?;
     println!(
         "{} ({} findings)",
-        verdict_icon(result.verdict),
-        result.findings.len()
+        verdict_display(output.verdict),
+        output.findings.len()
     );
-    for finding in &result.findings {
-        println!("    - [{}] {}", finding.severity, finding.issue);
-    }
+    print_findings(&output.findings);
     println!();
 
     // ============================================================
@@ -204,14 +203,9 @@ Rust Code Conventions:
         });
 
     print!("  Code style review ... ");
-    let result = run_critique(&agent, &input, context).await?;
-    println!("{}", verdict_icon(result.verdict));
-    for finding in &result.findings {
-        println!("    - [{}] {}", finding.severity, finding.issue);
-        if let Some(suggestion) = &finding.suggestion {
-            println!("      Fix: {}", suggestion);
-        }
-    }
+    let output = agent.critique(&input, context).await?;
+    println!("{}", verdict_display(output.verdict));
+    print_findings(&output.findings);
     println!();
 
     // ============================================================
@@ -235,13 +229,34 @@ Rust Code Conventions:
     });
 
     print!("  Essay evaluation ... ");
-    let result = run_critique(&agent, &input, context).await?;
-    println!("{}", verdict_icon(result.verdict));
-    if !result.suggestions.is_empty() {
-        for suggestion in &result.suggestions {
+    let output = agent.critique(&input, context).await?;
+    println!("{}", verdict_display(output.verdict));
+    if !output.suggestions.is_empty() {
+        for suggestion in &output.suggestions {
             println!("    - {}", suggestion);
         }
     }
+    println!();
+
+    // ============================================================
+    // Demo 6: Using Convenience Methods
+    // ============================================================
+    println!("------------------------------------------------------------");
+    println!("6. CONVENIENCE METHODS");
+    println!("   (Using is_passing() and to_score())");
+    println!("------------------------------------------------------------");
+    println!();
+
+    let context = AgentContext::new(create_llm_client(&api_key));
+    let input = CritiqueInput::new("42").with_criteria(CritiqueCriteria::GroundTruth {
+        expected: "The answer is 42".into(),
+    });
+
+    let output = agent.critique(&input, context).await?;
+    println!("  Verdict: {}", output.verdict);
+    println!("  is_passing(): {}", output.verdict.is_passing());
+    println!("  to_score(): {:.2}", output.verdict.to_score());
+    println!("  output.to_score(): {:.2}", output.to_score());
     println!();
 
     println!("============================================================");
@@ -251,84 +266,16 @@ Rust Code Conventions:
     Ok(())
 }
 
-/// Run critique and extract result
-async fn run_critique(
-    agent: &CritiqueAgent,
-    input: &CritiqueInput,
-    context: AgentContext,
-) -> Result<CritiqueResult, Box<dyn std::error::Error>> {
-    use gemicro_core::Agent;
-
-    let stream = agent.execute(&input.to_query(), context);
-    futures_util::pin_mut!(stream);
-
-    let mut result = CritiqueResult::default();
-
-    while let Some(update) = stream.next().await {
-        let update = update?;
-        if update.event_type == "critique_result" {
-            result.verdict = match update.data["verdict"].as_str() {
-                Some("Pass") => CritiqueVerdict::Pass,
-                Some("PassWithWarnings") => CritiqueVerdict::PassWithWarnings,
-                Some("NeedsRevision") => CritiqueVerdict::NeedsRevision,
-                Some("Reject") => CritiqueVerdict::Reject,
-                _ => CritiqueVerdict::Reject,
-            };
-            result.confidence = update.data["confidence"].as_f64().unwrap_or(0.0) as f32;
-            result.should_retry = update.data["should_retry"].as_bool().unwrap_or(false);
-        } else if update.event_type == "final_result" {
-            // Parse full output from final_result
-            if let Some(answer) = update.data.get("answer") {
-                if let Some(findings) = answer.get("findings").and_then(|f| f.as_array()) {
-                    for f in findings {
-                        result.findings.push(Finding {
-                            issue: f["issue"].as_str().unwrap_or("").to_string(),
-                            severity: f["severity"].as_str().unwrap_or("Info").to_string(),
-                            suggestion: f["suggestion"].as_str().map(String::from),
-                        });
-                    }
-                }
-                if let Some(suggestions) = answer.get("suggestions").and_then(|s| s.as_array()) {
-                    for s in suggestions {
-                        if let Some(text) = s.as_str() {
-                            result.suggestions.push(text.to_string());
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    Ok(result)
-}
-
-struct CritiqueResult {
-    verdict: CritiqueVerdict,
-    confidence: f32,
-    should_retry: bool,
-    findings: Vec<Finding>,
-    suggestions: Vec<String>,
-}
-
-impl Default for CritiqueResult {
-    fn default() -> Self {
-        Self {
-            verdict: CritiqueVerdict::Reject, // Default to most conservative
-            confidence: 0.0,
-            should_retry: false,
-            findings: Vec::new(),
-            suggestions: Vec::new(),
+fn print_findings(findings: &[CritiqueFinding]) {
+    for finding in findings {
+        println!("    - [{}] {}", finding.severity, finding.issue);
+        if let Some(suggestion) = &finding.suggestion {
+            println!("      Fix: {}", suggestion);
         }
     }
 }
 
-struct Finding {
-    issue: String,
-    severity: String,
-    suggestion: Option<String>,
-}
-
-fn verdict_icon(verdict: CritiqueVerdict) -> &'static str {
+fn verdict_display(verdict: CritiqueVerdict) -> &'static str {
     match verdict {
         CritiqueVerdict::Pass => "PASS",
         CritiqueVerdict::PassWithWarnings => "PASS (warnings)",

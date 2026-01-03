@@ -34,7 +34,7 @@
 //! - LLM function calling (the primary use case) goes through the adapter
 //! - Interceptors are opt-in via `with_interceptors()` builder method
 
-use super::{ConfirmationHandler, Tool, ToolError, ToolResult};
+use super::{BatchConfirmationHandler, Tool, ToolError, ToolResult};
 use crate::interceptor::{InterceptDecision, InterceptorChain, ToolCall};
 use async_trait::async_trait;
 use rust_genai::{CallableFunction, FunctionDeclaration, FunctionError};
@@ -80,7 +80,7 @@ use std::sync::Arc;
 #[non_exhaustive]
 pub struct ToolCallableAdapter {
     tool: Arc<dyn Tool>,
-    confirmation_handler: Option<Arc<dyn ConfirmationHandler>>,
+    confirmation_handler: Option<Arc<dyn BatchConfirmationHandler>>,
     interceptors: Option<Arc<InterceptorChain<ToolCall, ToolResult>>>,
 }
 
@@ -114,7 +114,7 @@ impl ToolCallableAdapter {
     ///     .with_confirmation_handler(Arc::new(AutoApprove));
     /// # }
     /// ```
-    pub fn with_confirmation_handler(mut self, handler: Arc<dyn ConfirmationHandler>) -> Self {
+    pub fn with_confirmation_handler(mut self, handler: Arc<dyn BatchConfirmationHandler>) -> Self {
         self.confirmation_handler = Some(handler);
         self
     }
@@ -300,7 +300,7 @@ impl CallableFunction for ToolCallableAdapter {
 /// ```
 pub fn tools_to_callables(
     tools: &[Arc<dyn Tool>],
-    handler: Option<Arc<dyn ConfirmationHandler>>,
+    handler: Option<Arc<dyn BatchConfirmationHandler>>,
 ) -> Vec<ToolCallableAdapter> {
     tools
         .iter()

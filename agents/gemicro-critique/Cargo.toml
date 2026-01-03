@@ -21,4 +21,4 @@ log = { workspace = true }
 rstest = { workspace = true }
 rust-genai = { workspace = true }
 env_logger = { workspace = true }
-tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

@@ -12,10 +12,12 @@ use crate::format::truncate;
 use anyhow::{Context, Result};
 use futures_util::StreamExt;
 use gemicro_core::{
-    enforce_final_result_contract, AgentContext, AgentError, AgentUpdate, ConfirmationHandler,
-    ConversationHistory, HistoryEntry, LlmClient,
+    enforce_final_result_contract, tool::ToolRegistry, AgentContext, AgentError, AgentUpdate,
+    BatchConfirmationHandler, ConversationHistory, HistoryEntry, LlmClient,
 };
 use gemicro_deep_research::DeepResearchAgent;
+use gemicro_developer::{DeveloperAgent, DeveloperConfig};
+use gemicro_echo::EchoAgent;
 use gemicro_runner::AgentRegistry;
 use gemicro_tool_agent::{ToolAgent, ToolAgentConfig};
 use rustyline::error::ReadlineError;
@@ -72,8 +74,11 @@ pub struct Session {
     /// Cumulative tokens used in this session
     session_tokens: u64,
 
-    /// Confirmation handler for tools that require user approval
-    confirmation_handler: Arc<dyn ConfirmationHandler>,
+    /// Confirmation handler for tools that require user approval (with batch support)
+    confirmation_handler: Arc<dyn BatchConfirmationHandler>,
+
+    /// Tool registry for agents that need tools (e.g., developer agent)
+    tool_registry: Arc<ToolRegistry>,
 }
 
 /// CLI argument overrides that take precedence over file config.
@@ -116,11 +121,16 @@ impl Session {
             .and_then(|p| std::fs::metadata(p).ok())
             .and_then(|m| m.modified().ok());
 
+        let llm = Arc::new(llm);
+
+        // Create tool registry for agents that need tools
+        let tool_registry = Arc::new(Self::create_tool_registry(Arc::clone(&llm)));
+
         Self {
             registry: AgentRegistry::new(),
             current_agent_name: String::new(),
             history: ConversationHistory::new(),
-            llm: Arc::new(llm),
+            llm,
             config_loader: ConfigLoader::new(),
             cli_overrides: CliOverrides::default(),
             binary_path,
@@ -128,7 +138,21 @@ impl Session {
             plain,
             session_tokens: 0,
             confirmation_handler: Arc::new(InteractiveConfirmation::default()),
+            tool_registry,
         }
+    }
+
+    /// Create a tool registry with developer-appropriate tools.
+    ///
+    /// Includes read-only tools, web search, and write tools that require confirmation.
+    /// Does not include the Task tool (subagent access) - that's for Phase 2.
+    fn create_tool_registry(llm: Arc<LlmClient>) -> ToolRegistry {
+        use gemicro_tool_agent::tools;
+
+        let mut registry = tools::default_registry();
+        tools::register_web_search_tool(&mut registry, llm);
+        tools::register_write_tools(&mut registry);
+        registry
     }
 
     /// Set CLI overrides that take precedence over file config.
@@ -206,6 +230,18 @@ impl Session {
                 ToolAgent::new(tool_config.clone()).expect("pre-validated config should not fail"),
             )
         });
+
+        // Register developer agent with defaults (config from file/CLI not yet implemented)
+        let developer_config = DeveloperConfig::default();
+        self.registry.register("developer", move || {
+            Box::new(
+                DeveloperAgent::new(developer_config.clone())
+                    .expect("default config should not fail"),
+            )
+        });
+
+        // Register echo agent (no config needed - for testing)
+        self.registry.register("echo", || Box::new(EchoAgent));
     }
 
     /// Reload configuration from files.
@@ -289,12 +325,21 @@ impl Session {
         false
     }
 
-    /// Get the current agent context with cancellation support
+    /// Get the current agent context with cancellation support.
+    ///
+    /// For agents that need tools (like developer), the tool registry is provided.
     fn agent_context(&self, cancellation_token: CancellationToken) -> AgentContext {
+        // Developer agent needs tools; others don't
+        let tools = if self.current_agent_name == "developer" {
+            Some(Arc::clone(&self.tool_registry))
+        } else {
+            None
+        };
+
         AgentContext {
             llm: self.llm.clone(),
             cancellation_token,
-            tools: None,
+            tools,
             confirmation_handler: Some(Arc::clone(&self.confirmation_handler)),
             execution: gemicro_core::ExecutionContext::root(),
             orchestration: None,
@@ -382,6 +427,11 @@ impl Session {
                         interrupted = true;
                         break;
                     }
+
+                    // Handle event-specific rendering first
+                    renderer
+                        .on_event(&update)
+                        .context("Renderer event handling failed")?;
 
                     // Update tracker with the event
                     tracker.handle_event(&update);
@@ -792,7 +842,9 @@ mod tests {
     #[test]
     fn test_session_stale_detection_fresh() {
         // A fresh session should not be stale
-        let genai_client = rust_genai::Client::builder("test-key".to_string()).build();
+        let genai_client = rust_genai::Client::builder("test-key".to_string())
+            .build()
+            .unwrap();
         let llm = LlmClient::new(genai_client, LlmConfig::default());
         let session = Session::new(llm, false);
 
@@ -802,7 +854,9 @@ mod tests {
 
     #[test]
     fn test_session_initial_token_count() {
-        let genai_client = rust_genai::Client::builder("test-key".to_string()).build();
+        let genai_client = rust_genai::Client::builder("test-key".to_string())
+            .build()
+            .unwrap();
         let llm = LlmClient::new(genai_client, LlmConfig::default());
         let session = Session::new(llm, false);
 
@@ -929,7 +983,9 @@ mod tests {
         let cancel_token_clone = cancellation_token.clone();
 
         // Create agent context
-        let genai_client = rust_genai::Client::builder("test-key".to_string()).build();
+        let genai_client = rust_genai::Client::builder("test-key".to_string())
+            .build()
+            .unwrap();
         let llm = LlmClient::new(genai_client, LlmConfig::default());
         let context = AgentContext::new_with_cancellation(llm, cancellation_token);
 
@@ -1024,7 +1080,9 @@ mod tests {
         }
 
         // Execute the stream
-        let genai_client = rust_genai::Client::builder("test-key".to_string()).build();
+        let genai_client = rust_genai::Client::builder("test-key".to_string())
+            .build()
+            .unwrap();
         let llm = LlmClient::new(genai_client, LlmConfig::default());
         let context = AgentContext::new(llm);
 
@@ -1073,7 +1131,9 @@ mod tests {
         let cancellation_token = CancellationToken::new();
         let cancel_token_clone = cancellation_token.clone();
 
-        let genai_client = rust_genai::Client::builder("test-key".to_string()).build();
+        let genai_client = rust_genai::Client::builder("test-key".to_string())
+            .build()
+            .unwrap();
         let llm = LlmClient::new(genai_client, LlmConfig::default());
         let context = AgentContext::new_with_cancellation(llm, cancellation_token);
 
@@ -1189,7 +1249,9 @@ mod tests {
         let cancellation_token = CancellationToken::new();
         cancellation_token.cancel();
 
-        let genai_client = rust_genai::Client::builder("test-key".to_string()).build();
+        let genai_client = rust_genai::Client::builder("test-key".to_string())
+            .build()
+            .unwrap();
         let llm = LlmClient::new(genai_client, LlmConfig::default());
         let context = AgentContext::new_with_cancellation(llm, cancellation_token);
 
@@ -1226,7 +1288,9 @@ mod tests {
     async fn test_normal_completion_without_cancellation() {
         let mock_agent = MockCancellableAgent::new(3);
 
-        let genai_client = rust_genai::Client::builder("test-key".to_string()).build();
+        let genai_client = rust_genai::Client::builder("test-key".to_string())
+            .build()
+            .unwrap();
         let llm = LlmClient::new(genai_client, LlmConfig::default());
         let context = AgentContext::new(llm);
 

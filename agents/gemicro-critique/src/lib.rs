@@ -13,7 +13,7 @@
 //!
 //! # Usage Patterns
 //!
-//! ## Ground Truth Validation (replaces LlmJudgeAgent)
+//! ## Ground Truth Validation (semantic comparison of answers)
 //!
 //! ```no_run
 //! use gemicro_critique::{CritiqueAgent, CritiqueConfig, CritiqueInput, CritiqueCriteria};
@@ -67,10 +67,10 @@ use std::time::{Duration, Instant};
 // ============================================================================
 
 /// Event emitted when critique evaluation starts.
-const EVENT_CRITIQUE_STARTED: &str = "critique_started";
+pub const EVENT_CRITIQUE_STARTED: &str = "critique_started";
 
 /// Event emitted when critique produces its result.
-const EVENT_CRITIQUE_RESULT: &str = "critique_result";
+pub const EVENT_CRITIQUE_RESULT: &str = "critique_result";
 
 // ============================================================================
 // Input Types
@@ -345,28 +345,17 @@ impl CritiqueOutput {
 
     /// Check if the verdict indicates the content passed.
     pub fn passed(&self) -> bool {
-        matches!(
-            self.verdict,
-            CritiqueVerdict::Pass | CritiqueVerdict::PassWithWarnings
-        )
+        self.verdict.is_passing()
     }
 
     /// Check if the verdict indicates failure.
     pub fn failed(&self) -> bool {
-        matches!(
-            self.verdict,
-            CritiqueVerdict::NeedsRevision | CritiqueVerdict::Reject
-        )
+        !self.verdict.is_passing()
     }
 
     /// Convert verdict to a numeric score (0.0 = Reject, 1.0 = Pass).
     pub fn to_score(&self) -> f64 {
-        match self.verdict {
-            CritiqueVerdict::Pass => 1.0,
-            CritiqueVerdict::PassWithWarnings => 0.75,
-            CritiqueVerdict::NeedsRevision => 0.25,
-            CritiqueVerdict::Reject => 0.0,
-        }
+        self.verdict.to_score()
     }
 }
 
@@ -390,6 +379,50 @@ impl std::fmt::Display for CritiqueVerdict {
             CritiqueVerdict::PassWithWarnings => write!(f, "PassWithWarnings"),
             CritiqueVerdict::NeedsRevision => write!(f, "NeedsRevision"),
             CritiqueVerdict::Reject => write!(f, "Reject"),
+        }
+    }
+}
+
+impl Default for CritiqueVerdict {
+    /// Defaults to `Reject` (conservative fail-safe).
+    fn default() -> Self {
+        CritiqueVerdict::Reject
+    }
+}
+
+impl std::str::FromStr for CritiqueVerdict {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // Case-insensitive matching for robustness with LLM responses
+        match s.to_lowercase().as_str() {
+            "pass" => Ok(CritiqueVerdict::Pass),
+            "passwithwarnings" => Ok(CritiqueVerdict::PassWithWarnings),
+            "needsrevision" => Ok(CritiqueVerdict::NeedsRevision),
+            "reject" => Ok(CritiqueVerdict::Reject),
+            _ => Err(format!("Unknown verdict: {}", s)),
+        }
+    }
+}
+
+impl CritiqueVerdict {
+    /// Returns true if this verdict indicates passing (Pass or PassWithWarnings).
+    #[must_use]
+    pub fn is_passing(&self) -> bool {
+        matches!(
+            self,
+            CritiqueVerdict::Pass | CritiqueVerdict::PassWithWarnings
+        )
+    }
+
+    /// Convert verdict to a numeric score (0.0 = Reject, 1.0 = Pass).
+    #[must_use]
+    pub fn to_score(&self) -> f64 {
+        match self {
+            CritiqueVerdict::Pass => 1.0,
+            CritiqueVerdict::PassWithWarnings => 0.75,
+            CritiqueVerdict::NeedsRevision => 0.25,
+            CritiqueVerdict::Reject => 0.0,
         }
     }
 }
@@ -683,7 +716,7 @@ fn build_prompt(input: &CritiqueInput) -> String {
 /// Critique Agent - validates content against configurable criteria.
 ///
 /// A versatile validation agent that can:
-/// - Compare answers to ground truth (replaces LlmJudgeAgent)
+/// - Compare answers to ground truth (semantic comparison)
 /// - Check outputs against specifications
 /// - Verify checklist items
 /// - Apply custom criteria
@@ -712,6 +745,67 @@ impl CritiqueAgent {
     /// Create with default configuration.
     pub fn default_agent() -> Self {
         Self::new(CritiqueConfig::default()).expect("default config is valid")
+    }
+
+    /// Execute critique and return typed output directly.
+    ///
+    /// This is a convenience method that consumes the event stream internally
+    /// and returns the structured `CritiqueOutput`. Use `execute()` directly
+    /// if you need streaming observability or access to individual events.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use gemicro_core::{AgentContext, LlmClient, LlmConfig};
+    /// use gemicro_critique::{CritiqueAgent, CritiqueConfig, CritiqueInput, CritiqueCriteria};
+    ///
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let agent = CritiqueAgent::new(CritiqueConfig::default())?;
+    /// let input = CritiqueInput::new("Paris")
+    ///     .with_criteria(CritiqueCriteria::GroundTruth {
+    ///         expected: "Paris".into()
+    ///     });
+    ///
+    /// # let genai_client = rust_genai::Client::builder("key".to_string()).build().unwrap();
+    /// # let llm = LlmClient::new(genai_client, LlmConfig::default());
+    /// let context = AgentContext::new(llm);
+    /// let output = agent.critique(&input, context).await?;
+    ///
+    /// if output.verdict.is_passing() {
+    ///     println!("Passed with confidence: {:.0}%", output.confidence * 100.0);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn critique(
+        &self,
+        input: &CritiqueInput,
+        context: AgentContext,
+    ) -> Result<CritiqueOutput, AgentError> {
+        use futures_util::StreamExt;
+
+        let stream = <Self as Agent>::execute(self, &input.to_query(), context);
+        futures_util::pin_mut!(stream);
+
+        while let Some(result) = stream.next().await {
+            let update = result?;
+            // Skip intermediate events; wait for final_result which contains full CritiqueOutput
+            // Use as_final_result() for type-safe access to the result field
+            if let Some(final_result) = update.as_final_result() {
+                // Use result_as<T>() for ergonomic typed deserialization
+                let output = final_result.result_as::<CritiqueOutput>().map_err(|e| {
+                    AgentError::ParseFailed(format!(
+                        "Failed to parse CritiqueOutput from final_result: {}",
+                        e
+                    ))
+                })?;
+                return Ok(output);
+            }
+        }
+
+        Err(AgentError::ParseFailed(
+            "Critique stream ended without producing a result".to_string(),
+        ))
     }
 }
 
@@ -1197,5 +1291,56 @@ mod tests {
         let prompt = build_prompt(&input);
         assert!(prompt.contains("1. item one"));
         assert!(prompt.contains("2. item two"));
+    }
+
+    // FromStr tests
+    #[test]
+    fn test_verdict_from_str_case_insensitive() {
+        use std::str::FromStr;
+
+        // Exact case
+        assert_eq!(
+            CritiqueVerdict::from_str("Pass").unwrap(),
+            CritiqueVerdict::Pass
+        );
+
+        // Lowercase
+        assert_eq!(
+            CritiqueVerdict::from_str("pass").unwrap(),
+            CritiqueVerdict::Pass
+        );
+
+        // Uppercase
+        assert_eq!(
+            CritiqueVerdict::from_str("PASS").unwrap(),
+            CritiqueVerdict::Pass
+        );
+
+        // Mixed case
+        assert_eq!(
+            CritiqueVerdict::from_str("pAsS").unwrap(),
+            CritiqueVerdict::Pass
+        );
+        assert_eq!(
+            CritiqueVerdict::from_str("PASSWITHWARNINGS").unwrap(),
+            CritiqueVerdict::PassWithWarnings
+        );
+        assert_eq!(
+            CritiqueVerdict::from_str("needsrevision").unwrap(),
+            CritiqueVerdict::NeedsRevision
+        );
+        assert_eq!(
+            CritiqueVerdict::from_str("REJECT").unwrap(),
+            CritiqueVerdict::Reject
+        );
+    }
+
+    #[test]
+    fn test_verdict_from_str_invalid() {
+        use std::str::FromStr;
+
+        assert!(CritiqueVerdict::from_str("invalid").is_err());
+        assert!(CritiqueVerdict::from_str("").is_err());
+        assert!(CritiqueVerdict::from_str("pass ").is_err()); // trailing space
     }
 }

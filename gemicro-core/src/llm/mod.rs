@@ -12,7 +12,7 @@
 //! use gemicro_core::{LlmClient, LlmRequest, LlmConfig};
 //!
 //! # async fn example() -> Result<(), gemicro_core::LlmError> {
-//! let genai_client = rust_genai::Client::builder("api-key".to_string()).build();
+//! let genai_client = rust_genai::Client::builder("api-key".to_string()).build()?;
 //! let client = LlmClient::new(genai_client, LlmConfig::default());
 //!
 //! let request = LlmRequest::new("What is the capital of France?");

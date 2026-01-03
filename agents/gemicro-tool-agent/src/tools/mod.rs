@@ -108,7 +108,7 @@ pub fn default_registry() -> ToolRegistry {
 ///
 /// let mut registry = default_registry();
 /// let agent_registry = Arc::new(AgentRegistry::new());
-/// let genai_client = rust_genai::Client::builder("key".to_string()).build();
+/// let genai_client = rust_genai::Client::builder("key".to_string()).build().unwrap();
 /// let llm = Arc::new(LlmClient::new(genai_client, LlmConfig::default()));
 ///
 /// register_task_tool(&mut registry, agent_registry, llm);
@@ -134,7 +134,7 @@ pub fn register_task_tool(
 /// use std::sync::Arc;
 ///
 /// let mut registry = default_registry();
-/// let genai_client = rust_genai::Client::builder("key".to_string()).build();
+/// let genai_client = rust_genai::Client::builder("key".to_string()).build().unwrap();
 /// let llm = Arc::new(LlmClient::new(genai_client, LlmConfig::default()));
 ///
 /// register_web_search_tool(&mut registry, llm);
@@ -188,7 +188,7 @@ pub fn register_write_tools(registry: &mut ToolRegistry) {
 /// use std::sync::Arc;
 ///
 /// let agent_registry = Arc::new(AgentRegistry::new());
-/// let genai_client = rust_genai::Client::builder("key".to_string()).build();
+/// let genai_client = rust_genai::Client::builder("key".to_string()).build().unwrap();
 /// let llm = Arc::new(LlmClient::new(genai_client, LlmConfig::default()));
 ///
 /// let registry = full_registry(agent_registry, llm);
@@ -242,7 +242,9 @@ mod tests {
     fn test_register_task_tool() {
         let mut registry = ToolRegistry::new();
         let agent_registry = Arc::new(AgentRegistry::new());
-        let genai_client = rust_genai::Client::builder("test-key".to_string()).build();
+        let genai_client = rust_genai::Client::builder("test-key".to_string())
+            .build()
+            .unwrap();
         let llm = Arc::new(LlmClient::new(genai_client, LlmConfig::default()));
 
         register_task_tool(&mut registry, agent_registry, llm);
@@ -254,7 +256,9 @@ mod tests {
     #[test]
     fn test_register_web_search_tool() {
         let mut registry = ToolRegistry::new();
-        let genai_client = rust_genai::Client::builder("test-key".to_string()).build();
+        let genai_client = rust_genai::Client::builder("test-key".to_string())
+            .build()
+            .unwrap();
         let llm = Arc::new(LlmClient::new(genai_client, LlmConfig::default()));
 
         register_web_search_tool(&mut registry, llm);
@@ -277,7 +281,9 @@ mod tests {
     #[test]
     fn test_full_registry() {
         let agent_registry = Arc::new(AgentRegistry::new());
-        let genai_client = rust_genai::Client::builder("test-key".to_string()).build();
+        let genai_client = rust_genai::Client::builder("test-key".to_string())
+            .build()
+            .unwrap();
         let llm = Arc::new(LlmClient::new(genai_client, LlmConfig::default()));
 
         let registry = full_registry(agent_registry, llm);

@@ -48,6 +48,15 @@ async fn main() -> Result<()> {
     if args.interactive {
         run_interactive(&args).await
     } else {
+        // Single-query mode currently only supports deep_research
+        // See #205 for AgentRegistry refactor
+        if args.agent != "deep_research" {
+            anyhow::bail!(
+                "Single-query mode currently only supports deep_research agent. \
+                 Use --interactive for other agents, or specify --agent deep_research."
+            );
+        }
+
         // Print header for single query mode
         println!("╔══════════════════════════════════════════════════════════════╗");
         println!("║                    gemicro Deep Research                     ║");
@@ -64,7 +73,9 @@ async fn main() -> Result<()> {
 
 /// Run the interactive REPL
 async fn run_interactive(args: &cli::Args) -> Result<()> {
-    let genai_client = rust_genai::Client::builder(args.api_key.clone()).build();
+    let genai_client = rust_genai::Client::builder(args.api_key.clone())
+        .build()
+        .context("Failed to create Gemini client")?;
     let llm = LlmClient::new(genai_client, args.llm_config());
 
     let mut session = Session::new(llm, args.plain);
@@ -87,10 +98,12 @@ async fn run_interactive(args: &cli::Args) -> Result<()> {
         );
     }
 
-    // Set the initial agent
-    session
-        .set_current_agent("deep_research")
-        .expect("deep_research agent should be registered");
+    // Set the initial agent from CLI flag
+    session.set_current_agent(&args.agent).unwrap_or_else(|_| {
+        eprintln!("Error: Unknown agent '{}'. Available agents:", args.agent);
+        eprintln!("  deep_research, developer, tool_agent, react, simple_qa, critique");
+        std::process::exit(1);
+    });
 
     session.run().await
 }
@@ -100,7 +113,9 @@ async fn run_research(args: &cli::Args, query: &str) -> Result<()> {
     let cancellation_token = CancellationToken::new();
 
     // Create LLM client and context with cancellation support
-    let genai_client = rust_genai::Client::builder(args.api_key.clone()).build();
+    let genai_client = rust_genai::Client::builder(args.api_key.clone())
+        .build()
+        .context("Failed to create Gemini client")?;
     let llm = LlmClient::new(genai_client, args.llm_config());
     let context = AgentContext::new_with_cancellation(llm, cancellation_token.clone());
 
@@ -188,6 +203,10 @@ async fn run_research(args: &cli::Args, query: &str) -> Result<()> {
                             interrupted = true;
                             break;
                         }
+                        // Handle event-specific rendering first
+                        renderer
+                            .on_event(&update)
+                            .context("Renderer event handling failed")?;
                         tracker.handle_event(&update);
                         renderer
                             .on_status(tracker.as_ref())
@@ -226,6 +245,11 @@ async fn run_research(args: &cli::Args, query: &str) -> Result<()> {
                                 interrupted = true;
                                 break;
                             }
+
+                            // Handle event-specific rendering first
+                            renderer
+                                .on_event(&update)
+                                .context("Renderer event handling failed")?;
 
                             tracker.handle_event(&update);
                             renderer
@@ -286,6 +310,11 @@ async fn run_research(args: &cli::Args, query: &str) -> Result<()> {
                         interrupted = true;
                         break;
                     }
+
+                    // Handle event-specific rendering first
+                    renderer
+                        .on_event(&update)
+                        .context("Renderer event handling failed")?;
 
                     tracker.handle_event(&update);
                     renderer

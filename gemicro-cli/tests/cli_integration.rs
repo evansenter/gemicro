@@ -48,6 +48,8 @@ fn test_cli_missing_query() {
 fn test_cli_invalid_temperature() {
     let output = run_cli(&[
         "test query",
+        "--agent",
+        "echo",
         "--api-key",
         "fake-key",
         "--temperature",
@@ -62,6 +64,8 @@ fn test_cli_invalid_temperature() {
 fn test_cli_invalid_min_max_queries() {
     let output = run_cli(&[
         "test query",
+        "--agent",
+        "echo",
         "--api-key",
         "fake-key",
         "--min-sub-queries",
@@ -76,7 +80,15 @@ fn test_cli_invalid_min_max_queries() {
 
 #[test]
 fn test_cli_zero_timeout() {
-    let output = run_cli(&["test query", "--api-key", "fake-key", "--timeout", "0"]);
+    let output = run_cli(&[
+        "test query",
+        "--agent",
+        "echo",
+        "--api-key",
+        "fake-key",
+        "--timeout",
+        "0",
+    ]);
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("timeout"));
@@ -86,6 +98,8 @@ fn test_cli_zero_timeout() {
 fn test_cli_llm_timeout_exceeds_total() {
     let output = run_cli(&[
         "test query",
+        "--agent",
+        "echo",
         "--api-key",
         "fake-key",
         "--timeout",
@@ -108,6 +122,8 @@ fn test_cli_simple_query() {
 
     let output = run_cli(&[
         "What is 2 + 2?",
+        "--agent",
+        "deep_research",
         "--min-sub-queries",
         "2",
         "--max-sub-queries",
@@ -140,6 +156,8 @@ fn test_cli_verbose_mode() {
 
     let output = run_cli(&[
         "What is Rust?",
+        "--agent",
+        "deep_research",
         "--verbose",
         "--min-sub-queries",
         "2",
@@ -169,6 +187,8 @@ fn test_cli_token_counts_displayed() {
 
     let output = run_cli(&[
         "Explain recursion briefly",
+        "--agent",
+        "deep_research",
         "--min-sub-queries",
         "2",
         "--max-sub-queries",
@@ -214,7 +234,7 @@ fn test_cli_interactive_help() {
 fn test_cli_interactive_no_query_required() {
     // Interactive mode should not require a query argument
     // This will fail on missing API key, but that's expected
-    let output = run_cli(&["--interactive", "--api-key", "fake-key"]);
+    let output = run_cli(&["--interactive", "--agent", "echo", "--api-key", "fake-key"]);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
     // Should NOT fail with "Query is required"
@@ -255,7 +275,7 @@ fn test_cli_interactive_quit() {
     }
 
     // Send /quit to exit the REPL immediately
-    let output = run_cli_with_stdin(&["--interactive"], "/quit\n");
+    let output = run_cli_with_stdin(&["--interactive", "--agent", "deep_research"], "/quit\n");
 
     assert!(output.status.success(), "REPL should exit cleanly on /quit");
 
@@ -272,7 +292,10 @@ fn test_cli_interactive_list_agents() {
     }
 
     // List agents then quit
-    let output = run_cli_with_stdin(&["--interactive"], "/agent\n/quit\n");
+    let output = run_cli_with_stdin(
+        &["--interactive", "--agent", "deep_research"],
+        "/agent\n/quit\n",
+    );
 
     assert!(output.status.success(), "REPL should exit cleanly");
 
@@ -296,7 +319,10 @@ fn test_cli_interactive_unknown_command() {
     }
 
     // Try unknown command then quit
-    let output = run_cli_with_stdin(&["--interactive"], "/foobar\n/quit\n");
+    let output = run_cli_with_stdin(
+        &["--interactive", "--agent", "deep_research"],
+        "/foobar\n/quit\n",
+    );
 
     assert!(
         output.status.success(),
@@ -324,6 +350,8 @@ fn test_cli_interactive_simple_query() {
     let output = run_cli_with_stdin(
         &[
             "--interactive",
+            "--agent",
+            "deep_research",
             "--timeout",
             "120",
             "--min-sub-queries",

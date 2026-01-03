@@ -17,7 +17,7 @@
 //!     .with_tool_filter(ToolSet::Specific(vec!["calculator".into()]));
 //! let agent = ToolAgent::new(config)?;
 //!
-//! let genai_client = rust_genai::Client::builder("api-key".to_string()).build();
+//! let genai_client = rust_genai::Client::builder("api-key".to_string()).build()?;
 //! let context = AgentContext::new(LlmClient::new(genai_client, LlmConfig::default()));
 //!
 //! let stream = agent.execute("What is 25 * 4?", context);
@@ -166,7 +166,7 @@ impl ToolAgentConfig {
 /// use futures_util::StreamExt;
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let genai_client = rust_genai::Client::builder("api-key".to_string()).build();
+/// let genai_client = rust_genai::Client::builder("api-key".to_string()).build()?;
 /// let context = AgentContext::new(LlmClient::new(genai_client, LlmConfig::default()));
 /// let agent = ToolAgent::new(ToolAgentConfig::default())?;
 ///
@@ -301,7 +301,7 @@ impl ToolAgent {
 
             // Try to get token usage from the response
             if let Some(usage) = response.usage.as_ref() {
-                total_tokens = usage.total_tokens.unwrap_or(0) as u32;
+                total_tokens = usage.total_tokens.unwrap_or(0);
             } else {
                 tokens_unavailable += 1;
             }

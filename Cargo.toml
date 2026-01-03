@@ -9,6 +9,8 @@ members = [
     "agents/gemicro-simple-qa",
     "agents/gemicro-tool-agent",
     "agents/gemicro-critique",
+    "agents/gemicro-developer",
+    "agents/gemicro-echo",
     "tools/gemicro-file-read",
     "tools/gemicro-web-fetch",
     "tools/gemicro-task",

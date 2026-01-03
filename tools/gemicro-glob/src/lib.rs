@@ -54,7 +54,8 @@ impl Tool for Glob {
     fn description(&self) -> &str {
         "Find files matching a glob pattern. Returns a list of file paths. \
          Supports patterns like '**/*.rs' (all Rust files), 'src/*.txt' (txt files in src), \
-         or 'docs/**/*' (all files in docs)."
+         or 'docs/**/*' (all files in docs). The base_dir can be absolute or relative \
+         (relative paths are resolved against the current working directory)."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -67,7 +68,9 @@ impl Tool for Glob {
                 },
                 "base_dir": {
                     "type": "string",
-                    "description": "Optional base directory to search from (defaults to current directory)"
+                    "description": "Optional base directory to search from. Can be absolute or relative \
+                                    (relative paths are resolved against the current working directory). \
+                                    Defaults to current directory if not specified."
                 }
             },
             "required": ["pattern"]
@@ -92,18 +95,47 @@ impl Tool for Glob {
 
         // Construct the full pattern
         let full_pattern = if let Some(ref base) = base_dir {
-            if !base.is_absolute() {
-                return Err(ToolError::InvalidInput(
-                    "base_dir must be an absolute path".into(),
-                ));
-            }
-            if !base.exists() {
-                return Err(ToolError::NotFound(format!(
-                    "Base directory does not exist: {}",
+            // Resolve relative paths against CWD, absolute paths remain unchanged
+            let resolved_base = if base.is_absolute() {
+                base.clone()
+            } else {
+                let cwd = std::env::current_dir().map_err(|e| {
+                    ToolError::ExecutionFailed(format!(
+                        "Failed to get current working directory: {}",
+                        e
+                    ))
+                })?;
+                cwd.join(base)
+            };
+
+            // Canonicalize to resolve symlinks and normalize (also validates existence)
+            let canonical_base = resolved_base.canonicalize().map_err(|e| match e.kind() {
+                std::io::ErrorKind::NotFound => ToolError::NotFound(format!(
+                    "Base directory does not exist: {} (resolved from {})",
+                    resolved_base.display(),
                     base.display()
+                )),
+                std::io::ErrorKind::PermissionDenied => ToolError::ExecutionFailed(format!(
+                    "Permission denied accessing base directory {}: {}",
+                    base.display(),
+                    e
+                )),
+                _ => ToolError::ExecutionFailed(format!(
+                    "Failed to resolve base directory {}: {}",
+                    base.display(),
+                    e
+                )),
+            })?;
+
+            // Verify it's actually a directory
+            if !canonical_base.is_dir() {
+                return Err(ToolError::InvalidInput(format!(
+                    "Base path is not a directory: {}",
+                    canonical_base.display()
                 )));
             }
-            format!("{}/{}", base.display(), pattern)
+
+            format!("{}/{}", canonical_base.display(), pattern)
         } else {
             pattern.to_string()
         };
@@ -217,17 +249,36 @@ mod tests {
 
     #[tokio::test]
     async fn test_glob_relative_base_dir() {
+        use std::fs::File;
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("test.rs");
+        File::create(&file_path).unwrap();
+
+        // RAII guard to restore CWD even on panic
+        struct CwdGuard(std::path::PathBuf);
+        impl Drop for CwdGuard {
+            fn drop(&mut self) {
+                let _ = std::env::set_current_dir(&self.0);
+            }
+        }
+        let _guard = CwdGuard(std::env::current_dir().unwrap());
+        std::env::set_current_dir(&dir).unwrap();
+
         let glob_tool = Glob;
         let result = glob_tool
             .execute(json!({
                 "pattern": "*.rs",
-                "base_dir": "relative/path"
+                "base_dir": "."  // Relative path - should now work
             }))
             .await;
 
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(matches!(err, ToolError::InvalidInput(_)));
+        // Guard handles restoration automatically via Drop
+
+        assert!(result.is_ok(), "Relative path should be supported");
+        let tool_result = result.unwrap();
+        assert!(tool_result.content.as_str().unwrap().contains("test.rs"));
     }
 
     #[tokio::test]
@@ -330,5 +381,60 @@ mod tests {
 
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), ToolError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_glob_relative_path_resolution() {
+        use std::fs::{self, File};
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let subdir = dir.path().join("subdir");
+        fs::create_dir(&subdir).unwrap();
+        File::create(subdir.join("nested.txt")).unwrap();
+
+        // RAII guard to restore CWD even on panic
+        struct CwdGuard(std::path::PathBuf);
+        impl Drop for CwdGuard {
+            fn drop(&mut self) {
+                let _ = std::env::set_current_dir(&self.0);
+            }
+        }
+        let _guard = CwdGuard(std::env::current_dir().unwrap());
+        std::env::set_current_dir(&dir).unwrap();
+
+        let glob_tool = Glob;
+
+        // Test relative path from CWD
+        let result = glob_tool
+            .execute(json!({
+                "pattern": "*.txt",
+                "base_dir": "subdir"  // Relative to CWD
+            }))
+            .await;
+
+        // Guard handles restoration automatically via Drop
+
+        assert!(result.is_ok(), "Should resolve relative path against CWD");
+        let tool_result = result.unwrap();
+        assert!(tool_result.content.as_str().unwrap().contains("nested.txt"));
+    }
+
+    #[tokio::test]
+    async fn test_glob_relative_nonexistent_dir() {
+        let glob_tool = Glob;
+        let result = glob_tool
+            .execute(json!({
+                "pattern": "*.rs",
+                "base_dir": "nonexistent/relative/path"
+            }))
+            .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, ToolError::NotFound(_)),
+            "Should return NotFound for nonexistent relative paths"
+        );
     }
 }

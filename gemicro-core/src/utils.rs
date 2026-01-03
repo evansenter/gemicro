@@ -17,7 +17,7 @@ use rust_genai::InteractionResponse;
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// let client = LlmClient::new(
-///     rust_genai::Client::builder("api-key".to_string()).build(),
+///     rust_genai::Client::builder("api-key".to_string()).build()?,
 ///     LlmConfig::default(),
 /// );
 /// let response = client.generate(LlmRequest::new("Hello")).await?;
@@ -27,8 +27,10 @@ use rust_genai::InteractionResponse;
 /// # }
 /// ```
 pub fn extract_total_tokens(response: &InteractionResponse) -> Option<u32> {
-    // Delegate to rust-genai's native method, converting i32 -> u32
-    response.total_tokens().and_then(|t| u32::try_from(t).ok())
+    // Delegate to rust-genai's native method, converting i32 to u32
+    response
+        .total_tokens()
+        .and_then(|t| u32::try_from(t).ok())
 }
 
 /// Truncate text to a maximum character count, adding ellipsis if needed.
@@ -150,15 +152,8 @@ mod tests {
         assert_eq!(extract_total_tokens(&response), Some(100));
     }
 
-    #[test]
-    fn test_extract_total_tokens_negative() {
-        let response = test_response(Some(rust_genai::UsageMetadata {
-            total_tokens: Some(-1),
-            ..Default::default()
-        }));
-        // Should return None on negative values
-        assert_eq!(extract_total_tokens(&response), None);
-    }
+    // Note: test_extract_total_tokens_negative was removed because
+    // rust-genai changed total_tokens from i32 to u32, making negative values impossible.
 
     #[test]
     fn test_truncate_short_string() {

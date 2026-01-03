@@ -45,6 +45,7 @@
 
 pub mod agent;
 pub mod config;
+pub mod context;
 pub mod coordination;
 pub mod error;
 pub mod history;
@@ -66,12 +67,14 @@ pub use agent::{
     EVENT_FINAL_RESULT,
 };
 pub use config::{GemicroConfig, LlmConfig, MODEL};
+pub use context::{ContextLevel, ContextUsage, DEFAULT_CONTEXT_WINDOW, DEFAULT_WARNING_THRESHOLD};
 pub use error::{AgentError, GemicroError, LlmError};
 pub use history::{ConversationHistory, HistoryEntry};
 pub use llm::{LlmClient, LlmRequest, LlmStreamChunk};
 pub use mock_llm::MockLlmClient;
 pub use tool::{
-    tools_to_callables, AutoApprove, AutoDeny, ConfirmationHandler, GemicroToolService, Tool,
+    tools_to_callables, AutoApprove, AutoDeny, BatchApproval, BatchConfirmationHandler,
+    BatchSummary, ConfirmationHandler, GemicroToolService, PendingToolCall, Tool, ToolBatch,
     ToolCallableAdapter, ToolError, ToolRegistry, ToolResult, ToolSet,
 };
 pub use tracking::{DefaultTracker, ExecutionTracking};
