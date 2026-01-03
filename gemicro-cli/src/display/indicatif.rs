@@ -169,6 +169,23 @@ impl IndicatifRenderer {
                 .and_then(|v| v.as_str())
                 .map(|s| truncate(s, TOOL_ARGS_PREVIEW_CHARS))
                 .unwrap_or_default(),
+            "task" | "Task" => {
+                // Show agent name and query preview for task tool
+                let agent = args
+                    .get("agent")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                let query = args
+                    .get("query")
+                    .and_then(|v| v.as_str())
+                    .map(|s| truncate(s, 40))
+                    .unwrap_or_default();
+                if query.is_empty() {
+                    agent.to_string()
+                } else {
+                    format!("{}: {}", agent, query)
+                }
+            }
             _ => {
                 // Generic: try common field names or show truncated JSON
                 if let Some(s) = args.get("input").and_then(|v| v.as_str()) {
@@ -315,6 +332,61 @@ impl Renderer for IndicatifRenderer {
                         println!("{} Context: {:.0}% used", icon, percent);
                     });
                 }
+            }
+            "subagent_started" => {
+                // Subagent delegation started - show with indentation
+                let agent_name = event
+                    .data
+                    .get("agent")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                let query_preview = event
+                    .data
+                    .get("query_preview")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+
+                self.spinner.suspend(|| {
+                    if query_preview.is_empty() {
+                        println!("    🤖 Delegating to {}...", agent_name);
+                    } else {
+                        println!("    🤖 Delegating to {}: {}...", agent_name, query_preview);
+                    }
+                });
+            }
+            "subagent_completed" => {
+                // Subagent completed - show result with indentation
+                let agent_name = event
+                    .data
+                    .get("agent")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                let success = event
+                    .data
+                    .get("success")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let duration_ms = event
+                    .data
+                    .get("duration_ms")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let result_preview = event.data.get("result_preview").and_then(|v| v.as_str());
+
+                let status_icon = if success { "✓" } else { "✗" };
+                let duration = format!("{:.1}s", duration_ms as f64 / 1000.0);
+
+                self.spinner.suspend(|| {
+                    if let Some(preview) = result_preview {
+                        let preview_truncated = truncate(preview, TOOL_RESULT_PREVIEW_CHARS);
+                        println!(
+                            "    {} {} ({}) → {}",
+                            status_icon, agent_name, duration, preview_truncated
+                        );
+                    } else {
+                        println!("    {} {} ({})", status_icon, agent_name, duration);
+                    }
+                });
             }
             _ => {
                 // Other events are handled by on_status via the tracker

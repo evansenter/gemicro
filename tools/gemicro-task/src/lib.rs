@@ -20,7 +20,7 @@ use gemicro_core::tool::{Tool, ToolError, ToolResult};
 use gemicro_core::{Agent, AgentContext, LlmClient, ToolSet, EVENT_FINAL_RESULT};
 use gemicro_runner::AgentRegistry;
 use serde_json::{json, Value};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 /// Default maximum subagent depth to prevent infinite recursion.
@@ -38,12 +38,12 @@ pub const DEFAULT_MAX_DEPTH: usize = 3;
 /// use gemicro_core::{LlmClient, LlmConfig, tool::Tool};
 /// use gemicro_runner::AgentRegistry;
 /// use serde_json::json;
-/// use std::sync::Arc;
+/// use std::sync::{Arc, RwLock};
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// let genai_client = rust_genai::Client::builder("api-key".to_string()).build()?;
 /// let llm = LlmClient::new(genai_client, LlmConfig::default());
-/// let registry = Arc::new(AgentRegistry::new());
+/// let registry = Arc::new(RwLock::new(AgentRegistry::new()));
 /// let task = Task::new(registry, Arc::new(llm));
 ///
 /// // Named agent
@@ -66,7 +66,11 @@ pub const DEFAULT_MAX_DEPTH: usize = 3;
 /// ```
 #[derive(Clone)]
 pub struct Task {
-    registry: Arc<AgentRegistry>,
+    /// Agent registry wrapped in RwLock for shared access.
+    ///
+    /// RwLock allows the registry to be mutated by its owner (e.g., Session on reload)
+    /// while Task holds a read-only view for agent lookups.
+    registry: Arc<RwLock<AgentRegistry>>,
     llm: Arc<LlmClient>,
     /// Parent execution context for tracking (if available)
     parent_context: Option<ExecutionContext>,
@@ -78,8 +82,9 @@ pub struct Task {
 
 impl std::fmt::Debug for Task {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let agent_count = self.registry.read().map(|r| r.len()).unwrap_or(0);
         f.debug_struct("Task")
-            .field("registry", &format!("{} agents", self.registry.len()))
+            .field("registry", &format!("{} agents", agent_count))
             .field("llm", &"LlmClient")
             .field(
                 "parent_depth",
@@ -91,7 +96,10 @@ impl std::fmt::Debug for Task {
 
 impl Task {
     /// Create a new Task tool with the given registry and LLM client.
-    pub fn new(registry: Arc<AgentRegistry>, llm: Arc<LlmClient>) -> Self {
+    ///
+    /// The registry is wrapped in `RwLock` to allow shared access: the owner
+    /// (e.g., CLI Session) can modify it on reload, while Task holds a read view.
+    pub fn new(registry: Arc<RwLock<AgentRegistry>>, llm: Arc<LlmClient>) -> Self {
         Self {
             registry,
             llm,
@@ -131,8 +139,11 @@ impl Task {
     }
 
     /// List available agents in the registry.
-    pub fn available_agents(&self) -> Vec<&str> {
-        self.registry.list()
+    pub fn available_agents(&self) -> Vec<String> {
+        self.registry
+            .read()
+            .map(|r| r.list().iter().map(|s| s.to_string()).collect())
+            .unwrap_or_default()
     }
 }
 
@@ -464,14 +475,21 @@ impl Task {
         _config: &SubagentConfig,
         timeout: Duration,
     ) -> Result<String, ToolError> {
-        // Get the agent from registry
-        let agent = self.registry.get(name).ok_or_else(|| {
-            let available: Vec<_> = self.registry.list();
-            ToolError::NotFound(format!(
-                "Agent '{}' not found. Available: {:?}",
-                name, available
-            ))
-        })?;
+        // Get the agent from registry (acquire read lock in a block to drop before await)
+        let agent = {
+            let registry = self
+                .registry
+                .read()
+                .map_err(|_| ToolError::ExecutionFailed("Agent registry lock poisoned".into()))?;
+            registry.get(name).ok_or_else(|| {
+                let available: Vec<_> = registry.list();
+                ToolError::NotFound(format!(
+                    "Agent '{}' not found. Available: {:?}",
+                    name, available
+                ))
+            })?
+        };
+        // Guard is dropped here at end of block, before any .await
 
         // Create context for the subagent with execution tracking and orchestration
         let mut context = AgentContext::from_arc(Arc::clone(&self.llm)).with_execution(execution);
@@ -616,7 +634,7 @@ mod tests {
         }
     }
 
-    fn create_test_registry() -> Arc<AgentRegistry> {
+    fn create_test_registry() -> Arc<RwLock<AgentRegistry>> {
         let mut registry = AgentRegistry::new();
         registry.register("mock_agent", || {
             Box::new(MockAgent {
@@ -624,7 +642,7 @@ mod tests {
                 answer: "Mock answer".to_string(),
             })
         });
-        Arc::new(registry)
+        Arc::new(RwLock::new(registry))
     }
 
     fn create_test_llm() -> Arc<LlmClient> {
@@ -708,7 +726,7 @@ mod tests {
         let task = Task::new(registry, create_test_llm());
 
         let agents = task.available_agents();
-        assert!(agents.contains(&"mock_agent"));
+        assert!(agents.contains(&"mock_agent".to_string()));
     }
 
     #[test]

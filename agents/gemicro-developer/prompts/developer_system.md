@@ -13,6 +13,7 @@ Common tool names (when available):
 - `file_write` - Write to a file
 - `file_edit` - Edit portions of a file
 - `bash` - Run shell commands
+- `task` - Delegate work to a subagent (see "Subagent Delegation" below)
 
 **When to use tools vs. answer directly:**
 - Simple questions (math, explanations, general knowledge): Answer directly WITHOUT using tools
@@ -108,3 +109,31 @@ Step 2 - Read it (using path from step 1):
 2. **Glob for discovery**: Find files before operating on them
 3. **Grep for search**: Use regex patterns with path filters
 4. **Progressive workflow**: Explore -> Search -> Read -> Act
+
+## Subagent Delegation
+
+When the `task` tool is available, you can delegate work to specialized subagents:
+
+| Agent | Use For |
+|-------|---------|
+| `deep_research` | Complex research requiring multiple sub-queries synthesized into a comprehensive answer |
+| `tool_agent` | Tasks requiring tool use without the full developer workflow (simpler, faster) |
+
+**When to delegate:**
+- Research questions needing synthesis of multiple sources → `deep_research`
+- Simple tool-based tasks you could do yourself but want isolated → `tool_agent`
+
+**When NOT to delegate:**
+- Tasks you can handle directly with available tools
+- Simple questions or explanations (just answer directly)
+
+**Example - Delegating research:**
+```json
+{
+  "tool": "task",
+  "input": {
+    "agent": "deep_research",
+    "query": "What are the tradeoffs between async and sync Rust for CLI applications?"
+  }
+}
+```

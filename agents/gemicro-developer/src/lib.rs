@@ -587,6 +587,29 @@ impl Agent for DeveloperAgent {
                         }),
                     );
 
+                    // For task tool, emit additional subagent_started event
+                    let is_subagent_call = tool_name == "task";
+                    let subagent_name = if is_subagent_call {
+                        let agent_name = arguments.get("agent")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown");
+                        let query = arguments.get("query")
+                            .and_then(|v| v.as_str())
+                            .map(|s| gemicro_core::truncate(s, 80));
+                        yield AgentUpdate::custom(
+                            events::EVENT_SUBAGENT_STARTED,
+                            format!("Spawning subagent: {}", agent_name),
+                            json!({
+                                "agent": agent_name,
+                                "query_preview": query,
+                                "call_id": call_id,
+                            }),
+                        );
+                        Some(agent_name.to_string())
+                    } else {
+                        None
+                    };
+
                     let tool_start = Instant::now();
 
                     // Get the tool from registry
@@ -632,6 +655,27 @@ impl Agent for DeveloperAgent {
                             "duration_ms": tool_duration.as_millis() as u64,
                         }),
                     );
+
+                    // For task tool, emit additional subagent_completed event
+                    if let Some(agent_name) = &subagent_name {
+                        let result_preview = if tool_result.is_ok() {
+                            result_json.as_str()
+                                .map(|s| gemicro_core::truncate(s, 100))
+                        } else {
+                            None
+                        };
+                        yield AgentUpdate::custom(
+                            events::EVENT_SUBAGENT_COMPLETED,
+                            format!("Subagent {} completed", agent_name),
+                            json!({
+                                "agent": agent_name,
+                                "call_id": call_id,
+                                "success": tool_result.is_ok(),
+                                "duration_ms": tool_duration.as_millis() as u64,
+                                "result_preview": result_preview,
+                            }),
+                        );
+                    }
 
                     // Check for cancellation after each tool execution
                     if context.cancellation_token.is_cancelled() {
