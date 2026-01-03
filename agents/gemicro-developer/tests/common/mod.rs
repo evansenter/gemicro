@@ -3,12 +3,14 @@
 #![allow(dead_code)]
 
 use async_trait::async_trait;
+use gemicro_bash::Bash;
 use gemicro_core::tool::{default_batch_confirm, AutoApprove, ConfirmationHandler, ToolRegistry};
 use gemicro_core::{
     AgentContext, BatchApproval, BatchConfirmationHandler, LlmClient, LlmConfig, ToolBatch,
 };
 use gemicro_file_read::FileRead;
 use gemicro_glob::Glob;
+use gemicro_grep::Grep;
 use serde_json::Value;
 use std::env;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -22,7 +24,7 @@ pub fn get_api_key() -> Option<String> {
 
 /// Create a test AgentContext with tools for DeveloperAgent testing.
 ///
-/// Includes FileRead and Glob tools with AutoApprove confirmation handler.
+/// Includes FileRead, Glob, Grep, and Bash tools with AutoApprove confirmation handler.
 pub fn create_test_context(api_key: &str) -> AgentContext {
     let genai_client = rust_genai::Client::builder(api_key.to_string())
         .build()
@@ -35,10 +37,13 @@ pub fn create_test_context(api_key: &str) -> AgentContext {
         .with_retry_base_delay_ms(500);
     let llm = LlmClient::new(genai_client, config);
 
-    // Create tool registry with read-only tools
+    // Create tool registry with tools for testing
+    // Note: Bash requires confirmation (handled by AutoApprove)
     let mut tools = ToolRegistry::new();
     tools.register(FileRead);
     tools.register(Glob);
+    tools.register(Grep);
+    tools.register(Bash);
 
     AgentContext::new(llm)
         .with_tools(tools)
@@ -61,10 +66,12 @@ pub fn create_test_context_with_handler(
         .with_retry_base_delay_ms(500);
     let llm = LlmClient::new(genai_client, config);
 
-    // Create tool registry with read-only tools
+    // Create tool registry with tools for testing
     let mut tools = ToolRegistry::new();
     tools.register(FileRead);
     tools.register(Glob);
+    tools.register(Grep);
+    tools.register(Bash);
 
     AgentContext::new(llm)
         .with_tools(tools)

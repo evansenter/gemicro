@@ -22,6 +22,8 @@ dirs = { workspace = true }
 rstest = { workspace = true }
 gemicro-file-read = { path = "../../tools/gemicro-file-read" }
 gemicro-glob = { path = "../../tools/gemicro-glob" }
+gemicro-grep = { path = "../../tools/gemicro-grep" }
+gemicro-bash = { path = "../../tools/gemicro-bash" }
 tokio-util = { workspace = true }
 textwrap = "0.16"
 async-trait = { workspace = true }

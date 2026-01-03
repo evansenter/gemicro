@@ -12,11 +12,13 @@
 //! Press Ctrl+C to cancel gracefully.
 
 use futures_util::StreamExt;
+use gemicro_bash::Bash;
 use gemicro_core::tool::{AutoApprove, ToolRegistry};
 use gemicro_core::{Agent, AgentContext, LlmClient, LlmConfig, MODEL};
 use gemicro_developer::{DeveloperAgent, DeveloperConfig};
 use gemicro_file_read::FileRead;
 use gemicro_glob::Glob;
+use gemicro_grep::Grep;
 use serde_json::Value;
 use std::env;
 use std::sync::Arc;
@@ -94,10 +96,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    // Create tool registry with read-only tools for this demo
+    // Create tool registry with tools for this demo
+    // Note: Bash requires confirmation (handled by AutoApprove for demos)
     let mut tools = ToolRegistry::new();
     tools.register(FileRead);
     tools.register(Glob);
+    tools.register(Grep);
+    tools.register(Bash);
 
     // Show registered tools
     println!("┌─ Registered Tools ──────────────────────────────────────────┐");
