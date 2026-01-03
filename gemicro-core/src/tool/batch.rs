@@ -282,11 +282,26 @@ pub trait BatchConfirmationHandler: ConfirmationHandler {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```no_run
+/// use gemicro_core::{BatchConfirmationHandler, BatchApproval, ToolBatch};
+/// use gemicro_core::tool::{ConfirmationHandler, AutoApprove, default_batch_confirm};
+/// use async_trait::async_trait;
+/// use serde_json::Value;
+///
+/// #[derive(Debug)]
+/// struct MySimpleHandler;
+///
+/// // BatchConfirmationHandler requires ConfirmationHandler
+/// #[async_trait]
+/// impl ConfirmationHandler for MySimpleHandler {
+///     async fn confirm(&self, _tool: &str, _msg: &str, _args: &Value) -> bool { true }
+/// }
+///
+/// #[async_trait]
 /// impl BatchConfirmationHandler for MySimpleHandler {
 ///     async fn confirm_batch(&self, batch: &ToolBatch) -> BatchApproval {
 ///         // No batch-level UI, fall back to individual confirmations
-///         default_batch_confirm(&self.confirmation_handler, batch, true).await
+///         default_batch_confirm(&AutoApprove, batch, true).await
 ///     }
 /// }
 /// ```
