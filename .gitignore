@@ -24,3 +24,4 @@ Cargo.lock
 # Claude Code
 .claude/
 .parallel-context.md
+.worktrees/
