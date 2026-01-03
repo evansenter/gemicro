@@ -3,8 +3,10 @@
 #![allow(dead_code)]
 
 use async_trait::async_trait;
-use gemicro_core::tool::{AutoApprove, ConfirmationHandler, ToolRegistry};
-use gemicro_core::{AgentContext, LlmClient, LlmConfig};
+use gemicro_core::tool::{default_batch_confirm, AutoApprove, ConfirmationHandler, ToolRegistry};
+use gemicro_core::{
+    AgentContext, BatchApproval, BatchConfirmationHandler, LlmClient, LlmConfig, ToolBatch,
+};
 use gemicro_file_read::FileRead;
 use gemicro_glob::Glob;
 use serde_json::Value;
@@ -44,7 +46,7 @@ pub fn create_test_context(api_key: &str) -> AgentContext {
 /// Create a test AgentContext with a custom confirmation handler.
 pub fn create_test_context_with_handler(
     api_key: &str,
-    handler: Arc<dyn ConfirmationHandler>,
+    handler: Arc<dyn BatchConfirmationHandler>,
 ) -> AgentContext {
     let genai_client = rust_genai::Client::builder(api_key.to_string()).build();
     let config = LlmConfig::default()
@@ -106,5 +108,13 @@ impl ConfirmationHandler for TestConfirmationHandler {
     async fn confirm(&self, _tool_name: &str, _message: &str, _args: &Value) -> bool {
         self.confirm_count.fetch_add(1, Ordering::SeqCst);
         self.approve
+    }
+}
+
+#[async_trait]
+impl BatchConfirmationHandler for TestConfirmationHandler {
+    async fn confirm_batch(&self, batch: &ToolBatch) -> BatchApproval {
+        // Use default behavior: falls back to individual confirms
+        default_batch_confirm(self, batch).await
     }
 }

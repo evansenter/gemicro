@@ -49,7 +49,7 @@ pub use config::DeveloperConfig;
 
 use async_stream::try_stream;
 use gemicro_core::{
-    tool::{AutoDeny, ConfirmationHandler, ToolError},
+    tool::{AutoDeny, ToolError},
     Agent, AgentContext, AgentError, AgentStream, AgentUpdate, BatchApproval,
     BatchConfirmationHandler, ContextLevel, ContextUsage, DefaultTracker, ExecutionTracking,
     LlmError, PendingToolCall, ResultMetadata, ToolBatch, MODEL,
@@ -186,7 +186,7 @@ impl Agent for DeveloperAgent {
                 AgentError::InvalidConfig("DeveloperAgent requires tools in context".into())
             })?;
 
-            let confirmation_handler: Arc<dyn ConfirmationHandler> =
+            let confirmation_handler: Arc<dyn BatchConfirmationHandler> =
                 context.confirmation_handler.clone().unwrap_or_else(|| Arc::new(AutoDeny));
 
             let filtered_tools = tools.filter(&tool_filter);
@@ -331,8 +331,7 @@ impl Agent for DeveloperAgent {
                     );
 
                     // Get batch confirmation
-                    // Deref: Arc<dyn ConfirmationHandler> -> dyn ConfirmationHandler
-                    let approval = (*confirmation_handler).confirm_batch(&batch).await;
+                    let approval = confirmation_handler.confirm_batch(&batch).await;
                     match approval {
                         BatchApproval::Approved => {
                             yield AgentUpdate::custom(

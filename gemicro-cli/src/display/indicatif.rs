@@ -277,6 +277,45 @@ impl Renderer for IndicatifRenderer {
                 // Clear tool call state
                 self.in_tool_call = false;
             }
+            "batch_approved" => {
+                // Batch was approved - brief confirmation
+                self.spinner.suspend(|| {
+                    println!("✅ Batch approved");
+                });
+            }
+            "batch_denied" => {
+                // Batch was denied
+                self.spinner.suspend(|| {
+                    println!("❌ Batch denied");
+                });
+            }
+            "batch_review_individually" => {
+                // User chose to review individually
+                self.spinner.suspend(|| {
+                    println!("🔍 Reviewing tools individually...");
+                });
+            }
+            "context_usage" => {
+                // Context usage update - update spinner with usage info
+                let percent = event
+                    .data
+                    .get("percent")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0);
+                let level = event
+                    .data
+                    .get("level")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("normal");
+
+                // Only show warning/critical levels prominently
+                if level == "warning" || level == "critical" {
+                    let icon = if level == "critical" { "🔴" } else { "🟡" };
+                    self.spinner.suspend(|| {
+                        println!("{} Context: {:.0}% used", icon, percent);
+                    });
+                }
+            }
             _ => {
                 // Other events are handled by on_status via the tracker
             }

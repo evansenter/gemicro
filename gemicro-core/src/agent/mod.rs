@@ -67,7 +67,7 @@ pub use subagent::{SubagentConfig, DEFAULT_SUBAGENT_TIMEOUT_SECS};
 
 use crate::error::AgentError;
 use crate::llm::LlmClient;
-use crate::tool::{ConfirmationHandler, Tool, ToolRegistry};
+use crate::tool::{BatchConfirmationHandler, Tool, ToolRegistry};
 use crate::tracking::ExecutionTracking;
 use crate::update::AgentUpdate;
 
@@ -194,8 +194,11 @@ pub struct AgentContext {
     /// will call this handler before execution. If the handler returns `false`,
     /// the tool invocation is denied.
     ///
+    /// Supports batch confirmations via [`BatchConfirmationHandler::confirm_batch`]
+    /// for agents that present multiple tool calls at once for approval.
+    ///
     /// If not set, tools requiring confirmation will be denied by default.
-    pub confirmation_handler: Option<Arc<dyn ConfirmationHandler>>,
+    pub confirmation_handler: Option<Arc<dyn BatchConfirmationHandler>>,
 
     /// Execution context for tracking parent-child agent relationships.
     ///
@@ -277,8 +280,9 @@ impl AgentContext {
     /// Add a confirmation handler for tools that require user approval.
     ///
     /// Tools that return `true` from [`Tool::requires_confirmation`] will
-    /// call this handler before execution.
-    pub fn with_confirmation_handler(mut self, handler: Arc<dyn ConfirmationHandler>) -> Self {
+    /// call this handler before execution. Handlers also support batch approval
+    /// via [`BatchConfirmationHandler::confirm_batch`].
+    pub fn with_confirmation_handler(mut self, handler: Arc<dyn BatchConfirmationHandler>) -> Self {
         self.confirmation_handler = Some(handler);
         self
     }
