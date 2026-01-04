@@ -121,6 +121,8 @@ mod tests {
             grounding_metadata: None,
             url_context_metadata: None,
             previous_interaction_id: None,
+            created: None,
+            updated: None,
         }
     }
 
