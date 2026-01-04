@@ -227,6 +227,11 @@ impl ToolAgent {
                 service = service.with_confirmation_handler(Arc::clone(handler));
             }
 
+            // Add interceptors if provided in context (e.g., PathSandbox)
+            if let Some(interceptors) = &context.interceptors {
+                service = service.with_interceptors(Arc::clone(interceptors));
+            }
+
             // Get tool names for the started event
             let tool_names: Vec<String> = service.registry()
                 .filter(&config.tool_filter)

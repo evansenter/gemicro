@@ -49,14 +49,14 @@ pub use config::DeveloperConfig;
 
 use async_stream::try_stream;
 use gemicro_core::{
-    tool::{AutoDeny, ToolError},
+    tool::{AutoApprove, AutoDeny, ToolCallableAdapter, ToolError},
     Agent, AgentContext, AgentError, AgentStream, AgentUpdate, BatchApproval,
     BatchConfirmationHandler, ContextLevel, ContextUsage, DefaultTracker, ExecutionTracking,
     LlmError, PendingToolCall, ResultMetadata, ToolBatch, MODEL,
 };
 use rust_genai::{
-    function_result_content, FunctionDeclaration, InteractionContent, InteractionResponse,
-    OwnedFunctionCallInfo,
+    function_result_content, CallableFunction, FunctionDeclaration, InteractionContent,
+    InteractionResponse, OwnedFunctionCallInfo,
 };
 use serde_json::json;
 use std::sync::Arc;
@@ -674,23 +674,37 @@ impl Agent for DeveloperAgent {
 
                     let tool_start = Instant::now();
 
-                    // Get the tool from registry
-                    // Individual confirmation needed when:
-                    // - approval_batching is disabled (original behavior), OR
-                    // - user chose ReviewIndividually for the batch
+                    // Build adapter with interceptors for proper security enforcement.
+                    // Confirmation handler is determined by batch approval state:
+                    // - If batch approved all tools → AutoApprove (no double-confirmation)
+                    // - Otherwise → actual handler for individual review
                     let tool_result = if let Some(tool) = tools.get(tool_name) {
-                        let needs_individual_confirm = (!approval_batching || review_individually)
-                            && tool.requires_confirmation(arguments);
-
-                        if needs_individual_confirm {
-                            let message = tool.confirmation_message(arguments);
-                            if !confirmation_handler.confirm(tool_name, &message, arguments).await {
-                                Err(ToolError::ConfirmationDenied(message))
+                        // Determine confirmation handler based on batch approval state
+                        let adapter_handler: Arc<dyn BatchConfirmationHandler> =
+                            if batch_approved && !review_individually {
+                                // Batch approved all tools - skip individual confirmation
+                                Arc::new(AutoApprove)
                             } else {
-                                tool.execute(arguments.clone()).await
+                                // Need individual confirmation (batching disabled or review_individually)
+                                Arc::clone(&confirmation_handler)
+                            };
+
+                        // Build adapter with interceptors (for security) and confirmation handler
+                        let mut adapter = ToolCallableAdapter::new(tool)
+                            .with_confirmation_handler(adapter_handler);
+                        if let Some(interceptors) = &context.interceptors {
+                            adapter = adapter.with_interceptors(Arc::clone(interceptors));
+                        }
+
+                        // Execute through adapter (triggers interceptors and confirmation)
+                        match adapter.call(arguments.clone()).await {
+                            Ok(value) => Ok(gemicro_core::tool::ToolResult::json(value)),
+                            Err(e) => {
+                                // Convert FunctionError to ToolError via string representation.
+                                // The FunctionError wraps ToolError internally, so the message
+                                // preserves the original error type information.
+                                Err(ToolError::ExecutionFailed(e.to_string()))
                             }
-                        } else {
-                            tool.execute(arguments.clone()).await
                         }
                     } else {
                         Err(ToolError::NotFound(tool_name.to_string()))

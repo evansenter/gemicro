@@ -150,6 +150,11 @@ impl GemicroToolService {
     pub fn has_confirmation_handler(&self) -> bool {
         self.confirmation_handler.is_some()
     }
+
+    /// Get the interceptor chain, if configured.
+    pub fn interceptors(&self) -> Option<&Arc<InterceptorChain<ToolCall, ToolResult>>> {
+        self.interceptors.as_ref()
+    }
 }
 
 impl ToolService for GemicroToolService {

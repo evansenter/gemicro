@@ -23,6 +23,9 @@ gemicro-tool-agent = { path = "../agents/gemicro-tool-agent" }
 
 # Tool crates - CLI needs Task tool for subagent access
 gemicro-task = { path = "../tools/gemicro-task" }
+
+# Hook crates - CLI needs PathSandbox for --sandbox-path support
+gemicro-path-sandbox = { path = "../hooks/gemicro-path-sandbox" }
 rust-genai = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }

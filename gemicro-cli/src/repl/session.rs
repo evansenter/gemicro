@@ -12,13 +12,17 @@ use crate::format::truncate;
 use anyhow::{Context, Result};
 use futures_util::StreamExt;
 use gemicro_core::{
-    enforce_final_result_contract, tool::ToolRegistry, AgentContext, AgentError, AgentUpdate,
-    BatchConfirmationHandler, ConversationHistory, HistoryEntry, LlmClient,
+    enforce_final_result_contract,
+    interceptor::{InterceptorChain, ToolCall},
+    tool::{ToolRegistry, ToolResult},
+    AgentContext, AgentError, AgentUpdate, BatchConfirmationHandler, ConversationHistory,
+    HistoryEntry, LlmClient,
 };
 use gemicro_critique::CritiqueAgent;
 use gemicro_deep_research::DeepResearchAgent;
 use gemicro_developer::{DeveloperAgent, DeveloperConfig};
 use gemicro_echo::EchoAgent;
+use gemicro_path_sandbox::PathSandbox;
 use gemicro_runner::AgentRegistry;
 use gemicro_task::Task;
 use gemicro_tool_agent::{ToolAgent, ToolAgentConfig};
@@ -84,6 +88,12 @@ pub struct Session {
 
     /// Tool registry for agents that need tools (e.g., developer agent)
     tool_registry: Arc<ToolRegistry>,
+
+    /// Optional interceptor chain for tool interception (e.g., PathSandbox)
+    ///
+    /// When set, tool calls are passed through this chain for validation,
+    /// logging, and security controls. Built from CLI --sandbox-path args.
+    interceptors: Option<Arc<InterceptorChain<ToolCall, ToolResult>>>,
 }
 
 /// CLI argument overrides that take precedence over file config.
@@ -150,6 +160,7 @@ impl Session {
             session_tokens: 0,
             confirmation_handler: Arc::new(InteractiveConfirmation::default()),
             tool_registry,
+            interceptors: None,
         }
     }
 
@@ -180,6 +191,24 @@ impl Session {
     /// Set CLI overrides that take precedence over file config.
     pub fn set_cli_overrides(&mut self, overrides: CliOverrides) {
         self.cli_overrides = overrides;
+    }
+
+    /// Set sandbox paths for file access restriction.
+    ///
+    /// When paths are provided, builds a PathSandbox interceptor that restricts
+    /// all file operations to the specified paths. This is a security feature
+    /// controlled by the CLI --sandbox-path flag.
+    ///
+    /// If paths is empty, no interceptor is configured.
+    pub fn set_sandbox_paths(&mut self, paths: Vec<PathBuf>) {
+        if paths.is_empty() {
+            self.interceptors = None;
+        } else {
+            let sandbox = PathSandbox::new(paths);
+            let chain: InterceptorChain<ToolCall, ToolResult> =
+                InterceptorChain::new().with(sandbox);
+            self.interceptors = Some(Arc::new(chain));
+        }
     }
 
     /// Load config and register agents.
@@ -364,6 +393,7 @@ impl Session {
     /// Get the current agent context with cancellation support.
     ///
     /// For agents that need tools (like developer), the tool registry is provided.
+    /// If sandbox paths are configured, interceptors are attached for security.
     fn agent_context(&self, cancellation_token: CancellationToken) -> AgentContext {
         // Developer agent needs tools; others don't
         let tools = if self.current_agent_name == "developer" {
@@ -379,6 +409,7 @@ impl Session {
             confirmation_handler: Some(Arc::clone(&self.confirmation_handler)),
             execution: gemicro_core::ExecutionContext::root(),
             orchestration: None,
+            interceptors: self.interceptors.clone(),
         }
     }
 

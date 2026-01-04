@@ -3,6 +3,7 @@
 use clap::Parser;
 use gemicro_core::LlmConfig;
 use gemicro_deep_research::ResearchConfig;
+use std::path::PathBuf;
 use std::time::Duration;
 
 /// AI agent exploration platform
@@ -81,6 +82,16 @@ pub struct Args {
     /// update stream in real-time.
     #[arg(long, env = "GEMICRO_EVENT_BUS_URL")]
     pub event_bus_url: Option<String>,
+
+    /// Restrict file operations to specific paths (whitelist)
+    ///
+    /// When provided, tools that access the filesystem are restricted to
+    /// only the specified paths. Any file operation outside these paths
+    /// will be denied. This provides defense-in-depth for agent execution.
+    ///
+    /// Can be specified multiple times: --sandbox-path /workspace --sandbox-path /tmp
+    #[arg(long = "sandbox-path", value_name = "PATH")]
+    pub sandbox_paths: Vec<PathBuf>,
 }
 
 impl Args {
@@ -137,6 +148,20 @@ impl Args {
                 self.temperature
             ));
         }
+
+        // Validate sandbox paths
+        for path in &self.sandbox_paths {
+            if !path.exists() {
+                return Err(format!("sandbox path does not exist: {}", path.display()));
+            }
+            if !path.is_dir() {
+                return Err(format!(
+                    "sandbox path must be a directory: {}",
+                    path.display()
+                ));
+            }
+        }
+
         Ok(())
     }
 
@@ -185,6 +210,7 @@ mod tests {
             plain: false,
             google_search: false,
             event_bus_url: None,
+            sandbox_paths: vec![],
         }
     }
 
@@ -362,5 +388,38 @@ mod tests {
         args.interactive = true;
 
         assert!(args.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_sandbox_path_not_exists() {
+        let mut args = test_args();
+        args.sandbox_paths = vec![PathBuf::from("/nonexistent/path/that/should/not/exist")];
+
+        let result = args.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("does not exist"));
+    }
+
+    #[test]
+    fn test_validate_sandbox_path_not_directory() {
+        // Use a file that should exist on most systems
+        let file_path = std::env::current_exe().expect("should get current exe");
+        let mut args = test_args();
+        args.sandbox_paths = vec![file_path];
+
+        let result = args.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("must be a directory"));
+    }
+
+    #[test]
+    fn test_validate_sandbox_path_valid() {
+        let mut args = test_args();
+        args.sandbox_paths = vec![PathBuf::from("/tmp")];
+
+        // This may fail on some systems without /tmp
+        if std::path::Path::new("/tmp").exists() {
+            assert!(args.validate().is_ok());
+        }
     }
 }

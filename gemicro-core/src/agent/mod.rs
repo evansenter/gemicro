@@ -66,8 +66,9 @@ pub use orchestration::{
 pub use subagent::{SubagentConfig, DEFAULT_SUBAGENT_TIMEOUT_SECS};
 
 use crate::error::AgentError;
+use crate::interceptor::{InterceptorChain, ToolCall};
 use crate::llm::LlmClient;
-use crate::tool::{BatchConfirmationHandler, Tool, ToolRegistry};
+use crate::tool::{BatchConfirmationHandler, Tool, ToolRegistry, ToolResult};
 use crate::tracking::ExecutionTracking;
 use crate::update::AgentUpdate;
 
@@ -214,6 +215,17 @@ pub struct AgentContext {
     ///
     /// If not set, orchestration limits are not enforced (default behavior).
     pub orchestration: Option<Arc<OrchestrationState>>,
+
+    /// Optional interceptor chain for tool interception.
+    ///
+    /// When set, tool calls are passed through this chain for validation,
+    /// logging, and security controls (e.g., PathSandbox for file access
+    /// restrictions). Shared across the entire execution tree via `Arc`.
+    ///
+    /// This is controlled by the CLI/environment, not individual agents.
+    /// Agents should attach these interceptors when building their
+    /// `GemicroToolService`.
+    pub interceptors: Option<Arc<InterceptorChain<ToolCall, ToolResult>>>,
 }
 
 impl AgentContext {
@@ -230,6 +242,7 @@ impl AgentContext {
             confirmation_handler: None,
             execution: ExecutionContext::root(),
             orchestration: None,
+            interceptors: None,
         }
     }
 
@@ -244,6 +257,7 @@ impl AgentContext {
             confirmation_handler: None,
             execution: ExecutionContext::root(),
             orchestration: None,
+            interceptors: None,
         }
     }
 
@@ -258,6 +272,7 @@ impl AgentContext {
             confirmation_handler: None,
             execution: ExecutionContext::root(),
             orchestration: None,
+            interceptors: None,
         }
     }
 
@@ -323,6 +338,38 @@ impl AgentContext {
         self
     }
 
+    /// Add an interceptor chain for tool interception.
+    ///
+    /// When set, tool calls are passed through this chain for validation,
+    /// logging, and security controls (e.g., PathSandbox for file access
+    /// restrictions).
+    ///
+    /// This is typically controlled by the CLI/environment, not agents.
+    /// The interceptors are inherited by child contexts.
+    ///
+    /// # Example
+    ///
+    /// ```text
+    /// use gemicro_core::{AgentContext, InterceptorChain, ToolCall, ToolResult};
+    /// use gemicro_path_sandbox::PathSandbox;
+    /// use std::sync::Arc;
+    /// use std::path::PathBuf;
+    ///
+    /// let sandbox = PathSandbox::new(vec![PathBuf::from("/workspace")]);
+    /// let interceptors: InterceptorChain<ToolCall, ToolResult> =
+    ///     InterceptorChain::new().with(sandbox);
+    ///
+    /// let context = AgentContext::new(llm)
+    ///     .with_interceptors(Arc::new(interceptors));
+    /// ```
+    pub fn with_interceptors(
+        mut self,
+        interceptors: Arc<InterceptorChain<ToolCall, ToolResult>>,
+    ) -> Self {
+        self.interceptors = Some(interceptors);
+        self
+    }
+
     /// Create a child context for spawning a subagent.
     ///
     /// The child context:
@@ -330,6 +377,7 @@ impl AgentContext {
     /// - Inherits the cancellation token (so cancelling parent cancels child)
     /// - Inherits tools and confirmation handler
     /// - Inherits orchestration state (for shared concurrency limits)
+    /// - Inherits interceptors (for shared security policy)
     /// - Creates a new execution context with this agent as parent
     ///
     /// # Example
@@ -349,6 +397,7 @@ impl AgentContext {
             confirmation_handler: self.confirmation_handler.clone(),
             execution: self.execution.child(agent_name),
             orchestration: self.orchestration.clone(),
+            interceptors: self.interceptors.clone(),
         }
     }
 

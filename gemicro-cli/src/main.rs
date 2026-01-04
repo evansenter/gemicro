@@ -85,6 +85,19 @@ async fn run_interactive(args: &cli::Args) -> Result<()> {
         research_config: Some(args.research_config()),
     });
 
+    // Set sandbox paths for file access restriction (if configured)
+    if !args.sandbox_paths.is_empty() {
+        log::info!(
+            "File sandbox enabled, restricted to: {}",
+            args.sandbox_paths
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        session.set_sandbox_paths(args.sandbox_paths.clone());
+    }
+
     // Load config files and register agents (always succeeds, logs warnings on errors)
     let loaded_files = session.load_config_and_register_agents();
     if !loaded_files.is_empty() {
