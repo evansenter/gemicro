@@ -86,6 +86,12 @@ use std::path::PathBuf;
 pub struct PathSandbox {
     /// Paths that are allowed for file operations.
     pub allowed_paths: Vec<PathBuf>,
+
+    /// Whether `allowed_paths` are pre-canonicalized.
+    ///
+    /// When true (set by `new_canonical()`), `is_path_allowed()` skips
+    /// re-canonicalizing allowed paths on each check, reducing I/O overhead.
+    pre_canonicalized: bool,
 }
 
 impl PathSandbox {
@@ -114,7 +120,10 @@ impl PathSandbox {
         if allowed_paths.is_empty() {
             panic!("PathSandbox requires at least one allowed path");
         }
-        Self { allowed_paths }
+        Self {
+            allowed_paths,
+            pre_canonicalized: false,
+        }
     }
 
     /// Create a new path sandbox with canonicalized paths.
@@ -156,6 +165,7 @@ impl PathSandbox {
 
         Ok(Self {
             allowed_paths: canonical,
+            pre_canonicalized: true,
         })
     }
 
@@ -203,18 +213,22 @@ impl PathSandbox {
 
         // Check if canonical path starts with any allowed path
         for allowed in &self.allowed_paths {
-            // Canonicalize allowed path too for consistent comparison
-            let canonical_allowed = match tokio::fs::canonicalize(allowed).await {
-                Ok(p) => p,
-                Err(e) => {
-                    // Skip non-canonicalizable allowed paths with warning
-                    // (don't fall back to non-canonical - could allow bypass)
-                    log::warn!(
-                        "PathSandbox: Skipping allowed path '{}' - cannot canonicalize: {}",
-                        allowed.display(),
-                        e
-                    );
-                    continue;
+            // Skip canonicalization if paths were pre-canonicalized at construction
+            let canonical_allowed = if self.pre_canonicalized {
+                allowed.clone()
+            } else {
+                match tokio::fs::canonicalize(allowed).await {
+                    Ok(p) => p,
+                    Err(e) => {
+                        // Skip non-canonicalizable allowed paths with warning
+                        // (don't fall back to non-canonical - could allow bypass)
+                        log::warn!(
+                            "PathSandbox: Skipping allowed path '{}' - cannot canonicalize: {}",
+                            allowed.display(),
+                            e
+                        );
+                        continue;
+                    }
                 }
             };
 
