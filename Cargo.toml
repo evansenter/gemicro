@@ -26,6 +26,7 @@ members = [
     "hooks/gemicro-input-sanitizer",
     "hooks/gemicro-conditional-permission",
     "hooks/gemicro-metrics",
+    "hooks/gemicro-path-sandbox",
 ]
 resolver = "2"
 
