@@ -346,7 +346,7 @@ async fn test_streaming_function_calling_with_hooks() {
     // Consume the stream
     while let Some(result) = stream.next().await {
         match result {
-            Ok(chunk) => match chunk {
+            Ok(event) => match event.chunk {
                 AutoFunctionStreamChunk::Delta(content) => {
                     saw_delta = true;
                     if let Some(text) = content.text() {

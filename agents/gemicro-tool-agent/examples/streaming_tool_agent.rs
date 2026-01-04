@@ -70,7 +70,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Consume the stream and display incremental updates
     while let Some(result) = stream.next().await {
         match result {
-            Ok(chunk) => match chunk {
+            Ok(event) => match event.chunk {
                 AutoFunctionStreamChunk::Delta(content) => {
                     if let Some(text) = content.text() {
                         print!("{}", text);

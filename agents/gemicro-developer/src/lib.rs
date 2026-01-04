@@ -312,6 +312,68 @@ pub(crate) fn execute_tool_sync_result(
     }
 }
 
+/// Result of building subagent lifecycle events.
+#[cfg(test)]
+pub(crate) struct SubagentEvents {
+    pub started_event: AgentUpdate,
+    pub completed_event: AgentUpdate,
+}
+
+/// Builds subagent lifecycle events for a task tool call.
+///
+/// Returns `Some(SubagentEvents)` if the tool is "task", `None` otherwise.
+/// This mirrors the event emission logic in the execute() loop but is
+/// testable in isolation.
+#[cfg(test)]
+pub(crate) fn build_subagent_events(
+    tool_name: &str,
+    call_id: &str,
+    arguments: &serde_json::Value,
+    success: bool,
+    duration_ms: u64,
+    result_preview: Option<&str>,
+) -> Option<SubagentEvents> {
+    if tool_name != "task" {
+        return None;
+    }
+
+    let agent_name = arguments
+        .get("agent")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    let query = arguments
+        .get("query")
+        .and_then(|v| v.as_str())
+        .map(|s| gemicro_core::truncate(s, 80));
+
+    let started_event = AgentUpdate::custom(
+        events::EVENT_SUBAGENT_STARTED,
+        format!("Spawning subagent: {}", agent_name),
+        json!({
+            "agent": agent_name,
+            "query_preview": query,
+            "call_id": call_id,
+        }),
+    );
+
+    let completed_event = AgentUpdate::custom(
+        events::EVENT_SUBAGENT_COMPLETED,
+        format!("Subagent {} completed", agent_name),
+        json!({
+            "agent": agent_name,
+            "call_id": call_id,
+            "success": success,
+            "duration_ms": duration_ms,
+            "result_preview": result_preview.map(|s| gemicro_core::truncate(s, 100)),
+        }),
+    );
+
+    Some(SubagentEvents {
+        started_event,
+        completed_event,
+    })
+}
+
 /// Developer agent with explicit function calling loop.
 ///
 /// Provides real-time tool execution events for CLI display.
@@ -587,6 +649,29 @@ impl Agent for DeveloperAgent {
                         }),
                     );
 
+                    // For task tool, emit additional subagent_started event
+                    let is_subagent_call = tool_name == "task";
+                    let subagent_name = if is_subagent_call {
+                        let agent_name = arguments.get("agent")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown");
+                        let query = arguments.get("query")
+                            .and_then(|v| v.as_str())
+                            .map(|s| gemicro_core::truncate(s, 80));
+                        yield AgentUpdate::custom(
+                            events::EVENT_SUBAGENT_STARTED,
+                            format!("Spawning subagent: {}", agent_name),
+                            json!({
+                                "agent": agent_name,
+                                "query_preview": query,
+                                "call_id": call_id,
+                            }),
+                        );
+                        Some(agent_name.to_string())
+                    } else {
+                        None
+                    };
+
                     let tool_start = Instant::now();
 
                     // Get the tool from registry
@@ -632,6 +717,27 @@ impl Agent for DeveloperAgent {
                             "duration_ms": tool_duration.as_millis() as u64,
                         }),
                     );
+
+                    // For task tool, emit additional subagent_completed event
+                    if let Some(agent_name) = &subagent_name {
+                        let result_preview = if tool_result.is_ok() {
+                            result_json.as_str()
+                                .map(|s| gemicro_core::truncate(s, 100))
+                        } else {
+                            None
+                        };
+                        yield AgentUpdate::custom(
+                            events::EVENT_SUBAGENT_COMPLETED,
+                            format!("Subagent {} completed", agent_name),
+                            json!({
+                                "agent": agent_name,
+                                "call_id": call_id,
+                                "success": tool_result.is_ok(),
+                                "duration_ms": tool_duration.as_millis() as u64,
+                                "result_preview": result_preview,
+                            }),
+                        );
+                    }
 
                     // Check for cancellation after each tool execution
                     if context.cancellation_token.is_cancelled() {
@@ -984,5 +1090,107 @@ mod tests {
             .with_approval_batching(false);
         assert_eq!(config.max_iterations, 100);
         assert!(!config.approval_batching);
+    }
+
+    // =========================================================================
+    // Tests for build_subagent_events
+    // =========================================================================
+
+    #[test]
+    fn test_subagent_events_task_tool() {
+        let arguments = json!({
+            "agent": "deep_research",
+            "query": "What are the tradeoffs between async runtimes?"
+        });
+
+        let result = build_subagent_events(
+            "task",
+            "call_123",
+            &arguments,
+            true,
+            5000,
+            Some("Async runtimes comparison..."),
+        );
+
+        assert!(result.is_some());
+        let events = result.unwrap();
+
+        // Check started event
+        assert_eq!(
+            events.started_event.event_type,
+            events::EVENT_SUBAGENT_STARTED
+        );
+        assert_eq!(events.started_event.data["agent"], "deep_research");
+        assert_eq!(events.started_event.data["call_id"], "call_123");
+        assert!(events.started_event.data["query_preview"]
+            .as_str()
+            .unwrap()
+            .contains("async"));
+
+        // Check completed event
+        assert_eq!(
+            events.completed_event.event_type,
+            events::EVENT_SUBAGENT_COMPLETED
+        );
+        assert_eq!(events.completed_event.data["agent"], "deep_research");
+        assert_eq!(events.completed_event.data["success"], true);
+        assert_eq!(events.completed_event.data["duration_ms"], 5000);
+        assert!(events.completed_event.data["result_preview"]
+            .as_str()
+            .unwrap()
+            .contains("Async"));
+    }
+
+    #[test]
+    fn test_subagent_events_non_task_tool_returns_none() {
+        let arguments = json!({"pattern": "*.rs"});
+
+        let result = build_subagent_events("glob", "call_456", &arguments, true, 100, None);
+
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_subagent_events_missing_agent_name() {
+        let arguments = json!({"query": "some query"}); // Missing "agent" field
+
+        let result = build_subagent_events("task", "call_789", &arguments, true, 1000, None);
+
+        assert!(result.is_some());
+        let events = result.unwrap();
+        assert_eq!(events.started_event.data["agent"], "unknown");
+        assert_eq!(events.completed_event.data["agent"], "unknown");
+    }
+
+    #[test]
+    fn test_subagent_events_failure() {
+        let arguments = json!({
+            "agent": "tool_agent",
+            "query": "Run failing task"
+        });
+
+        let result = build_subagent_events("task", "call_fail", &arguments, false, 250, None);
+
+        assert!(result.is_some());
+        let events = result.unwrap();
+        assert_eq!(events.completed_event.data["success"], false);
+        assert!(events.completed_event.data["result_preview"].is_null());
+    }
+
+    #[test]
+    fn test_subagent_events_long_query_truncated() {
+        let long_query = "a".repeat(200); // Longer than 80 char limit
+        let arguments = json!({
+            "agent": "deep_research",
+            "query": long_query
+        });
+
+        let result = build_subagent_events("task", "call_long", &arguments, true, 100, None);
+
+        assert!(result.is_some());
+        let events = result.unwrap();
+        let query_preview = events.started_event.data["query_preview"].as_str().unwrap();
+        assert!(query_preview.len() <= 83); // 80 + "..."
+        assert!(query_preview.ends_with("..."));
     }
 }

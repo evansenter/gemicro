@@ -64,7 +64,7 @@ use gemicro_runner::AgentRegistry;
 use gemicro_task::Task;
 use gemicro_web_fetch::WebFetch;
 use gemicro_web_search::WebSearch;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 /// Create a default tool registry with read-only tools.
 ///
@@ -96,7 +96,10 @@ pub fn default_registry() -> ToolRegistry {
 /// Register the Task tool in a registry.
 ///
 /// The Task tool allows spawning subagents to handle subtasks.
-/// Requires an AgentRegistry and LlmClient.
+/// Requires an `AgentRegistry` (wrapped in `RwLock` for shared access) and `LlmClient`.
+///
+/// The `RwLock` wrapper allows the registry owner to modify it (e.g., on reload)
+/// while the Task tool holds a read-only view for agent lookups.
 ///
 /// # Example
 ///
@@ -104,10 +107,10 @@ pub fn default_registry() -> ToolRegistry {
 /// use gemicro_tool_agent::tools::{default_registry, register_task_tool};
 /// use gemicro_runner::AgentRegistry;
 /// use gemicro_core::{LlmClient, LlmConfig};
-/// use std::sync::Arc;
+/// use std::sync::{Arc, RwLock};
 ///
 /// let mut registry = default_registry();
-/// let agent_registry = Arc::new(AgentRegistry::new());
+/// let agent_registry = Arc::new(RwLock::new(AgentRegistry::new()));
 /// let genai_client = rust_genai::Client::builder("key".to_string()).build().unwrap();
 /// let llm = Arc::new(LlmClient::new(genai_client, LlmConfig::default()));
 ///
@@ -115,7 +118,7 @@ pub fn default_registry() -> ToolRegistry {
 /// ```
 pub fn register_task_tool(
     registry: &mut ToolRegistry,
-    agent_registry: Arc<AgentRegistry>,
+    agent_registry: Arc<RwLock<AgentRegistry>>,
     llm: Arc<LlmClient>,
 ) {
     registry.register(Task::new(agent_registry, llm));
@@ -185,16 +188,19 @@ pub fn register_write_tools(registry: &mut ToolRegistry) {
 /// use gemicro_tool_agent::tools::full_registry;
 /// use gemicro_runner::AgentRegistry;
 /// use gemicro_core::{LlmClient, LlmConfig};
-/// use std::sync::Arc;
+/// use std::sync::{Arc, RwLock};
 ///
-/// let agent_registry = Arc::new(AgentRegistry::new());
+/// let agent_registry = Arc::new(RwLock::new(AgentRegistry::new()));
 /// let genai_client = rust_genai::Client::builder("key".to_string()).build().unwrap();
 /// let llm = Arc::new(LlmClient::new(genai_client, LlmConfig::default()));
 ///
 /// let registry = full_registry(agent_registry, llm);
 /// assert_eq!(registry.len(), 11); // All 11 tools
 /// ```
-pub fn full_registry(agent_registry: Arc<AgentRegistry>, llm: Arc<LlmClient>) -> ToolRegistry {
+pub fn full_registry(
+    agent_registry: Arc<RwLock<AgentRegistry>>,
+    llm: Arc<LlmClient>,
+) -> ToolRegistry {
     let mut registry = default_registry();
     register_task_tool(&mut registry, agent_registry, Arc::clone(&llm));
     register_web_search_tool(&mut registry, llm);
@@ -241,7 +247,7 @@ mod tests {
     #[test]
     fn test_register_task_tool() {
         let mut registry = ToolRegistry::new();
-        let agent_registry = Arc::new(AgentRegistry::new());
+        let agent_registry = Arc::new(RwLock::new(AgentRegistry::new()));
         let genai_client = rust_genai::Client::builder("test-key".to_string())
             .build()
             .unwrap();
@@ -280,7 +286,7 @@ mod tests {
 
     #[test]
     fn test_full_registry() {
-        let agent_registry = Arc::new(AgentRegistry::new());
+        let agent_registry = Arc::new(RwLock::new(AgentRegistry::new()));
         let genai_client = rust_genai::Client::builder("test-key".to_string())
             .build()
             .unwrap();

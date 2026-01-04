@@ -26,3 +26,9 @@ pub(crate) const EVENT_BATCH_REVIEW_INDIVIDUALLY: &str = "batch_review_individua
 
 /// Emitted periodically to report context usage.
 pub(crate) const EVENT_CONTEXT_USAGE: &str = "context_usage";
+
+/// Emitted when spawning a subagent via the task tool.
+pub(crate) const EVENT_SUBAGENT_STARTED: &str = "subagent_started";
+
+/// Emitted when a subagent completes execution.
+pub(crate) const EVENT_SUBAGENT_COMPLETED: &str = "subagent_completed";

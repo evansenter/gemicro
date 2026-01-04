@@ -19,6 +19,9 @@ gemicro-echo = { path = "../agents/gemicro-echo" }
 gemicro-react = { path = "../agents/gemicro-react" }
 gemicro-simple-qa = { path = "../agents/gemicro-simple-qa" }
 gemicro-tool-agent = { path = "../agents/gemicro-tool-agent" }
+
+# Tool crates - CLI needs Task tool for subagent access
+gemicro-task = { path = "../tools/gemicro-task" }
 rust-genai = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }

@@ -19,12 +19,13 @@ use gemicro_deep_research::DeepResearchAgent;
 use gemicro_developer::{DeveloperAgent, DeveloperConfig};
 use gemicro_echo::EchoAgent;
 use gemicro_runner::AgentRegistry;
+use gemicro_task::Task;
 use gemicro_tool_agent::{ToolAgent, ToolAgentConfig};
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU8, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::SystemTime;
 use tokio_util::sync::CancellationToken;
 
@@ -37,8 +38,11 @@ const HISTORY_PREVIEW_CHARS: usize = 256;
 
 /// REPL session state
 pub struct Session {
-    /// Agent registry
-    pub registry: AgentRegistry,
+    /// Agent registry (shared with Task tool for subagent access).
+    ///
+    /// Wrapped in RwLock to allow mutation on reload while Task tool holds
+    /// a read-only reference for agent lookups.
+    pub registry: Arc<RwLock<AgentRegistry>>,
 
     /// Currently selected agent name
     current_agent_name: String,
@@ -123,11 +127,17 @@ impl Session {
 
         let llm = Arc::new(llm);
 
-        // Create tool registry for agents that need tools
-        let tool_registry = Arc::new(Self::create_tool_registry(Arc::clone(&llm)));
+        // Create agent registry (shared with Task tool for subagent access)
+        let registry = Arc::new(RwLock::new(AgentRegistry::new()));
+
+        // Create tool registry with Task tool for subagent spawning
+        let tool_registry = Arc::new(Self::create_tool_registry(
+            Arc::clone(&llm),
+            Arc::clone(&registry),
+        ));
 
         Self {
-            registry: AgentRegistry::new(),
+            registry,
             current_agent_name: String::new(),
             history: ConversationHistory::new(),
             llm,
@@ -144,14 +154,25 @@ impl Session {
 
     /// Create a tool registry with developer-appropriate tools.
     ///
-    /// Includes read-only tools, web search, and write tools that require confirmation.
-    /// Does not include the Task tool (subagent access) - that's for Phase 2.
-    fn create_tool_registry(llm: Arc<LlmClient>) -> ToolRegistry {
+    /// Includes:
+    /// - Read-only tools (file_read, glob, grep)
+    /// - Web search tools
+    /// - Write tools that require confirmation (file_write, file_edit, bash)
+    /// - Task tool for spawning subagents (shares the Session's agent registry,
+    ///   enabling recursive delegation to any registered agent)
+    fn create_tool_registry(
+        llm: Arc<LlmClient>,
+        agent_registry: Arc<RwLock<AgentRegistry>>,
+    ) -> ToolRegistry {
         use gemicro_tool_agent::tools;
 
         let mut registry = tools::default_registry();
-        tools::register_web_search_tool(&mut registry, llm);
+        tools::register_web_search_tool(&mut registry, Arc::clone(&llm));
         tools::register_write_tools(&mut registry);
+
+        // Add Task tool for subagent spawning
+        registry.register(Task::new(agent_registry, llm));
+
         registry
     }
 
@@ -200,14 +221,6 @@ impl Session {
             }
         };
 
-        // Register deep_research agent (config is pre-validated, unwrap is safe)
-        self.registry.register("deep_research", move || {
-            Box::new(
-                DeepResearchAgent::new(research_config.clone())
-                    .expect("pre-validated config should not fail"),
-            )
-        });
-
         // Build tool_agent config from file or defaults
         let tool_config = if let Some(file_config) = &config.tool_agent {
             file_config.to_tool_agent_config()
@@ -224,16 +237,29 @@ impl Session {
             }
         };
 
+        // Register developer agent with defaults (config from file/CLI not yet implemented)
+        let developer_config = DeveloperConfig::default();
+
+        // Acquire write lock and register all agents
+        let mut registry = self.registry.write().expect("agent registry lock poisoned");
+
+        // Register deep_research agent (config is pre-validated, unwrap is safe)
+        registry.register("deep_research", move || {
+            Box::new(
+                DeepResearchAgent::new(research_config.clone())
+                    .expect("pre-validated config should not fail"),
+            )
+        });
+
         // Register tool_agent (config is pre-validated, unwrap is safe)
-        self.registry.register("tool_agent", move || {
+        registry.register("tool_agent", move || {
             Box::new(
                 ToolAgent::new(tool_config.clone()).expect("pre-validated config should not fail"),
             )
         });
 
-        // Register developer agent with defaults (config from file/CLI not yet implemented)
-        let developer_config = DeveloperConfig::default();
-        self.registry.register("developer", move || {
+        // Register developer agent
+        registry.register("developer", move || {
             Box::new(
                 DeveloperAgent::new(developer_config.clone())
                     .expect("default config should not fail"),
@@ -241,7 +267,7 @@ impl Session {
         });
 
         // Register echo agent (no config needed - for testing)
-        self.registry.register("echo", || Box::new(EchoAgent));
+        registry.register("echo", || Box::new(EchoAgent));
     }
 
     /// Reload configuration from files.
@@ -280,18 +306,24 @@ impl Session {
     /// Resets the session token count when switching to a different agent.
     /// Returns `Ok(())` if the agent exists, `Err` with message otherwise.
     pub fn set_current_agent(&mut self, name: &str) -> Result<(), String> {
-        if self.registry.contains(name) {
-            // Reset token count when switching agents
+        let registry = self
+            .registry
+            .read()
+            .map_err(|_| "Agent registry lock poisoned".to_string())?;
+
+        if registry.contains(name) {
+            drop(registry); // Release lock before modifying self
+                            // Reset token count when switching agents
             if self.current_agent_name != name {
                 self.session_tokens = 0;
             }
             self.current_agent_name = name.to_string();
             Ok(())
         } else {
+            let available = registry.list().join(", ");
             Err(format!(
                 "Unknown agent '{}'. Available: {}",
-                name,
-                self.registry.list().join(", ")
+                name, available
             ))
         }
     }
@@ -360,10 +392,15 @@ impl Session {
         if self.current_agent_name.is_empty() {
             anyhow::bail!("No agent selected. Register agents and call set_current_agent() first.");
         }
-        let agent = self
-            .registry
-            .get(&self.current_agent_name)
-            .context("Selected agent no longer available")?;
+        let agent = {
+            let registry = self
+                .registry
+                .read()
+                .map_err(|_| anyhow::anyhow!("Agent registry lock poisoned"))?;
+            registry
+                .get(&self.current_agent_name)
+                .context("Selected agent no longer available")?
+        };
 
         let agent_name = agent.name().to_string();
 
@@ -540,15 +577,19 @@ impl Session {
                         }
                         Command::ListAgents => {
                             println!("Available agents:");
-                            for name in self.registry.list() {
-                                let marker = if name == self.current_agent_name() {
-                                    " *"
-                                } else {
-                                    ""
-                                };
-                                if let Some(agent) = self.registry.get(name) {
-                                    println!("  {}{} - {}", name, marker, agent.description());
+                            if let Ok(registry) = self.registry.read() {
+                                for name in registry.list() {
+                                    let marker = if name == self.current_agent_name() {
+                                        " *"
+                                    } else {
+                                        ""
+                                    };
+                                    if let Some(agent) = registry.get(name) {
+                                        println!("  {}{} - {}", name, marker, agent.description());
+                                    }
                                 }
+                            } else {
+                                eprintln!("Error: Agent registry lock poisoned");
                             }
                         }
                         Command::Help => {

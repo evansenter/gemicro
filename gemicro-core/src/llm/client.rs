@@ -476,9 +476,9 @@ impl LlmClient {
                     .map_err(|_| LlmError::Timeout(timeout_duration.as_millis() as u64))?;
 
                 match chunk {
-                    Some(Ok(stream_chunk)) => {
+                    Some(Ok(stream_event)) => {
                         use rust_genai::StreamChunk;
-                        match stream_chunk {
+                        match stream_event.chunk {
                             StreamChunk::Delta(delta) => {
                                 if let Some(text) = delta.text() {
                                     let text_str = text.to_string();
@@ -603,9 +603,9 @@ impl LlmClient {
                 }?;
 
                 match chunk {
-                    Some(Ok(stream_chunk)) => {
+                    Some(Ok(stream_event)) => {
                         use rust_genai::StreamChunk;
-                        match stream_chunk {
+                        match stream_event.chunk {
                             StreamChunk::Delta(delta) => {
                                 if let Some(text) = delta.text() {
                                     let text_str = text.to_string();
