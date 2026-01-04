@@ -349,7 +349,8 @@ impl AgentContext {
     ///
     /// # Example
     ///
-    /// ```text
+    /// ```ignore
+    /// // PathSandbox is from gemicro-path-sandbox crate
     /// use gemicro_core::{AgentContext, InterceptorChain, ToolCall, ToolResult};
     /// use gemicro_path_sandbox::PathSandbox;
     /// use std::sync::Arc;
