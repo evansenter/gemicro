@@ -341,28 +341,18 @@ impl AgentContext {
     /// Add an interceptor chain for tool interception.
     ///
     /// When set, tool calls are passed through this chain for validation,
-    /// logging, and security controls (e.g., PathSandbox for file access
+    /// logging, and security controls (e.g., `PathSandbox` for file access
     /// restrictions).
     ///
     /// This is typically controlled by the CLI/environment, not agents.
     /// The interceptors are inherited by child contexts.
     ///
-    /// # Example
+    /// # Usage
     ///
-    /// ```ignore
-    /// // PathSandbox is from gemicro-path-sandbox crate
-    /// use gemicro_core::{AgentContext, InterceptorChain, ToolCall, ToolResult};
-    /// use gemicro_path_sandbox::PathSandbox;
-    /// use std::sync::Arc;
-    /// use std::path::PathBuf;
-    ///
-    /// let sandbox = PathSandbox::new(vec![PathBuf::from("/workspace")]);
-    /// let interceptors: InterceptorChain<ToolCall, ToolResult> =
-    ///     InterceptorChain::new().with(sandbox);
-    ///
-    /// let context = AgentContext::new(llm)
-    ///     .with_interceptors(Arc::new(interceptors));
-    /// ```
+    /// Build an `InterceptorChain<ToolCall, ToolResult>` with your desired
+    /// interceptors (e.g., `PathSandbox` from `gemicro-path-sandbox`), wrap
+    /// it in `Arc`, and pass to this method. See the CLI's `Session` for
+    /// a complete example.
     pub fn with_interceptors(
         mut self,
         interceptors: Arc<InterceptorChain<ToolCall, ToolResult>>,
