@@ -15,6 +15,7 @@ use gemicro_core::{
     enforce_final_result_contract, tool::ToolRegistry, AgentContext, AgentError, AgentUpdate,
     BatchConfirmationHandler, ConversationHistory, HistoryEntry, LlmClient,
 };
+use gemicro_critique::CritiqueAgent;
 use gemicro_deep_research::DeepResearchAgent;
 use gemicro_developer::{DeveloperAgent, DeveloperConfig};
 use gemicro_echo::EchoAgent;
@@ -268,6 +269,9 @@ impl Session {
 
         // Register echo agent (no config needed - for testing)
         registry.register("echo", || Box::new(EchoAgent));
+
+        // Register critique agent (for self-validation via Task tool)
+        registry.register("critique", || Box::new(CritiqueAgent::default_agent()));
     }
 
     /// Reload configuration from files.

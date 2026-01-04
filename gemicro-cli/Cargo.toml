@@ -13,6 +13,7 @@ gemicro-core = { path = "../gemicro-core" }
 gemicro-runner = { path = "../gemicro-runner" }
 
 # Agent crates - CLI needs all agents it uses
+gemicro-critique = { path = "../agents/gemicro-critique" }
 gemicro-deep-research = { path = "../agents/gemicro-deep-research" }
 gemicro-developer = { path = "../agents/gemicro-developer" }
 gemicro-echo = { path = "../agents/gemicro-echo" }

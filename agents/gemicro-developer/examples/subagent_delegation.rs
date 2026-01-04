@@ -9,6 +9,10 @@
 //!   GEMINI_API_KEY=your_key cargo run -p gemicro-developer --example subagent_delegation -- \
 //!     "Research the tradeoffs between tokio and async-std"
 //!
+//! Self-critique example (validates work against conventions):
+//!   GEMINI_API_KEY=your_key cargo run -p gemicro-developer --example subagent_delegation -- \
+//!     "Review the changes in src/lib.rs and validate against project conventions"
+//!
 //! For full wire-level debugging:
 //!   LOUD_WIRE=1 GEMINI_API_KEY=your_key cargo run -p gemicro-developer --example subagent_delegation
 
@@ -16,6 +20,7 @@ use futures_util::StreamExt;
 use gemicro_bash::Bash;
 use gemicro_core::tool::{AutoApprove, ToolRegistry};
 use gemicro_core::{Agent, AgentContext, LlmClient, LlmConfig, MODEL};
+use gemicro_critique::CritiqueAgent;
 use gemicro_deep_research::{DeepResearchAgent, ResearchConfig};
 use gemicro_developer::{DeveloperAgent, DeveloperConfig};
 use gemicro_file_read::FileRead;
@@ -106,6 +111,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let tool_config = ToolAgentConfig::default();
         reg.register("tool_agent", move || {
             Box::new(ToolAgent::new(tool_config.clone()).unwrap()) as Box<dyn Agent>
+        });
+
+        // Critique agent for self-validation against project conventions
+        reg.register("critique", || {
+            Box::new(CritiqueAgent::default_agent()) as Box<dyn Agent>
         });
 
         println!("Registered agents:");
