@@ -17,3 +17,4 @@ tokio = { workspace = true, features = ["fs"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "macros"] }
+env_logger = "0.11"

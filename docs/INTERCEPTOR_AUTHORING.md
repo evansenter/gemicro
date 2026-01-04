@@ -583,10 +583,35 @@ members = [
 | Crate | Purpose | Pattern |
 |-------|---------|---------|
 | `gemicro-audit-log` | Log all tool invocations | Unit struct |
-| `gemicro-file-security` | Block writes to sensitive paths | Config struct |
+| `gemicro-file-security` | Block writes to sensitive paths (blacklist) | Config struct |
+| `gemicro-path-sandbox` | Restrict file access to allowed paths (whitelist) | Config struct |
 | `gemicro-input-sanitizer` | Enforce input size limits | Config struct |
 | `gemicro-conditional-permission` | Dynamic permission prompts | Builder pattern |
 | `gemicro-metrics` | Track tool usage metrics | Stateful struct |
+
+### Whitelist vs Blacklist Security Models
+
+**FileSecurity (Blacklist)**: Blocks specific paths. Good for protecting known sensitive files.
+```rust
+// Block /etc and ~/.ssh
+let security = FileSecurity::new(vec![
+    PathBuf::from("/etc"),
+    PathBuf::from(home_dir.join(".ssh")),
+]);
+```
+
+**PathSandbox (Whitelist)**: Only allows specific paths. Good for sandboxed execution.
+```rust
+// Only allow /tmp/workspace
+let sandbox = PathSandbox::new(vec![PathBuf::from("/tmp/workspace")]);
+```
+
+**Defense-in-depth**: Combine both for layered protection:
+```rust
+let chain = InterceptorChain::new()
+    .with(PathSandbox::new(vec![workspace.clone()]))  // Whitelist first
+    .with(FileSecurity::new(vec![workspace.join(".env")]));  // Then blacklist sensitive files within
+```
 
 ## Security Documentation
 
@@ -613,7 +638,8 @@ When creating security-related interceptors, document limitations explicitly:
 ## See Also
 
 - `hooks/gemicro-audit-log/src/lib.rs` - Unit struct example
-- `hooks/gemicro-file-security/src/lib.rs` - Config struct example
+- `hooks/gemicro-file-security/src/lib.rs` - Config struct (blacklist) example
+- `hooks/gemicro-path-sandbox/src/lib.rs` - Config struct (whitelist) example
 - `hooks/gemicro-metrics/src/lib.rs` - Stateful struct example
 - `hooks/gemicro-conditional-permission/src/lib.rs` - Builder pattern example
 - `gemicro-core/src/interceptor/mod.rs` - Core trait definitions
