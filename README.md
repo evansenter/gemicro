@@ -60,7 +60,8 @@ let agent = DeveloperAgent::new(DeveloperConfig::default())?;
 let stream = agent.execute("Read CLAUDE.md and summarize it", AgentContext::new(llm));
 
 while let Some(update) = stream.next().await {
-    match update?.event_type.as_str() {
+    let update = update?;
+    match update.event_type.as_str() {
         "tool_call_started" => println!("🔧 {}", update.message),
         "final_result" => println!("{}", update.as_final_result().unwrap().result),
         _ => {} // Ignore unknown events (Evergreen philosophy)
