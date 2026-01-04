@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Gemicro is a CLI agent exploration platform for experimenting with AI agent implementation patterns, powered by the Gemini API via the rust-genai library.
 
-**Key Architecture**: 24-crate workspace with layered dependencies (6 agent crates in `agents/`, 10 tool crates in `tools/`, 5 hook crates in `hooks/`)
+**Key Architecture**: 26-crate workspace (7 agents, 10 tools, 5 hooks, 4 core)
 
 **Current Status**: Core implementation complete. Remaining work tracked in [GitHub Issues](https://github.com/evansenter/gemicro/issues).
 
@@ -198,6 +198,7 @@ use gemicro_core::{Agent, AgentContext}; // Always from core
 
 | Principle | Description |
 |-----------|-------------|
+| **LLM-First Design** | Don't build code to do what the LLM already does well. Give it context instead of building infrastructure. |
 | **Soft-Typed Events** | `event_type: String` + `data: JSON` instead of rigid enums |
 | **Semantic Meaning in Metadata** | Meaning lives in field names and event_type, not structure |
 | **ID Opacity** | IDs are opaque identifiers—never encode semantics in ID values |
