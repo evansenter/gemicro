@@ -1237,6 +1237,7 @@ let stream = agent.execute(&query, child_context);
 - `tools/gemicro-task/src/lib.rs` - Task tool for spawning subagents
 - `agents/gemicro-simple-qa/tests/integration.rs` - Integration test examples
 - `agents/gemicro-simple-qa/examples/trajectory_recording.rs` - Trajectory recording example
+- `agents/gemicro-developer/examples/subagent_delegation.rs` - Subagent delegation with CritiqueAgent
 - `docs/TOOL_AUTHORING.md` - Creating new tools
-- `docs/HOOK_AUTHORING.md` - Creating hooks to intercept tools
+- `docs/INTERCEPTOR_AUTHORING.md` - Creating interceptors to intercept tools
 - `CLAUDE.md` - Project design philosophy and crate responsibilities

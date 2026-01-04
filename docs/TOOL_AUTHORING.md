@@ -584,5 +584,5 @@ members = [
 - `tools/gemicro-bash/src/lib.rs` - Dangerous tool with confirmation
 - `tools/gemicro-web-fetch/src/lib.rs` - Async I/O tool
 - `gemicro-core/src/tool/mod.rs` - Core trait definitions
-- `docs/HOOK_AUTHORING.md` - Creating hooks to intercept tools
+- `docs/INTERCEPTOR_AUTHORING.md` - Creating interceptors to intercept tools
 - `CLAUDE.md` - Project design philosophy
