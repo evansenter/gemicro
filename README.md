@@ -51,54 +51,24 @@ gemicro --interactive
 
 ## Library Usage
 
-Beyond the CLI, Gemicro is a library for building agent-powered applications:
-
 ```rust
 use gemicro_developer::{DeveloperAgent, DeveloperConfig};
 use gemicro_core::{Agent, AgentContext, LlmClient, LlmConfig};
-use gemicro_core::tool::{AutoApprove, ToolRegistry};
-use futures_util::StreamExt;
-use std::sync::Arc;
 
-// Create LLM client
-let genai_client = rust_genai::Client::builder(api_key).build();
-let llm = LlmClient::new(genai_client, LlmConfig::default());
-
-// Create tool registry (register tools you want to use)
-let tools = ToolRegistry::new();
-
-// Build context with tools and confirmation handler
-let context = AgentContext::new(llm)
-    .with_tools(tools)
-    .with_confirmation_handler(Arc::new(AutoApprove));
-
-// Create an agent with configuration
-let config = DeveloperConfig::default().with_max_iterations(20);
-let agent = DeveloperAgent::new(config)?;
-
-// Execute and stream updates in real-time
-let stream = agent.execute("Read CLAUDE.md and summarize it", context);
-futures_util::pin_mut!(stream);
+let llm = LlmClient::new(rust_genai::Client::builder(api_key).build(), LlmConfig::default());
+let agent = DeveloperAgent::new(DeveloperConfig::default())?;
+let stream = agent.execute("Read CLAUDE.md and summarize it", AgentContext::new(llm));
 
 while let Some(update) = stream.next().await {
-    let update = update?;
-    match update.event_type.as_str() {
+    match update?.event_type.as_str() {
         "tool_call_started" => println!("🔧 {}", update.message),
-        "tool_result" => println!("  ✓ Complete"),
-        "final_result" => {
-            let result = update.as_final_result().unwrap();
-            println!("\n📊 {} tokens in {:?}",
-                result.metadata.total_tokens,
-                std::time::Duration::from_millis(result.metadata.duration_ms)
-            );
-            println!("\n{}", result.result);
-        }
-        _ => {} // Gracefully ignore unknown events (Evergreen philosophy)
+        "final_result" => println!("{}", update.as_final_result().unwrap().result),
+        _ => {} // Ignore unknown events (Evergreen philosophy)
     }
 }
 ```
 
-For a complete working example, see [`agents/gemicro-developer/examples/developer.rs`](agents/gemicro-developer/examples/developer.rs).
+See [`agents/gemicro-developer/examples/developer.rs`](agents/gemicro-developer/examples/developer.rs) for the full example with tools and confirmation handling.
 
 ## Available Agents
 
@@ -113,30 +83,25 @@ For a complete working example, see [`agents/gemicro-developer/examples/develope
 
 ## Architecture
 
-### 24-Crate Workspace
+### Workspace Structure
 
 ```
-gemicro-core (Agent trait, Tool trait, Interceptor trait, Coordination trait, events, LLM - GENERIC ONLY)
+gemicro-core (Agent trait, Tool trait, Interceptor trait, Coordination trait, events, LLM)
     ↓
-tools/* (10 tool crates - file_read, web_fetch, task, web_search, glob, grep, file_write, file_edit, bash, event_bus)
-hooks/* (5 hook crates - audit_log, file_security, input_sanitizer, conditional_permission, metrics)
-agents/* (6 agent crates - hermetic isolation)
+tools/* (10 crates)  ·  hooks/* (5 crates)  ·  agents/* (7 crates)
     ↓
-gemicro-runner (execution state, metrics, runner)
-    ↓
-gemicro-eval (datasets, scorers, harness)
-gemicro-cli (terminal rendering)
+gemicro-runner  ·  gemicro-eval  ·  gemicro-cli
 ```
 
-| Layer | Crates |
-|-------|--------|
-| **gemicro-core** | Agent/Tool/Interceptor/Coordination traits, AgentContext, AgentUpdate events, LlmClient. **No implementations.** |
-| **tools/** | file_read, web_fetch, task, web_search, glob, grep, file_write, file_edit, bash, event_bus |
+| Layer | Contents |
+|-------|----------|
+| **gemicro-core** | Agent/Tool/Interceptor/Coordination traits, events, LlmClient |
+| **tools/** | file ops, search (glob/grep), bash, web, task, event_bus |
 | **hooks/** | audit_log, file_security, input_sanitizer, conditional_permission, metrics |
-| **agents/** | deep_research, react, simple_qa, tool_agent, critique, developer |
-| **gemicro-runner** | Headless execution: AgentRunner, AgentRegistry, ExecutionState, metrics |
-| **gemicro-eval** | Evaluation: HotpotQA/GSM8K datasets, scorers (Contains, LLM Judge) |
-| **gemicro-cli** | Terminal UI: indicatif progress, rustyline REPL, markdown rendering |
+| **agents/** | deep_research, react, developer, tool_agent, critique, simple_qa, echo |
+| **gemicro-runner** | AgentRunner, AgentRegistry, ExecutionState |
+| **gemicro-eval** | HotpotQA/GSM8K datasets, scorers |
+| **gemicro-cli** | Terminal UI, REPL, markdown rendering |
 
 ### Design Philosophy
 
@@ -227,31 +192,15 @@ Goodbye!
 
 ### CLI Options
 
-```bash
-gemicro [OPTIONS] [QUERY]
+Key options (run `gemicro --help` for full list):
 
-Arguments:
-  [QUERY]  Research query (required unless using --interactive)
-
-Options:
-  -i, --interactive            Interactive REPL mode
-      --agent <NAME>           Agent to use (required)
-      --api-key <KEY>          Gemini API key (or GEMINI_API_KEY env var)
-      --min-sub-queries <N>    Minimum sub-queries [default: 3]
-      --max-sub-queries <N>    Maximum sub-queries [default: 5]
-      --max-concurrent <N>     Max parallel executions [default: 5]
-      --timeout <SECS>         Total timeout [default: 180]
-      --continue-on-failure    Continue if some sub-queries fail
-      --llm-timeout <SECS>     Per-request timeout [default: 60]
-      --max-tokens <N>         Max tokens per LLM request [default: 16384]
-      --temperature <F>        Temperature 0.0-1.0 [default: 0.7]
-      --google-search          Enable Google Search grounding
-      --event-bus-url <URL>    Event bus URL for cross-session coordination
-      --plain                  Plain text output (no markdown)
-  -v, --verbose                Enable debug logging
-  -h, --help                   Print help
-  -V, --version                Print version
-```
+| Option | Description |
+|--------|-------------|
+| `-i, --interactive` | REPL mode |
+| `--agent <NAME>` | Agent to use (required) |
+| `--google-search` | Enable web grounding |
+| `--timeout <SECS>` | Total timeout [default: 180] |
+| `-v, --verbose` | Debug logging |
 
 ## Development
 
