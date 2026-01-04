@@ -198,6 +198,7 @@ use gemicro_core::{Agent, AgentContext}; // Always from core
 
 | Principle | Description |
 |-----------|-------------|
+| **LLM-First Design** | Don't build code to do what the LLM already does well. Give it context instead of building infrastructure. |
 | **Soft-Typed Events** | `event_type: String` + `data: JSON` instead of rigid enums |
 | **Semantic Meaning in Metadata** | Meaning lives in field names and event_type, not structure |
 | **ID Opacity** | IDs are opaque identifiers—never encode semantics in ID values |
