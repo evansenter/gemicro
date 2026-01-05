@@ -215,6 +215,122 @@ fn test_cli_token_counts_displayed() {
 // step-level timing data).
 
 // ============================================================================
+// Sandbox Path Tests
+// ============================================================================
+
+#[test]
+fn test_cli_sandbox_path_help() {
+    let output = run_cli(&["--help"]);
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("--sandbox-path"),
+        "Help should mention --sandbox-path flag"
+    );
+    assert!(
+        stdout.contains("Restrict file operations"),
+        "Help should describe sandbox restriction"
+    );
+}
+
+#[test]
+fn test_cli_sandbox_path_nonexistent() {
+    let output = run_cli(&[
+        "test query",
+        "--agent",
+        "echo",
+        "--api-key",
+        "fake-key",
+        "--sandbox-path",
+        "/nonexistent/path/that/should/not/exist",
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("does not exist"),
+        "Should report path does not exist"
+    );
+}
+
+#[test]
+fn test_cli_sandbox_path_not_directory() {
+    // Use the test binary itself as a file that exists but isn't a directory
+    let binary_path = env!("CARGO_BIN_EXE_gemicro");
+    let output = run_cli(&[
+        "test query",
+        "--agent",
+        "echo",
+        "--api-key",
+        "fake-key",
+        "--sandbox-path",
+        binary_path,
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("must be a directory"),
+        "Should report path must be directory"
+    );
+}
+
+#[test]
+fn test_cli_sandbox_path_valid() {
+    // /tmp should exist on most systems
+    if !std::path::Path::new("/tmp").exists() {
+        return;
+    }
+
+    // With a valid sandbox path, should fail on missing agent or other reasons,
+    // but NOT on sandbox path validation
+    let output = run_cli(&[
+        "test query",
+        "--agent",
+        "echo",
+        "--api-key",
+        "fake-key",
+        "--sandbox-path",
+        "/tmp",
+    ]);
+
+    // Check that it didn't fail on sandbox validation
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("sandbox path does not exist"),
+        "Valid sandbox path should not trigger existence error"
+    );
+    assert!(
+        !stderr.contains("must be a directory"),
+        "Valid sandbox path should not trigger directory error"
+    );
+}
+
+#[test]
+fn test_cli_multiple_sandbox_paths() {
+    // Test that multiple --sandbox-path flags are accepted
+    if !std::path::Path::new("/tmp").exists() {
+        return;
+    }
+
+    let output = run_cli(&[
+        "test query",
+        "--agent",
+        "echo",
+        "--api-key",
+        "fake-key",
+        "--sandbox-path",
+        "/tmp",
+        "--sandbox-path",
+        "/tmp", // Duplicate is fine, just testing multiple args work
+    ]);
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("sandbox path"),
+        "Multiple valid sandbox paths should not trigger validation error"
+    );
+}
+
+// ============================================================================
 // Interactive REPL Tests
 // ============================================================================
 
