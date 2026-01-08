@@ -2,7 +2,7 @@
 //!
 //! These tools are included for convenience but follow the "Explicit Over Implicit"
 //! principle - they are NOT automatically registered. Callers must explicitly
-//! add them to a [`ToolRegistry`] if needed.
+//! add them to a [`gemicro_core::tool::ToolRegistry`] if needed.
 //!
 //! # Example
 //!
