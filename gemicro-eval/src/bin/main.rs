@@ -9,10 +9,9 @@ use gemicro_eval::{
     Contains, CritiqueScorer, Dataset, EvalConfig, EvalHarness, EvalProgress, EvalSummary,
     HotpotQA, JsonFileDataset, Scorers, GSM8K,
 };
+use gemicro_prompt_agent::{PromptAgent, PromptAgentConfig};
 use gemicro_react::{ReactAgent, ReactConfig};
 use gemicro_runner::AgentRegistry;
-use gemicro_simple_qa::{SimpleQaAgent, SimpleQaConfig};
-use gemicro_tool_agent::{ToolAgent, ToolAgentConfig};
 use indicatif::{ProgressBar, ProgressStyle};
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -36,7 +35,7 @@ struct Args {
     #[arg(long, default_value = "contains,critique")]
     scorer: String,
 
-    /// Agent to evaluate: deep_research, react, simple_qa, tool_agent
+    /// Agent to evaluate: deep_research, react, prompt_agent
     #[arg(long, short = 'a')]
     agent: String,
 
@@ -100,9 +99,9 @@ impl Args {
         }
 
         // Validate agent
-        if !["deep_research", "react", "simple_qa", "tool_agent"].contains(&self.agent.as_str()) {
+        if !["deep_research", "react", "prompt_agent"].contains(&self.agent.as_str()) {
             return Err(format!(
-                "Invalid agent '{}'. Use deep_research, react, simple_qa, or tool_agent.",
+                "Invalid agent '{}'. Use deep_research, react, or prompt_agent.",
                 self.agent
             ));
         }
@@ -168,12 +167,8 @@ fn create_registry() -> AgentRegistry {
         Box::new(ReactAgent::new(ReactConfig::default()).unwrap())
     });
 
-    registry.register("simple_qa", || {
-        Box::new(SimpleQaAgent::new(SimpleQaConfig::default()).unwrap())
-    });
-
-    registry.register("tool_agent", || {
-        Box::new(ToolAgent::new(ToolAgentConfig::default()).unwrap())
+    registry.register("prompt_agent", || {
+        Box::new(PromptAgent::new(PromptAgentConfig::default()).unwrap())
     });
 
     registry
@@ -451,8 +446,7 @@ mod tests {
         let registry = create_registry();
         assert!(registry.contains("deep_research"));
         assert!(registry.contains("react"));
-        assert!(registry.contains("simple_qa"));
-        assert!(registry.contains("tool_agent"));
+        assert!(registry.contains("prompt_agent"));
     }
 
     #[test]

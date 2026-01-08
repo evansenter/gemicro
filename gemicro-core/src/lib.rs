@@ -16,8 +16,7 @@
 //! Agents are in separate crates for hermetic isolation:
 //! - `gemicro-deep-research`: Decomposes queries, executes sub-queries in parallel, synthesizes
 //! - `gemicro-react`: Reasoning + Acting pattern with iterative tool use
-//! - `gemicro-simple-qa`: Minimal single-call agent for reference/demonstration
-//! - `gemicro-tool-agent`: Native function calling via rust-genai's `#[tool]` macro
+//! - `gemicro-prompt-agent`: Executes prompts with optional tool support
 //! - `gemicro-critique`: Generalized output validation and actionable feedback
 //!
 //! ## Example

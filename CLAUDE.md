@@ -9,6 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | Principle | Meaning |
 |-----------|---------|
 | **LLM-First** | Trust the model; don't over-engineer |
+| **Explicit Over Implicit** | No magical defaults; 3 lines of clear code beats hidden behavior |
 | **Soft-Typed Events** | `event_type: String` + `data: JSON`, not rigid enums |
 | **Graceful Unknowns** | Unknown event types logged, not errors |
 | **Agent Isolation** | Agents depend only on core, never on each other |
@@ -113,7 +114,7 @@ let stream = agent.execute(query, context);            // Context is minimal
 See `docs/AGENT_AUTHORING.md`, `docs/TOOL_AUTHORING.md`, `docs/INTERCEPTOR_AUTHORING.md`.
 
 Reference implementations:
-- Agent: `agents/gemicro-simple-qa/`
+- Agent: `agents/gemicro-prompt-agent/`
 - Tool: `tools/gemicro-file-read/`
 - Hook: `hooks/gemicro-audit-log/`
 

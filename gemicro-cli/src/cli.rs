@@ -19,7 +19,7 @@ pub struct Args {
     #[arg(short, long)]
     pub interactive: bool,
 
-    /// Agent to use (e.g., deep_research, developer, tool_agent)
+    /// Agent to use (e.g., deep_research, developer, prompt_agent)
     #[arg(long)]
     pub agent: String,
 

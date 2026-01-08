@@ -12,7 +12,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// # Example
 ///
 /// ```no_run
-/// use gemicro_tool_agent::tools::CurrentDatetime;
+/// use gemicro_prompt_agent::tools::CurrentDatetime;
 /// use gemicro_core::tool::Tool;
 /// use serde_json::json;
 ///

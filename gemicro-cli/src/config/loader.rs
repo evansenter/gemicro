@@ -293,17 +293,17 @@ impl ConfigLoader {
             (None, None) => {}
         }
 
-        // Compare tool_agent configs
-        match (&self.last_config.tool_agent, &new_config.tool_agent) {
+        // Compare prompt_agent configs
+        match (&self.last_config.prompt_agent, &new_config.prompt_agent) {
             (Some(old), Some(new)) => {
                 Self::diff_option(
-                    "tool_agent.timeout_secs",
+                    "prompt_agent.timeout_secs",
                     &old.timeout_secs,
                     &new.timeout_secs,
                     &mut changes,
                 );
                 Self::diff_option(
-                    "tool_agent.system_prompt",
+                    "prompt_agent.system_prompt",
                     &old.system_prompt,
                     &new.system_prompt,
                     &mut changes,
@@ -311,14 +311,14 @@ impl ConfigLoader {
             }
             (None, Some(_)) => {
                 changes.push(ConfigChange {
-                    field: "tool_agent".to_string(),
+                    field: "prompt_agent".to_string(),
                     old_value: "(none)".to_string(),
                     new_value: "(added)".to_string(),
                 });
             }
             (Some(_), None) => {
                 changes.push(ConfigChange {
-                    field: "tool_agent".to_string(),
+                    field: "prompt_agent".to_string(),
                     old_value: "(present)".to_string(),
                     new_value: "(removed)".to_string(),
                 });
@@ -487,7 +487,7 @@ mod tests {
                 max_sub_queries: Some(5),
                 ..Default::default()
             }),
-            tool_agent: None,
+            prompt_agent: None,
         };
 
         let new = GemicroConfig {
@@ -497,7 +497,7 @@ mod tests {
                 timeout_secs: Some(120),   // Added
                 ..Default::default()
             }),
-            tool_agent: None,
+            prompt_agent: None,
         };
 
         let mut loader = ConfigLoader::new();

@@ -78,9 +78,8 @@ See [`agents/gemicro-developer/examples/developer.rs`](agents/gemicro-developer/
 | `deep_research` | Decompose → Parallel Execute → Synthesize | Multi-hop research questions |
 | `react` | Thought → Action → Observation loops | Step-by-step reasoning with tools |
 | `developer` | Explicit FC with real-time tool events | Code tasks with full visibility |
-| `tool_agent` | Automatic function calling | Simple tool use via rust-genai |
+| `prompt_agent` | Single LLM call with optional tools | Simple prompts and tool use |
 | `critique` | LLM-as-judge with verdicts | Evaluation and quality assessment |
-| `simple_qa` | Single LLM call | Minimal reference implementation |
 
 ## Architecture
 
@@ -99,7 +98,7 @@ gemicro-runner  ·  gemicro-eval  ·  gemicro-cli
 | **gemicro-core** | Agent/Tool/Interceptor/Coordination traits, events, LlmClient |
 | **tools/** | file ops, search (glob/grep), bash, web, task, event_bus |
 | **hooks/** | audit_log, file_security, input_sanitizer, conditional_permission, metrics |
-| **agents/** | deep_research, react, developer, tool_agent, critique, simple_qa, echo |
+| **agents/** | deep_research, react, developer, prompt_agent, critique, echo |
 | **gemicro-runner** | AgentRunner, AgentRegistry, ExecutionState |
 | **gemicro-eval** | HotpotQA/GSM8K datasets, scorers |
 | **gemicro-cli** | Terminal UI, REPL, markdown rendering |

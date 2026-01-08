@@ -35,7 +35,7 @@
 //! sub_query_system = "You are a research assistant..."
 //! synthesis_system = "You are a research synthesis expert..."
 //!
-//! [tool_agent]
+//! [prompt_agent]
 //! timeout_secs = 60
 //! system_prompt = "You are a helpful assistant..."
 //! ```
@@ -44,4 +44,4 @@ pub mod loader;
 mod types;
 
 pub use loader::{ConfigChange, ConfigLoader, ConfigSource};
-pub use types::{DeepResearchToml, GemicroConfig, PromptsToml, ToolAgentToml};
+pub use types::{DeepResearchToml, GemicroConfig, PromptAgentToml, PromptsToml};

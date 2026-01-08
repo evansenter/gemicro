@@ -117,14 +117,14 @@ When the `task` tool is available, you can delegate work to specialized subagent
 | Agent | Use For |
 |-------|---------|
 | `deep_research` | Complex research requiring multiple sub-queries synthesized into a comprehensive answer |
-| `tool_agent` | Tasks requiring tool use without the full developer workflow (simpler, faster) |
+| `prompt_agent` | Simple tasks with optional tool use without the full developer workflow (simpler, faster) |
 | `critique` | Validate your work against project conventions (CLAUDE.md), check for issues before completing |
 
 *Note: Other registered agents may also be available. These are the commonly useful subagents.*
 
 **When to delegate:**
 - Research questions needing synthesis of multiple sources → `deep_research`
-- Simple tool-based tasks you could do yourself but want isolated → `tool_agent`
+- Simple tasks you could do yourself but want isolated → `prompt_agent`
 - Self-validation before completing significant changes → `critique`
 
 **When NOT to delegate:**

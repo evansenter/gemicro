@@ -43,9 +43,9 @@ jobs:
           - group: cli
             packages: "gemicro-cli"
           - group: research-qa
-            packages: "gemicro-deep-research gemicro-simple-qa"
+            packages: "gemicro-deep-research gemicro-prompt-agent"
           - group: react-tools
-            packages: "gemicro-react gemicro-tool-agent"
+            packages: "gemicro-react"
           - group: core-eval
             packages: "gemicro-core gemicro-eval"
     steps:

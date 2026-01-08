@@ -132,16 +132,16 @@ Location: `gemicro-core/src/update.rs`
 
 ```rust
 pub struct AgentUpdate {
-    pub event_type: String,       // Semantic identifier (e.g., "simple_qa_result")
+    pub event_type: String,       // Semantic identifier (e.g., "prompt_agent_result")
     pub message: String,          // Human-readable description
     pub timestamp: SystemTime,
     pub data: serde_json::Value,  // Arbitrary JSON payload
 }
 ```
 
-## Complete Example: SimpleQaAgent
+## Complete Example: PromptAgent
 
-The `SimpleQaAgent` is a minimal reference implementation. See the full source at `agents/gemicro-simple-qa/src/lib.rs`.
+The `PromptAgent` is a minimal reference implementation. See the full source at `agents/gemicro-prompt-agent/src/lib.rs`.
 
 ### 1. Event Type Constants (Internal Only)
 
@@ -149,15 +149,15 @@ Constants are internal to prevent typos and ensure consistency within the agent.
 
 ```rust
 // Internal constants - private to this module
-const EVENT_SIMPLE_QA_STARTED: &str = "simple_qa_started";
-const EVENT_SIMPLE_QA_RESULT: &str = "simple_qa_result";
+const EVENT_PROMPT_AGENT_STARTED: &str = "prompt_agent_started";
+const EVENT_PROMPT_AGENT_RESULT: &str = "prompt_agent_result";
 ```
 
 Use `AgentUpdate::custom()` with these constants:
 
 ```rust
 yield AgentUpdate::custom(
-    EVENT_SIMPLE_QA_STARTED,
+    EVENT_PROMPT_AGENT_STARTED,
     format!("Processing query: {}", truncate(&query, 50)),
     json!({ "query": query }),
 );
@@ -168,16 +168,16 @@ yield AgentUpdate::custom(
 Mark config structs with `#[non_exhaustive]` and provide builder methods:
 
 ```rust
-// Location: agents/gemicro-simple-qa/src/lib.rs
+// Location: agents/gemicro-prompt-agent/src/lib.rs
 
 #[derive(Debug, Clone)]
 #[non_exhaustive]  // Allows adding fields without breaking changes
-pub struct SimpleQaConfig {
+pub struct PromptAgentConfig {
     pub timeout: Duration,
     pub system_prompt: String,
 }
 
-impl SimpleQaConfig {
+impl PromptAgentConfig {
     /// Set the timeout duration.
     #[must_use]
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
@@ -193,7 +193,7 @@ impl SimpleQaConfig {
     }
 }
 
-impl SimpleQaConfig {
+impl PromptAgentConfig {
     pub fn validate(&self) -> Result<(), AgentError> {
         let mut errors = Vec::new();
 
@@ -216,14 +216,14 @@ impl SimpleQaConfig {
 ### 3. Agent Struct and Constructor
 
 ```rust
-// Location: agents/gemicro-simple-qa/src/lib.rs
+// Location: agents/gemicro-prompt-agent/src/lib.rs
 
-pub struct SimpleQaAgent {
-    config: SimpleQaConfig,
+pub struct PromptAgent {
+    config: PromptAgentConfig,
 }
 
-impl SimpleQaAgent {
-    pub fn new(config: SimpleQaConfig) -> Result<Self, AgentError> {
+impl PromptAgent {
+    pub fn new(config: PromptAgentConfig) -> Result<Self, AgentError> {
         config.validate()?;  // Fail fast on invalid config
         Ok(Self { config })
     }
@@ -233,15 +233,15 @@ impl SimpleQaAgent {
 ### 4. Implement Agent Trait
 
 ```rust
-// Location: agents/gemicro-simple-qa/src/lib.rs
+// Location: agents/gemicro-prompt-agent/src/lib.rs
 
-impl Agent for SimpleQaAgent {
+impl Agent for PromptAgent {
     fn name(&self) -> &str {
-        "simple_qa"
+        "prompt_agent"
     }
 
     fn description(&self) -> &str {
-        "A simple question-answering agent that makes a single LLM call"
+        "A prompt-based agent that makes a single LLM call with optional tools"
     }
 
     fn execute(&self, query: &str, context: AgentContext) -> AgentStream<'_> {
@@ -253,7 +253,7 @@ impl Agent for SimpleQaAgent {
 
             // Emit start event
             yield AgentUpdate::custom(
-                EVENT_SIMPLE_QA_STARTED,
+                EVENT_PROMPT_AGENT_STARTED,
                 format!("Processing query: {}", truncate(&query, 50)),
                 json!({ "query": query }),
             );
@@ -284,7 +284,7 @@ impl Agent for SimpleQaAgent {
 
             // Emit result event
             yield AgentUpdate::custom(
-                EVENT_SIMPLE_QA_RESULT,
+                EVENT_PROMPT_AGENT_RESULT,
                 answer.clone(),
                 json!({
                     "answer": answer,
@@ -647,13 +647,13 @@ mod tests {
 
     #[test]
     fn test_default_config_is_valid() {
-        let config = SimpleQaConfig::default();
+        let config = PromptAgentConfig::default();
         assert!(config.validate().is_ok());
     }
 
     #[test]
     fn test_config_rejects_zero_timeout() {
-        let config = SimpleQaConfig {
+        let config = PromptAgentConfig {
             timeout: Duration::ZERO,
             system_prompt: "Valid".to_string(),
         };
@@ -664,18 +664,18 @@ mod tests {
 
 ### Integration Tests
 
-Location: `agents/gemicro-simple-qa/tests/integration.rs`
+Location: `agents/gemicro-prompt-agent/tests/integration.rs`
 
 ```rust
 #[tokio::test]
 #[ignore]  // Requires GEMINI_API_KEY
-async fn test_simple_qa_full_flow() {
+async fn test_prompt_agent_full_flow() {
     let Some(api_key) = get_api_key() else {
         return;  // Skip if no API key
     };
 
     let context = create_test_context(&api_key);
-    let agent = SimpleQaAgent::new(SimpleQaConfig::default()).unwrap();
+    let agent = PromptAgent::new(PromptAgentConfig::default()).unwrap();
 
     let stream = agent.execute("What is 2 + 2?", context);
     futures_util::pin_mut!(stream);
@@ -688,8 +688,8 @@ async fn test_simple_qa_full_flow() {
 
     // Use string literals to match events (constants are internal)
     assert_eq!(events, vec![
-        "simple_qa_started",
-        "simple_qa_result",
+        "prompt_agent_started",
+        "prompt_agent_result",
         "final_result",
     ]);
 }
@@ -697,7 +697,7 @@ async fn test_simple_qa_full_flow() {
 
 Run integration tests with:
 ```bash
-cargo test --package gemicro-simple-qa -- --include-ignored
+cargo test --package gemicro-prompt-agent -- --include-ignored
 ```
 
 ## Registry Integration
@@ -711,13 +711,13 @@ use gemicro_runner::AgentRegistry;
 
 let mut registry = AgentRegistry::new();
 
-registry.register("simple_qa", || {
-    // unwrap() is safe here: SimpleQaConfig::default() is always valid
-    Box::new(SimpleQaAgent::new(SimpleQaConfig::default()).unwrap())
+registry.register("prompt_agent", || {
+    // unwrap() is safe here: PromptAgentConfig::default() is always valid
+    Box::new(PromptAgent::new(PromptAgentConfig::default()).unwrap())
 });
 
 // Create fresh instance for each execution
-let agent = registry.get("simple_qa").unwrap();
+let agent = registry.get("prompt_agent").unwrap();
 ```
 
 ### Why Factories?
@@ -965,7 +965,7 @@ For LLM-driven tool use (where the model decides which tools to call), use `Gemi
 use gemicro_core::tool::{GemicroToolService, ToolSet};
 use std::sync::Arc;
 
-impl Agent for ToolAgent {
+impl Agent for PromptAgent {
     fn execute(&self, query: &str, context: AgentContext) -> AgentStream<'_> {
         Box::pin(try_stream! {
             let tools = context.tools.clone().unwrap();
@@ -997,7 +997,7 @@ impl Agent for ToolAgent {
 }
 ```
 
-See `agents/gemicro-tool-agent/` for a complete implementation.
+See `agents/gemicro-prompt-agent/` for a complete implementation.
 
 ## Subagent Orchestration
 
@@ -1206,16 +1206,16 @@ let task = Task::new(registry)
 
 ### Convenience Constructors
 
-`SimpleQaAgent` provides constructors for use as an ephemeral agent backend:
+`PromptAgent` provides constructors for use as an ephemeral agent backend:
 
 ```rust
 // Create with custom system prompt (uses default timeout)
-let agent = SimpleQaAgent::with_system_prompt(
+let agent = PromptAgent::with_system_prompt(
     "You are a Python security auditor. Review code for vulnerabilities."
 )?;
 
 // Create with custom prompt and timeout
-let agent = SimpleQaAgent::with_system_prompt_and_timeout(
+let agent = PromptAgent::with_system_prompt_and_timeout(
     "You are a code reviewer.",
     Duration::from_secs(60),
 )?;
@@ -1225,18 +1225,17 @@ These are used by the Task tool when executing `PromptAgentDef`:
 
 ```rust
 // Task tool internally does:
-let agent = SimpleQaAgent::with_system_prompt(&prompt_def.system_prompt)?;
+let agent = PromptAgent::with_system_prompt(&prompt_def.system_prompt)?;
 let stream = agent.execute(&query, child_context);
 ```
 
 ## See Also
 
-- `agents/gemicro-simple-qa/src/lib.rs` - Full reference implementation
+- `agents/gemicro-prompt-agent/src/lib.rs` - Full reference implementation with tool support
 - `agents/gemicro-deep-research/src/` - Complex multi-phase example
-- `agents/gemicro-tool-agent/src/` - Tool-using agent example
 - `tools/gemicro-task/src/lib.rs` - Task tool for spawning subagents
-- `agents/gemicro-simple-qa/tests/integration.rs` - Integration test examples
-- `agents/gemicro-simple-qa/examples/trajectory_recording.rs` - Trajectory recording example
+- `agents/gemicro-prompt-agent/tests/integration.rs` - Integration test examples
+- `agents/gemicro-prompt-agent/examples/trajectory_recording.rs` - Trajectory recording example
 - `agents/gemicro-developer/examples/subagent_delegation.rs` - Subagent delegation with CritiqueAgent
 - `docs/TOOL_AUTHORING.md` - Creating new tools
 - `docs/INTERCEPTOR_AUTHORING.md` - Creating interceptors to intercept tools

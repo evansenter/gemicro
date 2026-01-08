@@ -18,8 +18,17 @@ gemicro-deep-research = { path = "../agents/gemicro-deep-research" }
 gemicro-developer = { path = "../agents/gemicro-developer" }
 gemicro-echo = { path = "../agents/gemicro-echo" }
 gemicro-react = { path = "../agents/gemicro-react" }
-gemicro-simple-qa = { path = "../agents/gemicro-simple-qa" }
-gemicro-tool-agent = { path = "../agents/gemicro-tool-agent" }
+gemicro-prompt-agent = { path = "../agents/gemicro-prompt-agent" }
+
+# Tool crates - CLI needs these for explicit tool registration
+gemicro-file-read = { path = "../tools/gemicro-file-read" }
+gemicro-web-fetch = { path = "../tools/gemicro-web-fetch" }
+gemicro-glob = { path = "../tools/gemicro-glob" }
+gemicro-grep = { path = "../tools/gemicro-grep" }
+gemicro-web-search = { path = "../tools/gemicro-web-search" }
+gemicro-file-write = { path = "../tools/gemicro-file-write" }
+gemicro-file-edit = { path = "../tools/gemicro-file-edit" }
+gemicro-bash = { path = "../tools/gemicro-bash" }
 
 # Tool crates - CLI needs Task tool for subagent access
 gemicro-task = { path = "../tools/gemicro-task" }

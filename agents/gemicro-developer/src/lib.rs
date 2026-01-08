@@ -1179,7 +1179,7 @@ mod tests {
     #[test]
     fn test_subagent_events_failure() {
         let arguments = json!({
-            "agent": "tool_agent",
+            "agent": "prompt_agent",
             "query": "Run failing task"
         });
 

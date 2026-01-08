@@ -4,7 +4,7 @@
 //! (e.g., `u64` for seconds instead of `Duration`).
 
 use gemicro_deep_research::{ResearchConfig, ResearchPrompts};
-use gemicro_tool_agent::ToolAgentConfig;
+use gemicro_prompt_agent::PromptAgentConfig;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -16,8 +16,8 @@ pub struct GemicroConfig {
     /// Deep Research agent configuration
     pub deep_research: Option<DeepResearchToml>,
 
-    /// Tool Agent configuration
-    pub tool_agent: Option<ToolAgentToml>,
+    /// Prompt Agent configuration
+    pub prompt_agent: Option<PromptAgentToml>,
 }
 
 impl GemicroConfig {
@@ -29,17 +29,17 @@ impl GemicroConfig {
                 None => self.deep_research = Some(dr),
             }
         }
-        if let Some(ta) = other.tool_agent {
-            match &mut self.tool_agent {
-                Some(existing) => existing.merge(ta),
-                None => self.tool_agent = Some(ta),
+        if let Some(pa) = other.prompt_agent {
+            match &mut self.prompt_agent {
+                Some(existing) => existing.merge(pa),
+                None => self.prompt_agent = Some(pa),
             }
         }
     }
 
     /// Check if this config is empty (all sections are None or default).
     pub fn is_empty(&self) -> bool {
-        self.deep_research.is_none() && self.tool_agent.is_none()
+        self.deep_research.is_none() && self.prompt_agent.is_none()
     }
 }
 
@@ -194,11 +194,11 @@ impl PromptsToml {
     }
 }
 
-/// TOML-serializable Tool Agent configuration.
+/// TOML-serializable Prompt Agent configuration.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 #[non_exhaustive]
-pub struct ToolAgentToml {
+pub struct PromptAgentToml {
     /// Total timeout in seconds
     pub timeout_secs: Option<u64>,
 
@@ -206,9 +206,9 @@ pub struct ToolAgentToml {
     pub system_prompt: Option<String>,
 }
 
-impl ToolAgentToml {
+impl PromptAgentToml {
     /// Merge another config into this one.
-    pub fn merge(&mut self, other: ToolAgentToml) {
+    pub fn merge(&mut self, other: PromptAgentToml) {
         if other.timeout_secs.is_some() {
             self.timeout_secs = other.timeout_secs;
         }
@@ -217,15 +217,15 @@ impl ToolAgentToml {
         }
     }
 
-    /// Convert to ToolAgentConfig, applying overrides to defaults.
-    pub fn to_tool_agent_config(&self) -> ToolAgentConfig {
-        let mut config = ToolAgentConfig::default();
+    /// Convert to PromptAgentConfig, applying overrides to defaults.
+    pub fn to_prompt_agent_config(&self) -> PromptAgentConfig {
+        let mut config = PromptAgentConfig::default();
 
         if let Some(v) = self.timeout_secs {
-            config.timeout = Duration::from_secs(v);
+            config = config.with_timeout(Duration::from_secs(v));
         }
         if let Some(v) = &self.system_prompt {
-            config.system_prompt = v.clone();
+            config = config.with_system_prompt(v.clone());
         }
 
         config
@@ -281,19 +281,19 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_tool_agent_config() {
+    fn test_parse_prompt_agent_config() {
         let toml = r#"
-            [tool_agent]
+            [prompt_agent]
             timeout_secs = 90
             system_prompt = "You are a specialized assistant."
         "#;
 
         let config: GemicroConfig = toml::from_str(toml).unwrap();
-        let ta = config.tool_agent.unwrap();
+        let pa = config.prompt_agent.unwrap();
 
-        assert_eq!(ta.timeout_secs, Some(90));
+        assert_eq!(pa.timeout_secs, Some(90));
         assert_eq!(
-            ta.system_prompt,
+            pa.system_prompt,
             Some("You are a specialized assistant.".to_string())
         );
     }
@@ -306,7 +306,7 @@ mod tests {
                 max_sub_queries: Some(5),
                 ..Default::default()
             }),
-            tool_agent: None,
+            prompt_agent: None,
         };
 
         let overlay = GemicroConfig {
@@ -315,7 +315,7 @@ mod tests {
                 timeout_secs: Some(120),
                 ..Default::default()
             }),
-            tool_agent: Some(ToolAgentToml {
+            prompt_agent: Some(PromptAgentToml {
                 timeout_secs: Some(60),
                 ..Default::default()
             }),
@@ -328,8 +328,8 @@ mod tests {
         assert_eq!(dr.max_sub_queries, Some(10)); // Overridden by overlay
         assert_eq!(dr.timeout_secs, Some(120)); // From overlay
 
-        let ta = base.tool_agent.unwrap();
-        assert_eq!(ta.timeout_secs, Some(60)); // From overlay
+        let pa = base.prompt_agent.unwrap();
+        assert_eq!(pa.timeout_secs, Some(60)); // From overlay
     }
 
     #[test]
@@ -351,13 +351,13 @@ mod tests {
     }
 
     #[test]
-    fn test_to_tool_agent_config() {
-        let toml_config = ToolAgentToml {
+    fn test_to_prompt_agent_config() {
+        let toml_config = PromptAgentToml {
             timeout_secs: Some(90),
             system_prompt: Some("Custom prompt".to_string()),
         };
 
-        let config = toml_config.to_tool_agent_config();
+        let config = toml_config.to_prompt_agent_config();
 
         assert_eq!(config.timeout, Duration::from_secs(90));
         assert_eq!(config.system_prompt, "Custom prompt");
@@ -371,7 +371,7 @@ mod tests {
                 max_sub_queries: Some(7),
                 ..Default::default()
             }),
-            tool_agent: None,
+            prompt_agent: None,
         };
 
         let toml_str = toml::to_string_pretty(&config).unwrap();

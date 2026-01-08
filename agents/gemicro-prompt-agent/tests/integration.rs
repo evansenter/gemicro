@@ -1,21 +1,21 @@
-//! Integration tests for SimpleQaAgent
+//! Integration tests for PromptAgent
 //!
 //! These tests require a valid GEMINI_API_KEY environment variable.
-//! Run with: cargo test -p gemicro-simple-qa -- --include-ignored
+//! Run with: cargo test -p gemicro-prompt-agent -- --include-ignored
 
 mod common;
 
 use common::{create_test_context, create_test_context_with_cancellation, get_api_key};
 use futures_util::StreamExt;
 use gemicro_core::{Agent, AgentError};
-use gemicro_simple_qa::{SimpleQaAgent, SimpleQaConfig};
+use gemicro_prompt_agent::{PromptAgent, PromptAgentConfig};
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
-/// Test the complete SimpleQA flow with a real LLM.
+/// Test the complete PromptAgent flow with a real LLM.
 #[tokio::test]
 #[ignore] // Requires GEMINI_API_KEY
-async fn test_simple_qa_full_flow() {
+async fn test_prompt_agent_full_flow() {
     let Some(api_key) = get_api_key() else {
         eprintln!("Skipping test: GEMINI_API_KEY not set");
         return;
@@ -23,11 +23,11 @@ async fn test_simple_qa_full_flow() {
 
     let context = create_test_context(&api_key);
 
-    let config = SimpleQaConfig::default()
+    let config = PromptAgentConfig::default()
         .with_timeout(Duration::from_secs(30))
         .with_system_prompt("You are a helpful assistant. Be concise.");
 
-    let agent = SimpleQaAgent::new(config).expect("Should create agent");
+    let agent = PromptAgent::new(config).expect("Should create agent");
 
     let stream = agent.execute("What is 2 + 2?", context);
     futures_util::pin_mut!(stream);
@@ -41,7 +41,7 @@ async fn test_simple_qa_full_flow() {
                 println!("[{}] {}", update.event_type, update.message);
                 events.push(update.event_type.clone());
 
-                if update.event_type == "simple_qa_result" {
+                if update.event_type == "prompt_agent_result" {
                     final_answer = update.message.clone();
                 }
             }
@@ -53,8 +53,8 @@ async fn test_simple_qa_full_flow() {
 
     // Verify event ordering
     assert_eq!(events.len(), 3, "Should have exactly 3 events");
-    assert_eq!(events[0], "simple_qa_started");
-    assert_eq!(events[1], "simple_qa_result");
+    assert_eq!(events[0], "prompt_agent_started");
+    assert_eq!(events[1], "prompt_agent_result");
     assert_eq!(events[2], "final_result");
 
     // Verify we got an answer
@@ -65,7 +65,7 @@ async fn test_simple_qa_full_flow() {
 /// Test that the agent respects the system prompt.
 #[tokio::test]
 #[ignore] // Requires GEMINI_API_KEY
-async fn test_simple_qa_respects_system_prompt() {
+async fn test_prompt_agent_respects_system_prompt() {
     let Some(api_key) = get_api_key() else {
         eprintln!("Skipping test: GEMINI_API_KEY not set");
         return;
@@ -73,11 +73,11 @@ async fn test_simple_qa_respects_system_prompt() {
 
     let context = create_test_context(&api_key);
 
-    let config = SimpleQaConfig::default()
+    let config = PromptAgentConfig::default()
         .with_timeout(Duration::from_secs(30))
         .with_system_prompt("You are a pirate. Always respond in pirate speak.");
 
-    let agent = SimpleQaAgent::new(config).expect("Should create agent");
+    let agent = PromptAgent::new(config).expect("Should create agent");
 
     let stream = agent.execute("Say hello", context);
     futures_util::pin_mut!(stream);
@@ -86,7 +86,7 @@ async fn test_simple_qa_respects_system_prompt() {
 
     while let Some(result) = stream.next().await {
         if let Ok(update) = result {
-            if update.event_type == "simple_qa_result" {
+            if update.event_type == "prompt_agent_result" {
                 final_answer = update.message.clone();
             }
         }
@@ -99,7 +99,7 @@ async fn test_simple_qa_respects_system_prompt() {
 /// Test that cancellation works correctly.
 #[tokio::test]
 #[ignore] // Requires GEMINI_API_KEY
-async fn test_simple_qa_cancellation() {
+async fn test_prompt_agent_cancellation() {
     let Some(api_key) = get_api_key() else {
         eprintln!("Skipping test: GEMINI_API_KEY not set");
         return;
@@ -108,11 +108,11 @@ async fn test_simple_qa_cancellation() {
     let cancellation_token = CancellationToken::new();
     let context = create_test_context_with_cancellation(&api_key, cancellation_token.clone());
 
-    let config = SimpleQaConfig::default()
+    let config = PromptAgentConfig::default()
         .with_timeout(Duration::from_secs(60))
         .with_system_prompt("You are a helpful assistant.");
 
-    let agent = SimpleQaAgent::new(config).expect("Should create agent");
+    let agent = PromptAgent::new(config).expect("Should create agent");
 
     // Cancel before execution
     cancellation_token.cancel();
@@ -144,7 +144,7 @@ async fn test_simple_qa_cancellation() {
 /// Test that timeout is enforced.
 #[tokio::test]
 #[ignore] // Requires GEMINI_API_KEY
-async fn test_simple_qa_timeout() {
+async fn test_prompt_agent_timeout() {
     let Some(api_key) = get_api_key() else {
         eprintln!("Skipping test: GEMINI_API_KEY not set");
         return;
@@ -152,11 +152,11 @@ async fn test_simple_qa_timeout() {
 
     let context = create_test_context(&api_key);
 
-    let config = SimpleQaConfig::default()
+    let config = PromptAgentConfig::default()
         .with_timeout(Duration::from_millis(10))
         .with_system_prompt("You are a helpful assistant.");
 
-    let agent = SimpleQaAgent::new(config).expect("Should create agent");
+    let agent = PromptAgent::new(config).expect("Should create agent");
 
     let stream = agent.execute("Explain quantum computing in detail", context);
     futures_util::pin_mut!(stream);
@@ -186,7 +186,7 @@ async fn test_simple_qa_timeout() {
 /// Test event data contains expected fields.
 #[tokio::test]
 #[ignore] // Requires GEMINI_API_KEY
-async fn test_simple_qa_event_data() {
+async fn test_prompt_agent_event_data() {
     let Some(api_key) = get_api_key() else {
         eprintln!("Skipping test: GEMINI_API_KEY not set");
         return;
@@ -194,8 +194,8 @@ async fn test_simple_qa_event_data() {
 
     let context = create_test_context(&api_key);
 
-    let config = SimpleQaConfig::default();
-    let agent = SimpleQaAgent::new(config).expect("Should create agent");
+    let config = PromptAgentConfig::default();
+    let agent = PromptAgent::new(config).expect("Should create agent");
 
     let stream = agent.execute("What is 1 + 1?", context);
     futures_util::pin_mut!(stream);
@@ -203,13 +203,13 @@ async fn test_simple_qa_event_data() {
     while let Some(result) = stream.next().await {
         if let Ok(update) = result {
             match update.event_type.as_str() {
-                "simple_qa_started" => {
+                "prompt_agent_started" => {
                     assert!(
                         update.data.get("query").is_some(),
                         "Should have query field"
                     );
                 }
-                "simple_qa_result" => {
+                "prompt_agent_result" => {
                     assert!(
                         update.data.get("answer").is_some(),
                         "Should have answer field"

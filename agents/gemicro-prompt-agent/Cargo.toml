@@ -1,21 +1,24 @@
 [package]
-name = "gemicro-simple-qa"
+name = "gemicro-prompt-agent"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Simple QA agent: minimal reference implementation for agent authoring"
+description = "Prompt agent: executes prompts with optional tool support"
 
 [dependencies]
 gemicro-core = { path = "../../gemicro-core" }
+rust-genai = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 async-stream = { workspace = true }
+async-trait = { workspace = true }
 futures-util = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 log = { workspace = true }
+meval = "0.2"
 
 [dev-dependencies]
 rstest = { workspace = true }

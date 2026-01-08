@@ -522,10 +522,10 @@ impl Task {
             ToolError::InvalidInput(format!("Invalid prompt agent definition: {}", e))
         })?;
 
-        // Create the ephemeral agent using SimpleQaAgent
-        // Note: For now we use SimpleQaAgent with the custom system prompt.
+        // Create the ephemeral agent using PromptAgent
+        // Note: For now we use PromptAgent with the custom system prompt.
         // In the future, this could support different base agent types.
-        let agent = gemicro_simple_qa::SimpleQaAgent::with_system_prompt(&def.system_prompt)
+        let agent = gemicro_prompt_agent::PromptAgent::with_system_prompt(&def.system_prompt)
             .map_err(|e| ToolError::ExecutionFailed(format!("Failed to create agent: {}", e)))?;
 
         // Create context for the subagent with execution tracking and orchestration

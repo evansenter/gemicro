@@ -26,9 +26,9 @@ use gemicro_developer::{DeveloperAgent, DeveloperConfig};
 use gemicro_file_read::FileRead;
 use gemicro_glob::Glob;
 use gemicro_grep::Grep;
+use gemicro_prompt_agent::{PromptAgent, PromptAgentConfig};
 use gemicro_runner::AgentRegistry;
 use gemicro_task::Task;
-use gemicro_tool_agent::{ToolAgent, ToolAgentConfig};
 use serde_json::Value;
 use std::env;
 use std::sync::{Arc, RwLock};
@@ -107,10 +107,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Box::new(DeepResearchAgent::new(research_config.clone()).unwrap()) as Box<dyn Agent>
         });
 
-        // Tool agent for simpler tool-based tasks
-        let tool_config = ToolAgentConfig::default();
-        reg.register("tool_agent", move || {
-            Box::new(ToolAgent::new(tool_config.clone()).unwrap()) as Box<dyn Agent>
+        // Prompt agent for simpler prompt-based tasks
+        let prompt_config = PromptAgentConfig::default();
+        reg.register("prompt_agent", move || {
+            Box::new(PromptAgent::new(prompt_config.clone()).unwrap()) as Box<dyn Agent>
         });
 
         // Critique agent for self-validation against project conventions

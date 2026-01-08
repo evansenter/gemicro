@@ -115,7 +115,7 @@ fn hash_password(password: &str) -> String {
             .with_context(
                 CritiqueContext::new()
                     .with_query("Implement password hashing")
-                    .with_agent("tool_agent"),
+                    .with_agent("prompt_agent"),
             )
             .with_criteria(CritiqueCriteria::Specification { spec: spec.into() });
 

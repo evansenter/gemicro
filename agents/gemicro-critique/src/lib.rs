@@ -34,7 +34,7 @@
 //! let input = CritiqueInput::new(generated_code)
 //!     .with_context(CritiqueContext::new()
 //!         .with_query("Implement user authentication")
-//!         .with_agent("tool_agent"))
+//!         .with_agent("prompt_agent"))
 //!     .with_criteria(CritiqueCriteria::Specification {
 //!         spec: "Must use bcrypt for password hashing".into()
 //!     });

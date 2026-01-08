@@ -17,8 +17,7 @@ pub const MODEL: &str = "gemini-3-flash-preview";
 /// Each agent type has its own crate with its own configuration:
 /// - `gemicro-deep-research`: ResearchConfig, ResearchPrompts
 /// - `gemicro-react`: ReactConfig, ReactPrompts
-/// - `gemicro-simple-qa`: SimpleQaConfig
-/// - `gemicro-tool-agent`: ToolAgentConfig
+/// - `gemicro-prompt-agent`: PromptAgentConfig
 /// - `gemicro-critique`: CritiqueConfig
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]

@@ -23,9 +23,18 @@ use gemicro_deep_research::DeepResearchAgent;
 use gemicro_developer::{DeveloperAgent, DeveloperConfig};
 use gemicro_echo::EchoAgent;
 use gemicro_path_sandbox::PathSandbox;
+use gemicro_prompt_agent::{tools as prompt_tools, PromptAgent, PromptAgentConfig};
 use gemicro_runner::AgentRegistry;
 use gemicro_task::Task;
-use gemicro_tool_agent::{ToolAgent, ToolAgentConfig};
+// Explicit tool imports (per "Explicit Over Implicit" principle)
+use gemicro_bash::Bash;
+use gemicro_file_edit::FileEdit;
+use gemicro_file_read::FileRead;
+use gemicro_file_write::FileWrite;
+use gemicro_glob::Glob;
+use gemicro_grep::Grep;
+use gemicro_web_fetch::WebFetch;
+use gemicro_web_search::WebSearch;
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 use std::path::PathBuf;
@@ -172,17 +181,34 @@ impl Session {
     /// - Write tools that require confirmation (file_write, file_edit, bash)
     /// - Task tool for spawning subagents (shares the Session's agent registry,
     ///   enabling recursive delegation to any registered agent)
+    ///
+    /// Per "Explicit Over Implicit" principle, all tools are registered explicitly
+    /// rather than using default registries.
     fn create_tool_registry(
         llm: Arc<LlmClient>,
         agent_registry: Arc<RwLock<AgentRegistry>>,
     ) -> ToolRegistry {
-        use gemicro_tool_agent::tools;
+        let mut registry = ToolRegistry::new();
 
-        let mut registry = tools::default_registry();
-        tools::register_web_search_tool(&mut registry, Arc::clone(&llm));
-        tools::register_write_tools(&mut registry);
+        // Built-in tools from prompt-agent crate
+        registry.register(prompt_tools::Calculator);
+        registry.register(prompt_tools::CurrentDatetime);
 
-        // Add Task tool for subagent spawning
+        // Read-only tools (no confirmation needed)
+        registry.register(FileRead);
+        registry.register(WebFetch::new());
+        registry.register(Glob);
+        registry.register(Grep);
+
+        // Web search tool (requires LlmClient)
+        registry.register(WebSearch::new(Arc::clone(&llm)));
+
+        // Write tools (require confirmation)
+        registry.register(FileWrite);
+        registry.register(FileEdit);
+        registry.register(Bash);
+
+        // Task tool for subagent spawning
         registry.register(Task::new(agent_registry, llm));
 
         registry
@@ -251,19 +277,19 @@ impl Session {
             }
         };
 
-        // Build tool_agent config from file or defaults
-        let tool_config = if let Some(file_config) = &config.tool_agent {
-            file_config.to_tool_agent_config()
+        // Build prompt_agent config from file or defaults
+        let prompt_config = if let Some(file_config) = &config.prompt_agent {
+            file_config.to_prompt_agent_config()
         } else {
-            ToolAgentConfig::default()
+            PromptAgentConfig::default()
         };
 
         // Validate config before registering - fallback to defaults on error
-        let tool_config = match ToolAgent::new(tool_config.clone()) {
-            Ok(_) => tool_config,
+        let prompt_config = match PromptAgent::new(prompt_config.clone()) {
+            Ok(_) => prompt_config,
             Err(e) => {
-                log::warn!("Invalid tool_agent config: {}. Using defaults.", e);
-                ToolAgentConfig::default()
+                log::warn!("Invalid prompt_agent config: {}. Using defaults.", e);
+                PromptAgentConfig::default()
             }
         };
 
@@ -281,10 +307,11 @@ impl Session {
             )
         });
 
-        // Register tool_agent (config is pre-validated, unwrap is safe)
-        registry.register("tool_agent", move || {
+        // Register prompt_agent (config is pre-validated, unwrap is safe)
+        registry.register("prompt_agent", move || {
             Box::new(
-                ToolAgent::new(tool_config.clone()).expect("pre-validated config should not fail"),
+                PromptAgent::new(prompt_config.clone())
+                    .expect("pre-validated config should not fail"),
             )
         });
 

@@ -114,7 +114,7 @@ async fn run_interactive(args: &cli::Args) -> Result<()> {
     // Set the initial agent from CLI flag
     session.set_current_agent(&args.agent).unwrap_or_else(|_| {
         eprintln!("Error: Unknown agent '{}'. Available agents:", args.agent);
-        eprintln!("  deep_research, developer, tool_agent, react, simple_qa, critique");
+        eprintln!("  deep_research, developer, prompt_agent, react, critique");
         std::process::exit(1);
     });
 
