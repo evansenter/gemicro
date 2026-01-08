@@ -7,7 +7,7 @@ mod common;
 
 use common::{create_test_client, get_api_key};
 use futures_util::StreamExt;
-use gemicro_core::LlmRequest;
+use gemicro_core::{LlmRequest, Turn};
 
 #[tokio::test]
 #[ignore] // Requires GEMINI_API_KEY
@@ -347,6 +347,44 @@ async fn test_structured_output_response_format() {
         }
         Err(e) => {
             panic!("Structured output request failed: {:?}", e);
+        }
+    }
+}
+
+#[tokio::test]
+#[ignore] // Requires GEMINI_API_KEY
+async fn test_generate_with_turns() {
+    let Some(api_key) = get_api_key() else {
+        eprintln!("Skipping test: GEMINI_API_KEY not set");
+        return;
+    };
+
+    let client = create_test_client(&api_key);
+
+    // Create a conversation history where we established a math context
+    let history = vec![Turn::user("What is 2 + 2?"), Turn::model("2 + 2 equals 4.")];
+
+    // Follow-up question that relies on the context
+    let request = LlmRequest::new("And what is that multiplied by 3? Just the number please.")
+        .with_turns(history);
+
+    let response = client.generate(request).await;
+
+    match response {
+        Ok(resp) => {
+            let text = resp.text().unwrap_or("");
+            println!("Multi-turn response: {}", text);
+
+            assert!(!text.is_empty(), "Response text should not be empty");
+            // The model should understand "that" refers to 4, and return 12
+            assert!(
+                text.contains("12"),
+                "Response should contain '12' (4 * 3), got: {}",
+                text
+            );
+        }
+        Err(e) => {
+            panic!("Multi-turn conversation failed: {:?}", e);
         }
     }
 }

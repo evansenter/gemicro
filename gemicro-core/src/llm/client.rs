@@ -676,8 +676,18 @@ impl LlmClient {
             .client
             .interaction()
             .with_model(MODEL)
-            .with_text(&request.prompt)
             .with_generation_config(generation_config);
+
+        // Use turns if provided, appending current prompt as final user turn.
+        // Otherwise fall back to simple text prompt.
+        if let Some(ref turns) = request.turns {
+            // Clone turns and append current prompt as final user turn
+            let mut full_turns = turns.clone();
+            full_turns.push(rust_genai::Turn::user(request.prompt.as_str()));
+            interaction = interaction.with_turns(full_turns);
+        } else {
+            interaction = interaction.with_text(&request.prompt);
+        }
 
         if let Some(ref system) = request.system_instruction {
             interaction = interaction.with_system_instruction(system);
@@ -873,6 +883,7 @@ mod tests {
             phase: "test".to_string(),
             request: SerializableLlmRequest {
                 prompt: "Test prompt".to_string(),
+                turns: None,
                 system_instruction: None,
                 use_google_search: false,
                 response_format: None,

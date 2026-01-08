@@ -123,6 +123,12 @@ pub struct SerializableLlmRequest {
     /// User prompt
     pub prompt: String,
 
+    /// Conversation history as serialized Turn array
+    ///
+    /// Stored as JSON for flexibility and forward compatibility.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turns: Option<serde_json::Value>,
+
     /// Optional system instruction
     pub system_instruction: Option<String>,
 
@@ -137,6 +143,10 @@ impl From<&LlmRequest> for SerializableLlmRequest {
     fn from(request: &LlmRequest) -> Self {
         Self {
             prompt: request.prompt.clone(),
+            turns: request
+                .turns
+                .as_ref()
+                .and_then(|t| serde_json::to_value(t).ok()),
             system_instruction: request.system_instruction.clone(),
             use_google_search: request.use_google_search,
             response_format: request.response_format.clone(),
@@ -296,6 +306,7 @@ mod tests {
     fn sample_request() -> SerializableLlmRequest {
         SerializableLlmRequest {
             prompt: "What is the capital of France?".to_string(),
+            turns: None,
             system_instruction: Some("You are a helpful assistant.".to_string()),
             use_google_search: false,
             response_format: None,
@@ -340,6 +351,24 @@ mod tests {
             serializable.response_format,
             Some(json!({"type": "object"}))
         );
+    }
+
+    #[test]
+    fn test_serializable_request_with_turns() {
+        use rust_genai::Turn;
+
+        let request = LlmRequest::new("Follow up question")
+            .with_turns(vec![Turn::user("What is 2+2?"), Turn::model("4")]);
+
+        let serializable = SerializableLlmRequest::from(&request);
+
+        assert_eq!(serializable.prompt, "Follow up question");
+        assert!(serializable.turns.is_some());
+
+        let turns_json = serializable.turns.unwrap();
+        assert!(turns_json.is_array());
+        let arr = turns_json.as_array().unwrap();
+        assert_eq!(arr.len(), 2);
     }
 
     #[test]
@@ -419,6 +448,45 @@ mod tests {
         assert_eq!(loaded.id, trajectory.id);
         assert_eq!(loaded.query, trajectory.query);
         assert_eq!(loaded.steps.len(), 1);
+
+        // Cleanup
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn test_trajectory_roundtrip_with_turns() {
+        use rust_genai::Turn;
+
+        let request_with_turns =
+            LlmRequest::new("Follow up").with_turns(vec![Turn::user("Q1"), Turn::model("A1")]);
+
+        let step_with_turns = TrajectoryStep {
+            phase: "multi_turn".to_string(),
+            request: SerializableLlmRequest::from(&request_with_turns),
+            response: LlmResponseData::Buffered(json!({
+                "outputs": [{"type": "text", "text": "Response"}]
+            })),
+            duration_ms: 100,
+            started_at: SystemTime::now(),
+        };
+
+        let trajectory = Trajectory::builder()
+            .query("Multi-turn test")
+            .agent_name("test_agent")
+            .build(vec![step_with_turns], vec![], 100, None);
+
+        let temp_dir = std::env::temp_dir();
+        let path = temp_dir.join(format!("trajectory_turns_test_{}.json", trajectory.id));
+
+        // Save and reload
+        trajectory.save(&path).unwrap();
+        let loaded = Trajectory::load(&path).unwrap();
+
+        // Verify turns survived the round-trip
+        assert!(loaded.steps[0].request.turns.is_some());
+        let turns = loaded.steps[0].request.turns.as_ref().unwrap();
+        assert!(turns.is_array());
+        assert_eq!(turns.as_array().unwrap().len(), 2);
 
         // Cleanup
         std::fs::remove_file(path).ok();
