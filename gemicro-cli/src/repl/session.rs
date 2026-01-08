@@ -11,6 +11,7 @@ use crate::error::ErrorFormatter;
 use crate::format::truncate;
 use anyhow::{Context, Result};
 use futures_util::StreamExt;
+use gemicro_audit_log::AuditLog;
 use gemicro_core::{
     enforce_final_result_contract,
     interceptor::{InterceptorChain, ToolCall},
@@ -156,6 +157,13 @@ impl Session {
             Arc::clone(&registry),
         ));
 
+        // Initialize interceptor chain with AuditLog for LOUD_WIRE support
+        let interceptors = {
+            let chain: InterceptorChain<ToolCall, ToolResult> =
+                InterceptorChain::new().with(AuditLog);
+            Some(Arc::new(chain))
+        };
+
         Self {
             registry,
             current_agent_name: String::new(),
@@ -169,7 +177,7 @@ impl Session {
             session_tokens: 0,
             confirmation_handler: Arc::new(InteractiveConfirmation::default()),
             tool_registry,
-            interceptors: None,
+            interceptors,
         }
     }
 
@@ -225,16 +233,20 @@ impl Session {
     /// all file operations to the specified paths. This is a security feature
     /// controlled by the CLI --sandbox-path flag.
     ///
-    /// If paths is empty, no interceptor is configured.
+    /// The interceptor chain always includes AuditLog for LOUD_WIRE debugging
+    /// support. When sandbox paths are provided, PathSandbox is added to enforce
+    /// the file access restrictions.
     pub fn set_sandbox_paths(&mut self, paths: Vec<PathBuf>) {
-        if paths.is_empty() {
-            self.interceptors = None;
-        } else {
-            let sandbox = PathSandbox::new(paths);
-            let chain: InterceptorChain<ToolCall, ToolResult> =
-                InterceptorChain::new().with(sandbox);
-            self.interceptors = Some(Arc::new(chain));
+        // Always include AuditLog for LOUD_WIRE support
+        let mut chain: InterceptorChain<ToolCall, ToolResult> =
+            InterceptorChain::new().with(AuditLog);
+
+        // Add PathSandbox if paths are provided
+        if !paths.is_empty() {
+            chain = chain.with(PathSandbox::new(paths));
         }
+
+        self.interceptors = Some(Arc::new(chain));
     }
 
     /// Load config and register agents.

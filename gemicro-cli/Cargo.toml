@@ -35,6 +35,8 @@ gemicro-task = { path = "../tools/gemicro-task" }
 
 # Hook crates - CLI needs PathSandbox for --sandbox-path support
 gemicro-path-sandbox = { path = "../hooks/gemicro-path-sandbox" }
+# Hook crates - CLI needs AuditLog for LOUD_WIRE debugging support
+gemicro-audit-log = { path = "../hooks/gemicro-audit-log" }
 rust-genai = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }

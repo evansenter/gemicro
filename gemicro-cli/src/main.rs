@@ -17,6 +17,7 @@ use gemicro_core::{
     LlmClient,
 };
 use gemicro_deep_research::DeepResearchAgent;
+use gemicro_prompt_agent::{PromptAgent, PromptAgentConfig};
 use repl::Session;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
@@ -56,26 +57,30 @@ async fn main() -> Result<()> {
     if interactive_mode {
         run_interactive(&args).await
     } else {
-        // Single-query mode currently only supports deep_research
-        // See #205 for AgentRegistry refactor
-        if args.agent != "deep_research" {
-            anyhow::bail!(
-                "Single-query mode currently only supports deep_research agent. \
-                 Use --interactive for other agents, or specify --agent deep_research."
-            );
-        }
-
-        // Print header for single query mode
-        println!("╔══════════════════════════════════════════════════════════════╗");
-        println!("║                    gemicro Deep Research                     ║");
-        println!("╚══════════════════════════════════════════════════════════════╝");
-        println!();
         // Safe to unwrap - validation ensures query exists when not interactive
         let query = args.query.as_ref().unwrap();
+
+        // Print header for single query mode
+        let agent_title = match args.agent.as_str() {
+            "deep_research" => "gemicro Deep Research",
+            "prompt_agent" => "gemicro Prompt Agent",
+            other => {
+                anyhow::bail!(
+                    "Single-query mode supports: deep_research, prompt_agent. \
+                     Use --interactive for other agents like '{}'.",
+                    other
+                );
+            }
+        };
+
+        println!("╔══════════════════════════════════════════════════════════════╗");
+        println!("║{:^64}║", agent_title);
+        println!("╚══════════════════════════════════════════════════════════════╝");
+        println!();
         println!("Query: {}", query);
         println!();
 
-        run_research(&args, query).await
+        run_single_query(&args, query).await
     }
 }
 
@@ -129,7 +134,7 @@ async fn run_interactive(args: &cli::Args) -> Result<()> {
     session.run().await
 }
 
-async fn run_research(args: &cli::Args, query: &str) -> Result<()> {
+async fn run_single_query(args: &cli::Args, query: &str) -> Result<()> {
     // Create cancellation token for cooperative shutdown
     let cancellation_token = CancellationToken::new();
 
@@ -140,9 +145,19 @@ async fn run_research(args: &cli::Args, query: &str) -> Result<()> {
     let llm = LlmClient::new(genai_client, args.llm_config());
     let context = AgentContext::new_with_cancellation(llm, cancellation_token.clone());
 
-    // Create agent and its tracker
-    let agent = DeepResearchAgent::new(args.research_config())
-        .context("Failed to create research agent")?;
+    // Create agent based on --agent flag
+    let agent: Box<dyn Agent> = match args.agent.as_str() {
+        "deep_research" => Box::new(
+            DeepResearchAgent::new(args.research_config())
+                .context("Failed to create research agent")?,
+        ),
+        "prompt_agent" => Box::new(
+            PromptAgent::new(PromptAgentConfig::default())
+                .context("Failed to create prompt agent")?,
+        ),
+        other => anyhow::bail!("Unsupported agent for single-query mode: {}", other),
+    };
+
     let mut tracker = agent.create_tracker();
     let mut renderer = IndicatifRenderer::new(args.plain);
 
