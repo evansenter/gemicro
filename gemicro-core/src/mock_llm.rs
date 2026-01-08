@@ -222,6 +222,7 @@ mod tests {
             phase: "test".to_string(),
             request: SerializableLlmRequest {
                 prompt: "What is 2+2?".to_string(),
+                turns: None,
                 system_instruction: None,
                 use_google_search: false,
                 response_format: None,
@@ -241,6 +242,7 @@ mod tests {
             phase: "streaming".to_string(),
             request: SerializableLlmRequest {
                 prompt: "Count to 3".to_string(),
+                turns: None,
                 system_instruction: None,
                 use_google_search: false,
                 response_format: None,
@@ -437,6 +439,7 @@ mod tests {
             phase: "timed".to_string(),
             request: SerializableLlmRequest {
                 prompt: "Count".to_string(),
+                turns: None,
                 system_instruction: None,
                 use_google_search: false,
                 response_format: None,

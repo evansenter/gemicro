@@ -31,3 +31,6 @@ mod request;
 
 pub use client::LlmClient;
 pub use request::{LlmRequest, LlmStreamChunk};
+
+// Re-export Turn types from rust-genai for multi-turn conversation support
+pub use rust_genai::{Role, Turn, TurnContent};

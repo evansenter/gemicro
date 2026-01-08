@@ -135,6 +135,7 @@ mod tests {
     fn sample_request() -> SerializableLlmRequest {
         SerializableLlmRequest {
             prompt: "Test prompt".to_string(),
+            turns: None,
             system_instruction: None,
             use_google_search: false,
             response_format: None,
