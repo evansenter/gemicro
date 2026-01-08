@@ -37,14 +37,16 @@
 pub mod tools;
 
 use gemicro_core::{
-    remaining_time, timeout_error, truncate, with_timeout_and_cancellation, Agent, AgentContext,
-    AgentError, AgentStream, AgentUpdate, GemicroToolService, LlmRequest, ResultMetadata, ToolSet,
-    MODEL,
+    remaining_time, timeout_error, tool::ToolCallableAdapter, truncate,
+    with_timeout_and_cancellation, Agent, AgentContext, AgentError, AgentStream, AgentUpdate,
+    LlmRequest, ResultMetadata, ToolSet, MODEL,
 };
 
 use async_stream::try_stream;
-use rust_genai::AutoFunctionResult;
-use serde_json::json;
+use rust_genai::{
+    function_result_content, CallableFunction, FunctionDeclaration, InteractionContent,
+};
+use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -57,6 +59,15 @@ const EVENT_PROMPT_AGENT_STARTED: &str = "prompt_agent_started";
 
 /// Event emitted when the agent produces its final result.
 const EVENT_PROMPT_AGENT_RESULT: &str = "prompt_agent_result";
+
+/// Event emitted before executing a tool call.
+const EVENT_TOOL_CALL_STARTED: &str = "tool_call_started";
+
+/// Event emitted after a tool call completes.
+const EVENT_TOOL_RESULT: &str = "tool_result";
+
+/// Maximum function calling iterations to prevent infinite loops.
+const MAX_ITERATIONS: usize = 10;
 
 // ============================================================================
 // Configuration
@@ -375,45 +386,175 @@ impl Agent for PromptAgent {
 
             // Branch based on whether tools are available
             let (answer, tokens_used) = if let Some(ref registry) = context.tools {
-                // Tool path: use function calling
-                let mut service = GemicroToolService::new(Arc::clone(registry))
-                    .with_filter(config.tool_filter.clone());
-
-                // Add confirmation handler if provided
-                if let Some(handler) = &context.confirmation_handler {
-                    service = service.with_confirmation_handler(Arc::clone(handler));
-                }
-
-                // Add interceptors if provided (e.g., PathSandbox)
-                if let Some(interceptors) = &context.interceptors {
-                    service = service.with_interceptors(Arc::clone(interceptors));
-                }
+                // Tool path: explicit function calling loop with events
+                let tools = registry.filter(&config.tool_filter);
+                let function_declarations: Vec<FunctionDeclaration> = tools
+                    .iter()
+                    .map(|t| t.to_function_declaration())
+                    .collect();
 
                 let client = context.llm.client();
-                let interaction = client
-                    .interaction()
-                    .with_model(MODEL)
-                    .with_system_instruction(&config.system_prompt)
-                    .with_text(&query)
-                    .with_tool_service(Arc::new(service));
+                let mut previous_interaction_id: Option<String> = None;
+                let mut total_tokens: u64 = 0;
 
-                let response_future = interaction.create_with_auto_functions();
+                // Function calling loop
+                let mut iteration = 0usize;
+                let final_text = loop {
+                    iteration += 1;
+                    if iteration > MAX_ITERATIONS {
+                        log::warn!("PromptAgent hit max iterations ({})", MAX_ITERATIONS);
+                        Err(AgentError::Other(format!(
+                            "Max iterations ({}) reached",
+                            MAX_ITERATIONS
+                        )))?;
+                    }
 
-                let result: AutoFunctionResult = with_timeout_and_cancellation(
-                    async {
-                        response_future.await.map_err(|e| {
-                            AgentError::Other(format!("Function calling failed: {}", e))
-                        })
-                    },
-                    timeout,
-                    &context.cancellation_token,
-                    || timeout_error(start, config.timeout, "query"),
-                )
-                .await?;
+                    // Check for cancellation
+                    if context.cancellation_token.is_cancelled() {
+                        Err(AgentError::Cancelled)?;
+                    }
 
-                let text = result.response.text().unwrap_or("").to_string();
-                let tokens = gemicro_core::extract_total_tokens(&result.response);
-                (text, tokens)
+                    // Make LLM request
+                    let response = match &previous_interaction_id {
+                        Some(prev_id) => {
+                            // Subsequent turn: chain to previous
+                            client
+                                .interaction()
+                                .with_model(MODEL)
+                                .with_functions(function_declarations.clone())
+                                .with_store_enabled()
+                                .with_previous_interaction(prev_id)
+                                .create()
+                                .await
+                                .map_err(|e| AgentError::Other(format!("LLM error: {}", e)))?
+                        }
+                        None => {
+                            // First turn: include system prompt and query
+                            client
+                                .interaction()
+                                .with_model(MODEL)
+                                .with_system_instruction(&config.system_prompt)
+                                .with_functions(function_declarations.clone())
+                                .with_store_enabled()
+                                .with_text(&query)
+                                .create()
+                                .await
+                                .map_err(|e| AgentError::Other(format!("LLM error: {}", e)))?
+                        }
+                    };
+
+                    // Track tokens
+                    if let Some(tokens) = gemicro_core::extract_total_tokens(&response) {
+                        total_tokens += tokens as u64;
+                    }
+
+                    let function_calls = response.function_calls();
+
+                    if function_calls.is_empty() {
+                        // No function calls - done, return final text
+                        break response.text().unwrap_or("").to_string();
+                    }
+
+                    // Store interaction ID for chaining
+                    previous_interaction_id = response.id.clone();
+
+                    // Execute each function call with events
+                    let mut function_results: Vec<InteractionContent> = Vec::new();
+
+                    for fc in function_calls {
+                        let tool_name = &fc.name;
+                        let call_id = fc.id.unwrap_or("unknown");
+                        let arguments = &fc.args;
+
+                        // Emit tool_call_started event
+                        yield AgentUpdate::custom(
+                            EVENT_TOOL_CALL_STARTED,
+                            format!("Calling tool: {}", tool_name),
+                            json!({
+                                "tool_name": tool_name,
+                                "call_id": call_id,
+                                "arguments": arguments,
+                            }),
+                        );
+
+                        let tool_start = Instant::now();
+
+                        // Execute tool - find it in the filtered tools list
+                        let tool_result: Result<Value, String> = {
+                            let tool_opt = tools.iter().find(|t| t.name() == *tool_name);
+                            if let Some(tool) = tool_opt {
+                                let mut adapter = ToolCallableAdapter::new(Arc::clone(tool));
+                                if let Some(handler) = &context.confirmation_handler {
+                                    adapter = adapter.with_confirmation_handler(Arc::clone(handler));
+                                }
+                                if let Some(interceptors) = &context.interceptors {
+                                    adapter = adapter.with_interceptors(Arc::clone(interceptors));
+                                }
+
+                                match adapter.call((*arguments).clone()).await {
+                                    Ok(value) => Ok(value),
+                                    Err(e) => Err(e.to_string()),
+                                }
+                            } else {
+                                Err(format!("Tool not found: {}", tool_name))
+                            }
+                        };
+
+                        let tool_duration = tool_start.elapsed();
+                        let (success, result_json) = match &tool_result {
+                            Ok(value) => (true, value.clone()),
+                            Err(e) => (false, json!({ "error": e })),
+                        };
+
+                        // Emit tool_result event
+                        yield AgentUpdate::custom(
+                            EVENT_TOOL_RESULT,
+                            format!("Tool {} completed", tool_name),
+                            json!({
+                                "tool_name": tool_name,
+                                "call_id": call_id,
+                                "result": result_json,
+                                "success": success,
+                                "duration_ms": tool_duration.as_millis() as u64,
+                            }),
+                        );
+
+                        // Add to results for next LLM call
+                        function_results.push(function_result_content(
+                            tool_name.to_string(),
+                            call_id.to_string(),
+                            result_json,
+                        ));
+                    }
+
+                    // Send function results back to LLM
+                    let response = client
+                        .interaction()
+                        .with_model(MODEL)
+                        .with_functions(function_declarations.clone())
+                        .with_store_enabled()
+                        .with_previous_interaction(previous_interaction_id.as_ref().unwrap())
+                        .with_content(function_results)
+                        .create()
+                        .await
+                        .map_err(|e| AgentError::Other(format!("LLM error: {}", e)))?;
+
+                    // Track tokens
+                    if let Some(tokens) = gemicro_core::extract_total_tokens(&response) {
+                        total_tokens += tokens as u64;
+                    }
+
+                    // Check if more function calls or final text
+                    let more_calls = response.function_calls();
+                    if more_calls.is_empty() {
+                        break response.text().unwrap_or("").to_string();
+                    }
+
+                    // More calls - continue loop
+                    previous_interaction_id = response.id.clone();
+                };
+
+                (final_text, Some(total_tokens))
             } else {
                 // Simple path: no tools, just a prompt
                 let request = LlmRequest::with_system(&query, &config.system_prompt);
@@ -435,7 +576,7 @@ impl Agent for PromptAgent {
                 .await?;
 
                 let text = response.text().unwrap_or("").to_string();
-                let tokens = gemicro_core::extract_total_tokens(&response);
+                let tokens = gemicro_core::extract_total_tokens(&response).map(|t| t as u64);
                 (text, tokens)
             };
 
@@ -454,7 +595,7 @@ impl Agent for PromptAgent {
 
             // Emit standard final_result for ExecutionState/harness compatibility
             let metadata = ResultMetadata::new(
-                tokens_used.unwrap_or(0),
+                tokens_used.unwrap_or(0) as u32,
                 if tokens_used.is_none() { 1 } else { 0 },
                 duration_ms,
             );

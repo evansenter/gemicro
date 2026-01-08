@@ -99,11 +99,6 @@ impl Args {
     ///
     /// Returns an error if arguments are invalid.
     pub fn validate(&self) -> Result<(), String> {
-        // Query is required unless in interactive mode
-        if !self.interactive && self.query.is_none() {
-            return Err("Query is required (or use --interactive for REPL mode)".to_string());
-        }
-
         // Warn if both interactive and query are provided (query will be ignored)
         if self.interactive && self.query.is_some() {
             eprintln!(
@@ -362,14 +357,13 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_query_required_without_interactive() {
+    fn test_validate_no_query_no_interactive_is_valid() {
+        // No query defaults to interactive mode in main.rs
         let mut args = test_args();
         args.query = None;
         args.interactive = false;
 
-        let result = args.validate();
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Query is required"));
+        assert!(args.validate().is_ok());
     }
 
     #[test]

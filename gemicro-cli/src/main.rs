@@ -32,8 +32,13 @@ async fn main() -> Result<()> {
     }
 
     // Initialize logging
+    // Filter out noisy third-party crates, show only gemicro-related debug output
     if args.verbose {
-        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug")).init();
+        env_logger::Builder::from_env(
+            env_logger::Env::default()
+                .default_filter_or("debug,rustyline=warn,hyper=warn,reqwest=warn,h2=warn"),
+        )
+        .init();
     } else {
         env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
     }
@@ -45,7 +50,10 @@ async fn main() -> Result<()> {
         );
     }
 
-    if args.interactive {
+    // Interactive mode: explicit -i flag OR no query provided (default)
+    let interactive_mode = args.interactive || args.query.is_none();
+
+    if interactive_mode {
         run_interactive(&args).await
     } else {
         // Single-query mode currently only supports deep_research
