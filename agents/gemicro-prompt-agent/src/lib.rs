@@ -39,7 +39,7 @@ pub mod tools;
 use gemicro_core::{
     remaining_time, timeout_error, tool::ToolCallableAdapter, truncate,
     with_timeout_and_cancellation, Agent, AgentContext, AgentError, AgentStream, AgentUpdate,
-    LlmRequest, ResultMetadata, ToolSet, MODEL,
+    LlmRequest, ResultMetadata, ToolSet,
 };
 
 use async_stream::try_stream;
@@ -66,7 +66,10 @@ const EVENT_TOOL_CALL_STARTED: &str = "tool_call_started";
 /// Event emitted after a tool call completes.
 const EVENT_TOOL_RESULT: &str = "tool_result";
 
-/// Maximum function calling iterations to prevent infinite loops.
+/// Maximum function calling continuation rounds to prevent infinite loops.
+///
+/// This limits how many times the agent can send function results back to the model.
+/// The initial LLM call is not counted, so total LLM calls = 1 + MAX_ITERATIONS.
 const MAX_ITERATIONS: usize = 10;
 
 // ============================================================================
@@ -386,16 +389,29 @@ impl Agent for PromptAgent {
 
             // Branch based on whether tools are available
             let (answer, tokens_used) = if let Some(ref registry) = context.tools {
-                // Tool path: explicit function calling loop with events
+                // Tool path: function calling loop with events
+                // Uses LlmClient's generate() for centralized logging/retry/recording
                 let tools = registry.filter(&config.tool_filter);
                 let function_declarations: Vec<FunctionDeclaration> = tools
                     .iter()
                     .map(|t| t.to_function_declaration())
                     .collect();
 
-                let client = context.llm.client();
-                let mut previous_interaction_id: Option<String> = None;
                 let mut total_tokens: u64 = 0;
+
+                // Initial request with query and function declarations
+                let initial_request = LlmRequest::with_system(&query, &config.system_prompt)
+                    .with_functions(function_declarations.clone());
+
+                let mut response = context
+                    .llm
+                    .generate_with_cancellation(initial_request, &context.cancellation_token)
+                    .await
+                    .map_err(|e| AgentError::Other(format!("LLM error: {}", e)))?;
+
+                if let Some(tokens) = gemicro_core::extract_total_tokens(&response) {
+                    total_tokens += tokens as u64;
+                }
 
                 // Function calling loop
                 let mut iteration = 0usize;
@@ -414,49 +430,6 @@ impl Agent for PromptAgent {
                         Err(AgentError::Cancelled)?;
                     }
 
-                    // Make LLM request
-                    let response = match &previous_interaction_id {
-                        Some(prev_id) => {
-                            // Subsequent turn: chain to previous
-                            client
-                                .interaction()
-                                .with_model(MODEL)
-                                .with_functions(function_declarations.clone())
-                                .with_store_enabled()
-                                .with_previous_interaction(prev_id)
-                                .create()
-                                .await
-                                .map_err(|e| AgentError::Other(format!("LLM error: {}", e)))?
-                        }
-                        None => {
-                            // First turn: include system prompt and query
-                            client
-                                .interaction()
-                                .with_model(MODEL)
-                                .with_system_instruction(&config.system_prompt)
-                                .with_functions(function_declarations.clone())
-                                .with_store_enabled()
-                                .with_text(&query)
-                                .create()
-                                .await
-                                .map_err(|e| AgentError::Other(format!("LLM error: {}", e)))?
-                        }
-                    };
-
-                    // Log response in debug mode
-                    // Note: Styling differs from genai_rs request logs. For consistent styling,
-                    // response logging should be added to genai_rs upstream.
-                    if log::log_enabled!(log::Level::Debug) {
-                        if let Ok(response_json) = serde_json::to_string_pretty(&response) {
-                            log::debug!("Response Body (JSON):\n{}", response_json);
-                        }
-                    }
-
-                    // Track tokens
-                    if let Some(tokens) = gemicro_core::extract_total_tokens(&response) {
-                        total_tokens += tokens as u64;
-                    }
-
                     let function_calls = response.function_calls();
 
                     if function_calls.is_empty() {
@@ -464,8 +437,10 @@ impl Agent for PromptAgent {
                         break response.text().unwrap_or("").to_string();
                     }
 
-                    // Store interaction ID for chaining
-                    previous_interaction_id = response.id.clone();
+                    // Get interaction ID for chaining
+                    let interaction_id = response.id.clone().ok_or_else(|| {
+                        AgentError::Other("Missing interaction ID for function calling".into())
+                    })?;
 
                     // Execute each function call with events
                     let mut function_results: Vec<InteractionContent> = Vec::new();
@@ -536,40 +511,25 @@ impl Agent for PromptAgent {
                         ));
                     }
 
-                    // Send function results back to LLM
-                    let response = client
-                        .interaction()
-                        .with_model(MODEL)
-                        .with_functions(function_declarations.clone())
-                        .with_store_enabled()
-                        .with_previous_interaction(previous_interaction_id.as_ref().unwrap())
-                        .with_content(function_results)
-                        .create()
+                    // Send function results back to LLM using continuation request
+                    let continuation = LlmRequest::continuation(
+                        &interaction_id,
+                        function_declarations.clone(),
+                        function_results,
+                    );
+
+                    response = context
+                        .llm
+                        .generate_with_cancellation(continuation, &context.cancellation_token)
                         .await
                         .map_err(|e| AgentError::Other(format!("LLM error: {}", e)))?;
 
-                    // Log response in debug mode
-                    // Note: Styling differs from genai_rs request logs. For consistent styling,
-                    // response logging should be added to genai_rs upstream.
-                    if log::log_enabled!(log::Level::Debug) {
-                        if let Ok(response_json) = serde_json::to_string_pretty(&response) {
-                            log::debug!("Response Body (JSON):\n{}", response_json);
-                        }
-                    }
-
-                    // Track tokens
+                    // Track tokens (logging now handled by LlmClient)
                     if let Some(tokens) = gemicro_core::extract_total_tokens(&response) {
                         total_tokens += tokens as u64;
                     }
 
-                    // Check if more function calls or final text
-                    let more_calls = response.function_calls();
-                    if more_calls.is_empty() {
-                        break response.text().unwrap_or("").to_string();
-                    }
-
-                    // More calls - continue loop
-                    previous_interaction_id = response.id.clone();
+                    // Loop continues - check for more function calls at top of loop
                 };
 
                 (final_text, Some(total_tokens))

@@ -183,18 +183,19 @@ impl LlmClient {
 
     /// Get a reference to the underlying genai_rs client.
     ///
-    /// Use this for operations that `LlmClient` doesn't support directly:
-    /// - Function calling (tool declarations, multi-turn function loops)
-    /// - Previous interaction chaining
-    /// - Custom interaction builders
-    ///
     /// # Warning: Escape Hatch
     ///
     /// This method bypasses `LlmClient`'s automatic timeout enforcement, retry
     /// logic, recording, and response logging. When using this directly, you are
     /// responsible for implementing these features yourself.
     ///
-    /// Prefer using `generate()` or `generate_stream()` when possible.
+    /// **Prefer using `generate()` or `generate_stream()` with `LlmRequest` builders:**
+    /// - Function calling: `LlmRequest::new(...).with_functions(declarations)`
+    /// - Multi-turn continuations: `LlmRequest::continuation(prev_id, functions, results)`
+    /// - Conversation history: `LlmRequest::new(...).with_turns(turns)`
+    ///
+    /// Use this only for operations that genuinely require custom interaction builders
+    /// (e.g., advanced streaming patterns or features not yet in `LlmRequest`).
     pub fn client(&self) -> &genai_rs::Client {
         &self.client
     }
@@ -353,18 +354,25 @@ impl LlmClient {
         &self,
         request: &LlmRequest,
     ) -> Result<genai_rs::InteractionResponse, LlmError> {
-        let interaction = self.build_interaction(request);
-
         // Capture timing for recording
         let started_at = SystemTime::now();
         let start_instant = Instant::now();
 
-        // Execute with timeout (rust-genai handles timeout natively)
-        let response = interaction
-            .with_timeout(self.config.timeout)
-            .create()
-            .await
-            .map_err(LlmError::from)?;
+        // Execute with timeout - use different builders for initial vs continuation requests
+        // (genai_rs uses typestate so they return different types)
+        let response = if self.is_continuation(request) {
+            self.build_continuation_interaction(request)?
+                .with_timeout(self.config.timeout)
+                .create()
+                .await
+                .map_err(LlmError::from)?
+        } else {
+            self.build_interaction(request)
+                .with_timeout(self.config.timeout)
+                .create()
+                .await
+                .map_err(LlmError::from)?
+        };
 
         // Log response in debug mode
         // Note: Styling differs from genai_rs request logs. For consistent styling,
@@ -375,8 +383,9 @@ impl LlmClient {
             }
         }
 
-        // Validate response has content
-        if response.text().is_none() {
+        // Validate response has content (text or function calls)
+        // Function calling responses may have function_calls but no text
+        if response.text().is_none() && response.function_calls().is_empty() {
             return Err(LlmError::NoContent);
         }
 
@@ -693,7 +702,8 @@ impl LlmClient {
 
     /// Validate the request before processing
     fn validate_request(&self, request: &LlmRequest) -> Result<(), LlmError> {
-        if request.prompt.is_empty() {
+        // Continuations (function result responses) don't require a prompt
+        if request.prompt.is_empty() && !self.is_continuation(request) {
             return Err(LlmError::InvalidRequest(
                 "Prompt cannot be empty".to_string(),
             ));
@@ -701,7 +711,7 @@ impl LlmClient {
         Ok(())
     }
 
-    /// Build an interaction from the request (DRY helper)
+    /// Build an interaction from the request (DRY helper for initial requests)
     fn build_interaction(&self, request: &LlmRequest) -> genai_rs::InteractionBuilder<'_> {
         let generation_config = GenerationConfig {
             temperature: Some(self.config.temperature),
@@ -715,19 +725,28 @@ impl LlmClient {
             .with_model(MODEL)
             .with_generation_config(generation_config);
 
-        // Use turns if provided, appending current prompt as final user turn.
-        // Otherwise fall back to simple text prompt.
+        // Initial request: use turns or simple text prompt
         if let Some(ref turns) = request.turns {
             // Clone turns and append current prompt as final user turn
             let mut full_turns = turns.clone();
             full_turns.push(genai_rs::Turn::user(request.prompt.as_str()));
             interaction = interaction.with_turns(full_turns);
-        } else {
+        } else if !request.prompt.is_empty() {
             interaction = interaction.with_text(&request.prompt);
         }
 
         if let Some(ref system) = request.system_instruction {
             interaction = interaction.with_system_instruction(system);
+        }
+
+        // Add function declarations if provided
+        if let Some(ref functions) = request.functions {
+            interaction = interaction.with_functions(functions.clone());
+        }
+
+        // Enable storage for interaction chaining
+        if request.store_enabled {
+            interaction = interaction.with_store_enabled();
         }
 
         if request.use_google_search {
@@ -739,6 +758,57 @@ impl LlmClient {
         }
 
         interaction
+    }
+
+    /// Build a continuation interaction from the request (for function calling chains)
+    ///
+    /// This uses genai_rs's Chained typestate which is distinct from initial FirstTurn requests.
+    fn build_continuation_interaction(
+        &self,
+        request: &LlmRequest,
+    ) -> Result<genai_rs::InteractionBuilder<'_, genai_rs::request_builder::Chained>, LlmError>
+    {
+        let generation_config = GenerationConfig {
+            temperature: Some(self.config.temperature),
+            max_output_tokens: Some(self.config.max_tokens as i32),
+            ..Default::default()
+        };
+
+        // Start with previous interaction - this creates a Chained builder
+        let prev_id = request.previous_interaction_id.as_ref().ok_or_else(|| {
+            LlmError::InvalidRequest(
+                "Continuation request missing previous_interaction_id".to_string(),
+            )
+        })?;
+
+        let mut interaction = self
+            .client
+            .interaction()
+            .with_model(MODEL)
+            .with_generation_config(generation_config)
+            .with_previous_interaction(prev_id);
+
+        // Add function results
+        if let Some(ref results) = request.function_results {
+            interaction = interaction.with_content(results.clone());
+        }
+
+        // Add function declarations if provided
+        if let Some(ref functions) = request.functions {
+            interaction = interaction.with_functions(functions.clone());
+        }
+
+        // Enable storage for interaction chaining (usually already enabled for continuations)
+        if request.store_enabled {
+            interaction = interaction.with_store_enabled();
+        }
+
+        Ok(interaction)
+    }
+
+    /// Check if a request is a continuation (for validation bypass)
+    fn is_continuation(&self, request: &LlmRequest) -> bool {
+        request.previous_interaction_id.is_some() && request.function_results.is_some()
     }
 }
 
@@ -805,6 +875,64 @@ mod tests {
 
         let result = client.validate_request(&request);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_request_continuation_empty_prompt_allowed() {
+        use genai_rs::function_result_content;
+
+        let genai_client = genai_rs::Client::builder("test-key".to_string())
+            .build()
+            .unwrap();
+        let client = LlmClient::new(genai_client, LlmConfig::default());
+
+        // A continuation request has empty prompt but previous_interaction_id + function_results
+        let request = LlmRequest::continuation(
+            "interaction_123",
+            vec![], // Empty functions for this test
+            vec![function_result_content(
+                "get_time",
+                "call_1",
+                serde_json::json!({"time": "12:00"}),
+            )],
+        );
+
+        let result = client.validate_request(&request);
+        assert!(
+            result.is_ok(),
+            "Continuation with empty prompt should be valid"
+        );
+    }
+
+    #[test]
+    fn test_is_continuation() {
+        use genai_rs::function_result_content;
+
+        let genai_client = genai_rs::Client::builder("test-key".to_string())
+            .build()
+            .unwrap();
+        let client = LlmClient::new(genai_client, LlmConfig::default());
+
+        // Regular request is not a continuation
+        let regular = LlmRequest::new("Hello");
+        assert!(!client.is_continuation(&regular));
+
+        // Request with only previous_interaction_id is not a continuation
+        let mut partial = LlmRequest::new("");
+        partial.previous_interaction_id = Some("interaction_123".to_string());
+        assert!(!client.is_continuation(&partial));
+
+        // Proper continuation request
+        let continuation = LlmRequest::continuation(
+            "interaction_123",
+            vec![],
+            vec![function_result_content(
+                "get_time",
+                "call_1",
+                serde_json::json!({}),
+            )],
+        );
+        assert!(client.is_continuation(&continuation));
     }
 
     #[test]
