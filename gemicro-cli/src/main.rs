@@ -17,7 +17,7 @@ use gemicro_core::{
     LlmClient,
 };
 use gemicro_deep_research::DeepResearchAgent;
-use gemicro_prompt_agent::{PromptAgent, PromptAgentConfig};
+use gemicro_prompt_agent::{tools, PromptAgent, PromptAgentConfig};
 use repl::Session;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
@@ -74,7 +74,7 @@ async fn main() -> Result<()> {
         };
 
         println!("╔══════════════════════════════════════════════════════════════╗");
-        println!("║{:^64}║", agent_title);
+        println!("║{:^62}║", agent_title);
         println!("╚══════════════════════════════════════════════════════════════╝");
         println!();
         println!("Query: {}", query);
@@ -138,23 +138,33 @@ async fn run_single_query(args: &cli::Args, query: &str) -> Result<()> {
     // Create cancellation token for cooperative shutdown
     let cancellation_token = CancellationToken::new();
 
-    // Create LLM client and context with cancellation support
+    // Create LLM client
     let genai_client = rust_genai::Client::builder(args.api_key.clone())
         .build()
         .context("Failed to create Gemini client")?;
     let llm = LlmClient::new(genai_client, args.llm_config());
-    let context = AgentContext::new_with_cancellation(llm, cancellation_token.clone());
 
-    // Create agent based on --agent flag
-    let agent: Box<dyn Agent> = match args.agent.as_str() {
-        "deep_research" => Box::new(
-            DeepResearchAgent::new(args.research_config())
-                .context("Failed to create research agent")?,
-        ),
-        "prompt_agent" => Box::new(
-            PromptAgent::new(PromptAgentConfig::default())
-                .context("Failed to create prompt agent")?,
-        ),
+    // Create agent and context based on --agent flag
+    // Context is agent-specific: prompt_agent gets tools, others don't
+    let (agent, context): (Box<dyn Agent>, AgentContext) = match args.agent.as_str() {
+        "deep_research" => {
+            let agent = Box::new(
+                DeepResearchAgent::new(args.research_config())
+                    .context("Failed to create research agent")?,
+            );
+            let context = AgentContext::new_with_cancellation(llm, cancellation_token.clone());
+            (agent, context)
+        }
+        "prompt_agent" => {
+            let agent = Box::new(
+                PromptAgent::new(PromptAgentConfig::default())
+                    .context("Failed to create prompt agent")?,
+            );
+            // Add bundled tools (Calculator, CurrentDatetime)
+            let context = AgentContext::new_with_cancellation(llm, cancellation_token.clone())
+                .with_tools(tools::default_registry());
+            (agent, context)
+        }
         other => anyhow::bail!("Unsupported agent for single-query mode: {}", other),
     };
 

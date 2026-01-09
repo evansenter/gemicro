@@ -364,6 +364,16 @@ impl LlmClient {
             .await
             .map_err(LlmError::from)?;
 
+        // Log response in debug mode (complements rust-genai's request logging)
+        if log::log_enabled!(log::Level::Debug) {
+            if let Ok(response_json) = serde_json::to_string_pretty(&response) {
+                log::debug!(
+                    "Response Body (JSON):\n    {}",
+                    response_json.replace('\n', "\n    ")
+                );
+            }
+        }
+
         // Validate response has content
         if response.text().is_none() {
             return Err(LlmError::NoContent);
