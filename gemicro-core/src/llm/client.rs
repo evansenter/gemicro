@@ -181,16 +181,18 @@ impl LlmClient {
         }
     }
 
-    /// Get a reference to the underlying rust-genai client.
+    /// Get a reference to the underlying genai_rs client.
     ///
-    /// Use this for advanced operations like function calling that require
-    /// direct access to the client.
+    /// Use this for operations that `LlmClient` doesn't support directly:
+    /// - Function calling (tool declarations, multi-turn function loops)
+    /// - Previous interaction chaining
+    /// - Custom interaction builders
     ///
     /// # Warning: Escape Hatch
     ///
     /// This method bypasses `LlmClient`'s automatic timeout enforcement, retry
-    /// logic, and consistent error handling. When using this directly, you are
-    /// responsible for implementing these guarantees yourself.
+    /// logic, recording, and response logging. When using this directly, you are
+    /// responsible for implementing these features yourself.
     ///
     /// Prefer using `generate()` or `generate_stream()` when possible.
     pub fn client(&self) -> &genai_rs::Client {
@@ -364,13 +366,12 @@ impl LlmClient {
             .await
             .map_err(LlmError::from)?;
 
-        // Log response in debug mode (complements rust-genai's request logging)
+        // Log response in debug mode
+        // Note: Styling differs from genai_rs request logs. For consistent styling,
+        // response logging should be added to genai_rs upstream.
         if log::log_enabled!(log::Level::Debug) {
             if let Ok(response_json) = serde_json::to_string_pretty(&response) {
-                log::debug!(
-                    "Response Body (JSON):\n    {}",
-                    response_json.replace('\n', "\n    ")
-                );
+                log::debug!("Response Body (JSON):\n{}", response_json);
             }
         }
 
@@ -531,11 +532,10 @@ impl LlmClient {
             }
 
             // Log accumulated response in debug mode
+            // Note: Styling differs from genai_rs request logs. For consistent styling,
+            // response logging should be added to genai_rs upstream.
             if log::log_enabled!(log::Level::Debug) && !accumulated_response.is_empty() {
-                log::debug!(
-                    "Response Body (streamed):\n    {}",
-                    accumulated_response.replace('\n', "\n    ")
-                );
+                log::debug!("Response Body (streamed):\n{}", accumulated_response);
             }
 
             // Record the step at the end of streaming
@@ -671,11 +671,10 @@ impl LlmClient {
             }
 
             // Log accumulated response in debug mode
+            // Note: Styling differs from genai_rs request logs. For consistent styling,
+            // response logging should be added to genai_rs upstream.
             if log::log_enabled!(log::Level::Debug) && !accumulated_response.is_empty() {
-                log::debug!(
-                    "Response Body (streamed):\n    {}",
-                    accumulated_response.replace('\n', "\n    ")
-                );
+                log::debug!("Response Body (streamed):\n{}", accumulated_response);
             }
 
             // Record the step at the end of streaming

@@ -443,6 +443,15 @@ impl Agent for PromptAgent {
                         }
                     };
 
+                    // Log response in debug mode
+                    // Note: Styling differs from genai_rs request logs. For consistent styling,
+                    // response logging should be added to genai_rs upstream.
+                    if log::log_enabled!(log::Level::Debug) {
+                        if let Ok(response_json) = serde_json::to_string_pretty(&response) {
+                            log::debug!("Response Body (JSON):\n{}", response_json);
+                        }
+                    }
+
                     // Track tokens
                     if let Some(tokens) = gemicro_core::extract_total_tokens(&response) {
                         total_tokens += tokens as u64;
@@ -538,6 +547,15 @@ impl Agent for PromptAgent {
                         .create()
                         .await
                         .map_err(|e| AgentError::Other(format!("LLM error: {}", e)))?;
+
+                    // Log response in debug mode
+                    // Note: Styling differs from genai_rs request logs. For consistent styling,
+                    // response logging should be added to genai_rs upstream.
+                    if log::log_enabled!(log::Level::Debug) {
+                        if let Ok(response_json) = serde_json::to_string_pretty(&response) {
+                            log::debug!("Response Body (JSON):\n{}", response_json);
+                        }
+                    }
 
                     // Track tokens
                     if let Some(tokens) = gemicro_core::extract_total_tokens(&response) {
