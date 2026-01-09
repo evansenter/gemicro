@@ -475,6 +475,9 @@ impl LlmClient {
             let serializable_request = SerializableLlmRequest::from(&request);
             let phase = self.current_phase();
 
+            // Accumulate response text for debug logging
+            let mut accumulated_response = String::new();
+
             // Get the stream (not async - returns immediately)
             let stream = interaction.create_stream();
             futures_util::pin_mut!(stream);
@@ -501,6 +504,9 @@ impl LlmClient {
                                         });
                                     }
 
+                                    // Accumulate for debug logging
+                                    accumulated_response.push_str(&text_str);
+
                                     yield LlmStreamChunk {
                                         text: text_str,
                                     };
@@ -522,6 +528,14 @@ impl LlmClient {
                     }
                     None => break,
                 }
+            }
+
+            // Log accumulated response in debug mode
+            if log::log_enabled!(log::Level::Debug) && !accumulated_response.is_empty() {
+                log::debug!(
+                    "Response Body (streamed):\n    {}",
+                    accumulated_response.replace('\n', "\n    ")
+                );
             }
 
             // Record the step at the end of streaming
@@ -591,6 +605,9 @@ impl LlmClient {
             let serializable_request = SerializableLlmRequest::from(&request);
             let phase = self.current_phase();
 
+            // Accumulate response text for debug logging
+            let mut accumulated_response = String::new();
+
             // Get the stream (not async - returns immediately)
             let stream = interaction.create_stream();
             futures_util::pin_mut!(stream);
@@ -628,6 +645,9 @@ impl LlmClient {
                                         });
                                     }
 
+                                    // Accumulate for debug logging
+                                    accumulated_response.push_str(&text_str);
+
                                     yield LlmStreamChunk {
                                         text: text_str,
                                     };
@@ -648,6 +668,14 @@ impl LlmClient {
                     }
                     None => break,
                 }
+            }
+
+            // Log accumulated response in debug mode
+            if log::log_enabled!(log::Level::Debug) && !accumulated_response.is_empty() {
+                log::debug!(
+                    "Response Body (streamed):\n    {}",
+                    accumulated_response.replace('\n', "\n    ")
+                );
             }
 
             // Record the step at the end of streaming
