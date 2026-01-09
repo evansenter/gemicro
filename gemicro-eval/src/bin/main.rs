@@ -177,13 +177,13 @@ fn create_registry() -> AgentRegistry {
 /// Run evaluation with progress display.
 async fn run_evaluation(args: &Args) -> Result<EvalSummary, String> {
     // Create LLM client for agent execution
-    let genai_client = rust_genai::Client::builder(args.api_key.clone())
+    let genai_client = genai_rs::Client::builder(args.api_key.clone())
         .build()
         .map_err(|e| format!("Failed to create Gemini client: {}", e))?;
     let llm = LlmClient::new(genai_client, args.llm_config());
 
     // Create separate LLM client for scorer (critique needs its own client)
-    let scorer_genai_client = rust_genai::Client::builder(args.api_key.clone())
+    let scorer_genai_client = genai_rs::Client::builder(args.api_key.clone())
         .build()
         .map_err(|e| format!("Failed to create scorer Gemini client: {}", e))?;
     let scorer_llm = std::sync::Arc::new(LlmClient::new(scorer_genai_client, args.llm_config()));
@@ -431,7 +431,7 @@ mod tests {
         args.scorer = "contains".to_string();
 
         // Create a dummy LlmClient for the scorer (not used for contains scorer)
-        let genai_client = rust_genai::Client::builder("test-key".to_string())
+        let genai_client = genai_rs::Client::builder("test-key".to_string())
             .build()
             .unwrap();
         let llm = std::sync::Arc::new(LlmClient::new(genai_client, args.llm_config()));

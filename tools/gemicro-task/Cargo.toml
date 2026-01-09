@@ -18,4 +18,4 @@ log.workspace = true
 [dev-dependencies]
 async-stream.workspace = true
 tokio = { workspace = true, features = ["test-util", "macros"] }
-rust-genai.workspace = true
+genai-rs.workspace = true

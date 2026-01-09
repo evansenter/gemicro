@@ -39,6 +39,26 @@ async fn main() -> Result<()> {
             env_logger::Env::default()
                 .default_filter_or("debug,rustyline=warn,hyper=warn,reqwest=warn,h2=warn"),
         )
+        .write_style(env_logger::WriteStyle::Always) // Force colors even when piped
+        .format(|buf, record| {
+            use std::io::Write;
+            // Color-code by module: genai_rs = dim cyan, gemicro = bright
+            let style = buf.default_level_style(record.level());
+            let module = record.module_path().unwrap_or("unknown");
+            let is_wire = module.starts_with("genai_rs");
+            if is_wire {
+                // Dim style for wire-level debug (less important)
+                writeln!(buf, "\x1b[2m[{}] {}\x1b[0m", module, record.args())
+            } else {
+                // Normal style with level coloring for app logs
+                writeln!(
+                    buf,
+                    "{style}[{}]{style:#} {}",
+                    record.level(),
+                    record.args()
+                )
+            }
+        })
         .init();
     } else {
         env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
@@ -86,7 +106,7 @@ async fn main() -> Result<()> {
 
 /// Run the interactive REPL
 async fn run_interactive(args: &cli::Args) -> Result<()> {
-    let genai_client = rust_genai::Client::builder(args.api_key.clone())
+    let genai_client = genai_rs::Client::builder(args.api_key.clone())
         .build()
         .context("Failed to create Gemini client")?;
     let llm = LlmClient::new(genai_client, args.llm_config());
@@ -139,7 +159,7 @@ async fn run_single_query(args: &cli::Args, query: &str) -> Result<()> {
     let cancellation_token = CancellationToken::new();
 
     // Create LLM client
-    let genai_client = rust_genai::Client::builder(args.api_key.clone())
+    let genai_client = genai_rs::Client::builder(args.api_key.clone())
         .build()
         .context("Failed to create Gemini client")?;
     let llm = LlmClient::new(genai_client, args.llm_config());

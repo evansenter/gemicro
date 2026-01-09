@@ -9,7 +9,7 @@ use gemicro_core::tool::{Tool, ToolCallableAdapter, ToolError, ToolResult};
 use gemicro_file_security::FileSecurity;
 use gemicro_input_sanitizer::InputSanitizer;
 use gemicro_metrics::Metrics;
-use rust_genai::CallableFunction;
+use genai_rs::CallableFunction;
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::sync::Arc;

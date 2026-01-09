@@ -1,6 +1,6 @@
 //! LLM request and response types.
 
-use rust_genai::Turn;
+use genai_rs::Turn;
 
 /// Request to the LLM
 #[derive(Debug, Clone)]
@@ -22,7 +22,7 @@ pub struct LlmRequest {
     ///
     /// ```
     /// use gemicro_core::LlmRequest;
-    /// use rust_genai::Turn;
+    /// use genai_rs::Turn;
     ///
     /// let history = vec![
     ///     Turn::user("What is 2+2?"),
@@ -114,7 +114,7 @@ impl LlmRequest {
     ///
     /// ```
     /// use gemicro_core::LlmRequest;
-    /// use rust_genai::Turn;
+    /// use genai_rs::Turn;
     ///
     /// let history = vec![
     ///     Turn::user("What is 2+2?"),

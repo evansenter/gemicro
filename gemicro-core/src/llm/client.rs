@@ -7,7 +7,7 @@ use crate::trajectory::{
     LlmResponseData, SerializableLlmRequest, SerializableStreamChunk, TrajectoryStep,
 };
 use futures_util::stream::{Stream, StreamExt};
-use rust_genai::GenerationConfig;
+use genai_rs::GenerationConfig;
 use std::sync::{Arc, RwLock};
 use std::time::{Instant, SystemTime};
 use tokio_util::sync::CancellationToken;
@@ -19,7 +19,7 @@ use tokio_util::sync::CancellationToken;
 /// to enable it.
 pub struct LlmClient {
     /// Underlying rust-genai client
-    client: rust_genai::Client,
+    client: genai_rs::Client,
 
     /// LLM configuration (timeout, tokens, temperature, etc.)
     config: LlmConfig,
@@ -54,7 +54,7 @@ impl LlmClient {
     ///
     /// Recording is disabled by default. Use [`with_recording`](Self::with_recording)
     /// to create a client that captures LLM interactions.
-    pub fn new(client: rust_genai::Client, config: LlmConfig) -> Self {
+    pub fn new(client: genai_rs::Client, config: LlmConfig) -> Self {
         Self {
             client,
             config,
@@ -75,7 +75,7 @@ impl LlmClient {
     /// use gemicro_core::{LlmClient, LlmRequest, LlmConfig};
     ///
     /// # async fn example() -> Result<(), gemicro_core::LlmError> {
-    /// # let genai_client = rust_genai::Client::builder("key".to_string()).build().unwrap();
+    /// # let genai_client = genai_rs::Client::builder("key".to_string()).build().unwrap();
     /// let client = LlmClient::with_recording(genai_client, LlmConfig::default());
     ///
     /// client.set_phase("decomposition");
@@ -91,7 +91,7 @@ impl LlmClient {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn with_recording(client: rust_genai::Client, config: LlmConfig) -> Self {
+    pub fn with_recording(client: genai_rs::Client, config: LlmConfig) -> Self {
         Self {
             client,
             config,
@@ -193,7 +193,7 @@ impl LlmClient {
     /// responsible for implementing these guarantees yourself.
     ///
     /// Prefer using `generate()` or `generate_stream()` when possible.
-    pub fn client(&self) -> &rust_genai::Client {
+    pub fn client(&self) -> &genai_rs::Client {
         &self.client
     }
 
@@ -207,7 +207,7 @@ impl LlmClient {
     /// This method waits for the full response before returning.
     /// Use `generate_stream()` for real-time token-by-token output.
     ///
-    /// Returns the full [`rust_genai::InteractionResponse`] with access to:
+    /// Returns the full [`genai_rs::InteractionResponse`] with access to:
     /// - `response.text()` - the generated text
     /// - `response.usage` - full token usage metadata
     /// - `response.id` - interaction ID for tracking
@@ -231,7 +231,7 @@ impl LlmClient {
     /// ```no_run
     /// # use gemicro_core::{LlmClient, LlmRequest, LlmConfig};
     /// # async fn example() -> Result<(), gemicro_core::LlmError> {
-    /// # let genai_client = rust_genai::Client::builder("key".to_string()).build().unwrap();
+    /// # let genai_client = genai_rs::Client::builder("key".to_string()).build().unwrap();
     /// let client = LlmClient::new(genai_client, LlmConfig::default());
     /// let request = LlmRequest::new("Explain quantum computing");
     /// let response = client.generate(request).await?;
@@ -242,7 +242,7 @@ impl LlmClient {
     pub async fn generate(
         &self,
         request: LlmRequest,
-    ) -> Result<rust_genai::InteractionResponse, LlmError> {
+    ) -> Result<genai_rs::InteractionResponse, LlmError> {
         self.validate_request(&request)?;
 
         let mut last_error = None;
@@ -281,7 +281,7 @@ impl LlmClient {
     /// # use gemicro_core::{LlmClient, LlmRequest, LlmConfig};
     /// # use tokio_util::sync::CancellationToken;
     /// # async fn example() -> Result<(), gemicro_core::LlmError> {
-    /// # let genai_client = rust_genai::Client::builder("key".to_string()).build().unwrap();
+    /// # let genai_client = genai_rs::Client::builder("key".to_string()).build().unwrap();
     /// let client = LlmClient::new(genai_client, LlmConfig::default());
     /// let token = CancellationToken::new();
     /// let request = LlmRequest::new("Explain quantum computing");
@@ -295,7 +295,7 @@ impl LlmClient {
         &self,
         request: LlmRequest,
         cancellation_token: &CancellationToken,
-    ) -> Result<rust_genai::InteractionResponse, LlmError> {
+    ) -> Result<genai_rs::InteractionResponse, LlmError> {
         self.validate_request(&request)?;
 
         // Check cancellation before starting
@@ -350,7 +350,7 @@ impl LlmClient {
     async fn generate_once(
         &self,
         request: &LlmRequest,
-    ) -> Result<rust_genai::InteractionResponse, LlmError> {
+    ) -> Result<genai_rs::InteractionResponse, LlmError> {
         let interaction = self.build_interaction(request);
 
         // Capture timing for recording
@@ -443,7 +443,7 @@ impl LlmClient {
     /// # use gemicro_core::{LlmClient, LlmRequest, LlmConfig};
     /// # use futures_util::stream::StreamExt;
     /// # async fn example() -> Result<(), gemicro_core::LlmError> {
-    /// # let genai_client = rust_genai::Client::builder("key".to_string()).build().unwrap();
+    /// # let genai_client = genai_rs::Client::builder("key".to_string()).build().unwrap();
     /// let client = LlmClient::new(genai_client, LlmConfig::default());
     /// let request = LlmRequest::new("Count to 10");
     ///
@@ -487,7 +487,7 @@ impl LlmClient {
 
                 match chunk {
                     Some(Ok(stream_event)) => {
-                        use rust_genai::StreamChunk;
+                        use genai_rs::StreamChunk;
                         match stream_event.chunk {
                             StreamChunk::Delta(delta) => {
                                 if let Some(text) = delta.text() {
@@ -551,7 +551,7 @@ impl LlmClient {
     /// # use futures_util::stream::StreamExt;
     /// # use tokio_util::sync::CancellationToken;
     /// # async fn example() -> Result<(), gemicro_core::LlmError> {
-    /// # let genai_client = rust_genai::Client::builder("key".to_string()).build().unwrap();
+    /// # let genai_client = genai_rs::Client::builder("key".to_string()).build().unwrap();
     /// let client = LlmClient::new(genai_client, LlmConfig::default());
     /// let token = CancellationToken::new();
     /// let request = LlmRequest::new("Count to 10");
@@ -614,7 +614,7 @@ impl LlmClient {
 
                 match chunk {
                     Some(Ok(stream_event)) => {
-                        use rust_genai::StreamChunk;
+                        use genai_rs::StreamChunk;
                         match stream_event.chunk {
                             StreamChunk::Delta(delta) => {
                                 if let Some(text) = delta.text() {
@@ -675,7 +675,7 @@ impl LlmClient {
     }
 
     /// Build an interaction from the request (DRY helper)
-    fn build_interaction(&self, request: &LlmRequest) -> rust_genai::InteractionBuilder<'_> {
+    fn build_interaction(&self, request: &LlmRequest) -> genai_rs::InteractionBuilder<'_> {
         let generation_config = GenerationConfig {
             temperature: Some(self.config.temperature),
             max_output_tokens: Some(self.config.max_tokens as i32),
@@ -693,7 +693,7 @@ impl LlmClient {
         if let Some(ref turns) = request.turns {
             // Clone turns and append current prompt as final user turn
             let mut full_turns = turns.clone();
-            full_turns.push(rust_genai::Turn::user(request.prompt.as_str()));
+            full_turns.push(genai_rs::Turn::user(request.prompt.as_str()));
             interaction = interaction.with_turns(full_turns);
         } else {
             interaction = interaction.with_text(&request.prompt);
@@ -704,7 +704,7 @@ impl LlmClient {
         }
 
         if request.use_google_search {
-            interaction = interaction.with_tools(vec![rust_genai::Tool::GoogleSearch]);
+            interaction = interaction.with_tools(vec![genai_rs::Tool::GoogleSearch]);
         }
 
         if let Some(ref schema) = request.response_format {
@@ -757,7 +757,7 @@ mod tests {
 
     #[test]
     fn test_validate_request_empty_prompt() {
-        let genai_client = rust_genai::Client::builder("test-key".to_string())
+        let genai_client = genai_rs::Client::builder("test-key".to_string())
             .build()
             .unwrap();
         let client = LlmClient::new(genai_client, LlmConfig::default());
@@ -770,7 +770,7 @@ mod tests {
 
     #[test]
     fn test_validate_request_valid_prompt() {
-        let genai_client = rust_genai::Client::builder("test-key".to_string())
+        let genai_client = genai_rs::Client::builder("test-key".to_string())
             .build()
             .unwrap();
         let client = LlmClient::new(genai_client, LlmConfig::default());
@@ -792,7 +792,7 @@ mod tests {
             retry_base_delay_ms: 500,
         };
 
-        let genai_client = rust_genai::Client::builder("test-key".to_string())
+        let genai_client = genai_rs::Client::builder("test-key".to_string())
             .build()
             .unwrap();
         let client = LlmClient::new(genai_client, config.clone());
@@ -806,7 +806,7 @@ mod tests {
     #[test]
     fn test_llm_client_debug_redacts_api_key() {
         // Create client with a secret API key
-        let genai_client = rust_genai::Client::builder("secret-api-key-12345".to_string())
+        let genai_client = genai_rs::Client::builder("secret-api-key-12345".to_string())
             .build()
             .unwrap();
         let client = LlmClient::new(genai_client, LlmConfig::default());
@@ -841,7 +841,7 @@ mod tests {
 
     #[test]
     fn test_llm_client_not_recording_by_default() {
-        let genai_client = rust_genai::Client::builder("test-key".to_string())
+        let genai_client = genai_rs::Client::builder("test-key".to_string())
             .build()
             .unwrap();
         let client = LlmClient::new(genai_client, LlmConfig::default());
@@ -853,7 +853,7 @@ mod tests {
 
     #[test]
     fn test_llm_client_with_recording() {
-        let genai_client = rust_genai::Client::builder("test-key".to_string())
+        let genai_client = genai_rs::Client::builder("test-key".to_string())
             .build()
             .unwrap();
         let client = LlmClient::with_recording(genai_client, LlmConfig::default());
@@ -864,7 +864,7 @@ mod tests {
 
     #[test]
     fn test_set_and_get_phase() {
-        let genai_client = rust_genai::Client::builder("test-key".to_string())
+        let genai_client = genai_rs::Client::builder("test-key".to_string())
             .build()
             .unwrap();
         let client = LlmClient::new(genai_client, LlmConfig::default());
@@ -883,7 +883,7 @@ mod tests {
 
     #[test]
     fn test_take_steps_clears_recorder() {
-        let genai_client = rust_genai::Client::builder("test-key".to_string())
+        let genai_client = genai_rs::Client::builder("test-key".to_string())
             .build()
             .unwrap();
         let client = LlmClient::with_recording(genai_client, LlmConfig::default());
@@ -918,7 +918,7 @@ mod tests {
 
     #[test]
     fn test_debug_shows_recording_status() {
-        let genai_client = rust_genai::Client::builder("test-key".to_string())
+        let genai_client = genai_rs::Client::builder("test-key".to_string())
             .build()
             .unwrap();
         let recording_client = LlmClient::with_recording(genai_client, LlmConfig::default());
@@ -929,7 +929,7 @@ mod tests {
             "Debug output should show is_recording: true"
         );
 
-        let genai_client2 = rust_genai::Client::builder("test-key".to_string())
+        let genai_client2 = genai_rs::Client::builder("test-key".to_string())
             .build()
             .unwrap();
         let non_recording = LlmClient::new(genai_client2, LlmConfig::default());

@@ -92,7 +92,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_temperature(0.7);
 
     // Create LLM client for Task tool (needs Arc for sharing)
-    let genai_client_for_task = rust_genai::Client::builder(api_key.clone()).build()?;
+    let genai_client_for_task = genai_rs::Client::builder(api_key.clone()).build()?;
     let llm_for_task = Arc::new(LlmClient::new(genai_client_for_task, llm_config.clone()));
 
     // Register subagents using factory closures
@@ -140,7 +140,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
 
     // Create a separate LLM client for the agent context
-    let genai_client = rust_genai::Client::builder(api_key).build()?;
+    let genai_client = genai_rs::Client::builder(api_key).build()?;
     let llm = LlmClient::new(genai_client, llm_config);
 
     // Create context

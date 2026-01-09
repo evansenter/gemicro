@@ -28,12 +28,12 @@ reqwest = { version = "0.12", features = ["json"] }
 dirs = "6.0"
 clap = { version = "4.5", features = ["derive", "env"] }
 indicatif = { workspace = true }
-rust-genai = { workspace = true }
+genai-rs = { workspace = true }
 env_logger = "0.11"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros"] }
-rust-genai = { workspace = true }
+genai-rs = { workspace = true }
 tempfile = { workspace = true }
 env_logger = "0.11"
 rstest = { workspace = true }

@@ -3,7 +3,7 @@
 //! These are pure functions with no external dependencies, providing
 //! common text manipulation and response handling operations used across crates.
 
-use rust_genai::InteractionResponse;
+use genai_rs::InteractionResponse;
 
 /// Extract total token count from an LLM response.
 ///
@@ -17,7 +17,7 @@ use rust_genai::InteractionResponse;
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// let client = LlmClient::new(
-///     rust_genai::Client::builder("api-key".to_string()).build()?,
+///     genai_rs::Client::builder("api-key".to_string()).build()?,
 ///     LlmConfig::default(),
 /// );
 /// let response = client.generate(LlmRequest::new("Hello")).await?;
@@ -108,14 +108,14 @@ pub fn first_sentence(s: &str) -> String {
 mod tests {
     use super::*;
 
-    fn test_response(usage: Option<rust_genai::UsageMetadata>) -> InteractionResponse {
+    fn test_response(usage: Option<genai_rs::UsageMetadata>) -> InteractionResponse {
         InteractionResponse {
             id: Some("test".to_string()),
             model: None,
             agent: None,
             input: vec![],
             outputs: vec![],
-            status: rust_genai::InteractionStatus::Completed,
+            status: genai_rs::InteractionStatus::Completed,
             usage,
             tools: None,
             grounding_metadata: None,
@@ -134,7 +134,7 @@ mod tests {
 
     #[test]
     fn test_extract_total_tokens_none_total() {
-        let response = test_response(Some(rust_genai::UsageMetadata {
+        let response = test_response(Some(genai_rs::UsageMetadata {
             total_tokens: None,
             total_input_tokens: Some(10),
             total_output_tokens: Some(20),
@@ -145,7 +145,7 @@ mod tests {
 
     #[test]
     fn test_extract_total_tokens_valid() {
-        let response = test_response(Some(rust_genai::UsageMetadata {
+        let response = test_response(Some(genai_rs::UsageMetadata {
             total_tokens: Some(100),
             ..Default::default()
         }));

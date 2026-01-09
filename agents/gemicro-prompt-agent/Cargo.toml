@@ -9,7 +9,7 @@ description = "Prompt agent: executes prompts with optional tool support"
 
 [dependencies]
 gemicro-core = { path = "../../gemicro-core" }
-rust-genai = { workspace = true }
+genai-rs = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 async-stream = { workspace = true }
@@ -22,7 +22,7 @@ meval = "0.2"
 
 [dev-dependencies]
 rstest = { workspace = true }
-rust-genai = { workspace = true }
+genai-rs = { workspace = true }
 tokio = { workspace = true, features = ["test-util", "macros"] }
 tokio-util = { workspace = true }
 futures-util = { workspace = true }

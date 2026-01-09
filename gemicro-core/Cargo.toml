@@ -5,8 +5,8 @@ edition = "2021"
 description = "Core library for gemicro AI agent exploration platform"
 
 [dependencies]
-rust-genai = { workspace = true }
-rust-genai-macros = { workspace = true }
+genai-rs = { workspace = true }
+genai-rs-macros = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 async-trait = { workspace = true }

@@ -37,7 +37,7 @@
 use super::{BatchConfirmationHandler, Tool, ToolError, ToolResult};
 use crate::interceptor::{InterceptDecision, InterceptorChain, ToolCall};
 use async_trait::async_trait;
-use rust_genai::{CallableFunction, FunctionDeclaration, FunctionError};
+use genai_rs::{CallableFunction, FunctionDeclaration, FunctionError};
 use serde_json::Value;
 use std::sync::Arc;
 
@@ -59,7 +59,7 @@ use std::sync::Arc;
 ///
 /// ```no_run
 /// use gemicro_core::tool::{ToolCallableAdapter, ToolRegistry, AutoApprove};
-/// use rust_genai::CallableFunction;
+/// use genai_rs::CallableFunction;
 /// use std::sync::Arc;
 ///
 /// // Assuming you have a registry with tools
@@ -319,7 +319,7 @@ mod tests {
     use super::*;
     use crate::tool::{AutoApprove, AutoDeny, ToolError, ToolResult};
     use async_trait::async_trait;
-    use rust_genai::CallableFunction;
+    use genai_rs::CallableFunction;
     use serde_json::{json, Value};
 
     #[derive(Debug)]

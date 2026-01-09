@@ -15,4 +15,4 @@ serde_json = { workspace = true }
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros"] }
 futures-util = { workspace = true }
-rust-genai = { workspace = true }
+genai-rs = { workspace = true }

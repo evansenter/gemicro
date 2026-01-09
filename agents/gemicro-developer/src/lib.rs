@@ -24,7 +24,7 @@
 //! use futures_util::StreamExt;
 //!
 //! # async fn example() -> Result<(), gemicro_core::AgentError> {
-//! # let genai_client = rust_genai::Client::builder("your-api-key".to_string()).build().unwrap();
+//! # let genai_client = genai_rs::Client::builder("your-api-key".to_string()).build().unwrap();
 //! let llm = LlmClient::new(genai_client, LlmConfig::default());
 //! let context = AgentContext::new(llm);
 //!
@@ -54,7 +54,7 @@ use gemicro_core::{
     BatchConfirmationHandler, ContextLevel, ContextUsage, DefaultTracker, ExecutionTracking,
     LlmError, PendingToolCall, ResultMetadata, ToolBatch, MODEL,
 };
-use rust_genai::{
+use genai_rs::{
     function_result_content, CallableFunction, FunctionDeclaration, InteractionContent,
     InteractionResponse, OwnedFunctionCallInfo,
 };
@@ -64,7 +64,7 @@ use std::time::Instant;
 
 /// Build the final result event with answer and metadata.
 fn build_final_result(
-    response: &rust_genai::InteractionResponse,
+    response: &genai_rs::InteractionResponse,
     start: Instant,
     total_tool_calls: usize,
     iteration: usize,

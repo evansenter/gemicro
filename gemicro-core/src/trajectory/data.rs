@@ -355,7 +355,7 @@ mod tests {
 
     #[test]
     fn test_serializable_request_with_turns() {
-        use rust_genai::Turn;
+        use genai_rs::Turn;
 
         let request = LlmRequest::new("Follow up question")
             .with_turns(vec![Turn::user("What is 2+2?"), Turn::model("4")]);
@@ -455,7 +455,7 @@ mod tests {
 
     #[test]
     fn test_trajectory_roundtrip_with_turns() {
-        use rust_genai::Turn;
+        use genai_rs::Turn;
 
         let request_with_turns =
             LlmRequest::new("Follow up").with_turns(vec![Turn::user("Q1"), Turn::model("A1")]);

@@ -35,7 +35,7 @@
 //!     let agent = DeepResearchAgent::new(ResearchConfig::default())?;
 //!
 //!     // Create context
-//!     let genai_client = rust_genai::Client::builder("api-key".to_string()).build();
+//!     let genai_client = genai_rs::Client::builder("api-key".to_string()).build();
 //!     let llm = LlmClient::new(genai_client, LlmConfig::default());
 //!     let context = AgentContext::new(llm);
 //!

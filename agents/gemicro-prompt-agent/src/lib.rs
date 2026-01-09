@@ -16,7 +16,7 @@
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! let agent = PromptAgent::new(PromptAgentConfig::default())?;
 //!
-//! let genai = rust_genai::Client::builder("api-key".to_string()).build()?;
+//! let genai = genai_rs::Client::builder("api-key".to_string()).build()?;
 //! let context = AgentContext::new(LlmClient::new(genai, LlmConfig::default()));
 //!
 //! let stream = agent.execute("What is Rust?", context);
@@ -43,7 +43,7 @@ use gemicro_core::{
 };
 
 use async_stream::try_stream;
-use rust_genai::{
+use genai_rs::{
     function_result_content, CallableFunction, FunctionDeclaration, InteractionContent,
 };
 use serde_json::{json, Value};
@@ -217,7 +217,7 @@ impl PromptAgentConfig {
 /// let agent = PromptAgent::new(config)?;
 ///
 /// // Create context WITH explicit tools
-/// let genai = rust_genai::Client::builder("api-key".to_string()).build()?;
+/// let genai = genai_rs::Client::builder("api-key".to_string()).build()?;
 /// let registry = ToolRegistry::new();
 /// // registry.register(Calculator); // Register your tools
 ///
@@ -240,7 +240,7 @@ impl PromptAgentConfig {
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// let agent = PromptAgent::new(PromptAgentConfig::default())?;
 ///
-/// let genai = rust_genai::Client::builder("api-key".to_string()).build()?;
+/// let genai = genai_rs::Client::builder("api-key".to_string()).build()?;
 /// let context = AgentContext::new(LlmClient::new(genai, LlmConfig::default()));
 ///
 /// let stream = agent.execute("What is Rust?", context);

@@ -26,7 +26,7 @@ pub fn get_api_key() -> Option<String> {
 ///
 /// Includes FileRead, Glob, Grep, and Bash tools with AutoApprove confirmation handler.
 pub fn create_test_context(api_key: &str) -> AgentContext {
-    let genai_client = rust_genai::Client::builder(api_key.to_string())
+    let genai_client = genai_rs::Client::builder(api_key.to_string())
         .build()
         .unwrap();
     let config = LlmConfig::default()
@@ -55,7 +55,7 @@ pub fn create_test_context_with_handler(
     api_key: &str,
     handler: Arc<dyn BatchConfirmationHandler>,
 ) -> AgentContext {
-    let genai_client = rust_genai::Client::builder(api_key.to_string())
+    let genai_client = genai_rs::Client::builder(api_key.to_string())
         .build()
         .unwrap();
     let config = LlmConfig::default()

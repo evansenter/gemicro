@@ -109,7 +109,7 @@ impl Dataset for MockDataset {
 
 /// Helper to create a mock LLM client (the agent doesn't actually use it).
 fn mock_llm() -> gemicro_core::LlmClient {
-    let genai_client = rust_genai::Client::builder("fake-key".to_string())
+    let genai_client = genai_rs::Client::builder("fake-key".to_string())
         .build()
         .unwrap();
     gemicro_core::LlmClient::new(genai_client, gemicro_core::LlmConfig::default())
