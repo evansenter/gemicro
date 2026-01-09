@@ -7,10 +7,28 @@ use crate::trajectory::{
     LlmResponseData, SerializableLlmRequest, SerializableStreamChunk, TrajectoryStep,
 };
 use futures_util::stream::{Stream, StreamExt};
-use genai_rs::GenerationConfig;
+use genai_rs::{function_result_content, FunctionCallInfo, GenerationConfig};
+use std::future::Future;
 use std::sync::{Arc, RwLock};
 use std::time::{Instant, SystemTime};
 use tokio_util::sync::CancellationToken;
+
+/// Result from [`LlmClient::generate_with_tools`]
+#[derive(Debug)]
+#[non_exhaustive]
+pub struct GenerateWithToolsResponse {
+    /// The final response from the model (after all tool calls completed)
+    pub response: genai_rs::InteractionResponse,
+
+    /// Total tokens used across all turns (initial + continuations)
+    pub total_tokens: u64,
+
+    /// Number of tool calling continuation rounds executed
+    ///
+    /// 0 means the model responded without calling any tools.
+    /// Does not count the initial request.
+    pub turns: usize,
+}
 
 /// LLM client wrapping rust-genai with timeout and configuration
 ///
@@ -347,6 +365,158 @@ impl LlmClient {
 
         Err(last_error
             .unwrap_or_else(|| LlmError::Other("Retry loop exited unexpectedly".to_string())))
+    }
+
+    /// Execute a multi-turn function calling loop.
+    ///
+    /// This method handles the entire function calling loop internally:
+    /// 1. Makes initial request with functions
+    /// 2. If response contains function calls, executes them via the callback
+    /// 3. Sends results back to the model
+    /// 4. Repeats until model returns final text (no function calls) or max_turns reached
+    ///
+    /// # Arguments
+    ///
+    /// * `request` - Initial request (should include functions via `with_functions()`)
+    /// * `tool_executor` - Async callback that executes function calls. Receives a reference
+    ///   to each [`FunctionCallInfo`] and returns a [`serde_json::Value`] result. Errors should
+    ///   be wrapped in the Value (e.g., `json!({"error": "message"})`).
+    /// * `max_turns` - Maximum continuation rounds. Does not count the initial request.
+    ///   Set to 10 for typical use cases.
+    /// * `cancellation_token` - Token for cancelling the operation
+    ///
+    /// # Returns
+    ///
+    /// [`GenerateWithToolsResponse`] containing the final response, total tokens used,
+    /// and number of tool-calling turns executed.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LlmError::Other` if max_turns is exceeded, or propagates errors from
+    /// the underlying LLM calls.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use gemicro_core::{LlmClient, LlmRequest, FunctionCallInfo};
+    /// use serde_json::json;
+    ///
+    /// let result = client.generate_with_tools(
+    ///     LlmRequest::with_system("What time is it?", "You have access to tools.")
+    ///         .with_functions(function_declarations),
+    ///     |fc: &FunctionCallInfo| async move {
+    ///         match fc.name.as_str() {
+    ///             "get_time" => json!({"time": "12:00 PM"}),
+    ///             _ => json!({"error": format!("Unknown function: {}", fc.name)}),
+    ///         }
+    ///     },
+    ///     10,
+    ///     &cancellation_token,
+    /// ).await?;
+    ///
+    /// println!("Final answer: {}", result.response.text().unwrap_or(""));
+    /// println!("Total tokens: {}", result.total_tokens);
+    /// println!("Tool-calling turns: {}", result.turns);
+    /// ```
+    pub async fn generate_with_tools<F, Fut>(
+        &self,
+        request: LlmRequest,
+        tool_executor: F,
+        max_turns: usize,
+        cancellation_token: &CancellationToken,
+    ) -> Result<GenerateWithToolsResponse, LlmError>
+    where
+        F: Fn(&FunctionCallInfo) -> Fut,
+        Fut: Future<Output = serde_json::Value>,
+    {
+        self.validate_request(&request)?;
+
+        // Check cancellation before starting
+        if cancellation_token.is_cancelled() {
+            return Err(LlmError::Cancelled);
+        }
+
+        // Get function declarations from request (needed for continuations)
+        let function_declarations = request.functions.clone().unwrap_or_default();
+
+        // Make initial request
+        let mut response = self
+            .generate_with_cancellation(request, cancellation_token)
+            .await?;
+
+        let mut total_tokens: u64 = crate::extract_total_tokens(&response)
+            .map(|t| t as u64)
+            .unwrap_or(0);
+        let mut turns: usize = 0;
+
+        // Function calling loop
+        loop {
+            // Check cancellation
+            if cancellation_token.is_cancelled() {
+                return Err(LlmError::Cancelled);
+            }
+
+            let function_calls = response.function_calls();
+
+            // If no function calls, we're done
+            if function_calls.is_empty() {
+                break;
+            }
+
+            // Check max turns
+            turns += 1;
+            if turns > max_turns {
+                return Err(LlmError::Other(format!(
+                    "Max tool-calling turns ({}) exceeded",
+                    max_turns
+                )));
+            }
+
+            // Get interaction ID for chaining
+            let interaction_id = response.id.clone().ok_or_else(|| {
+                LlmError::Other("Missing interaction ID for function calling continuation".into())
+            })?;
+
+            // Execute each function call via the callback
+            let mut function_results = Vec::with_capacity(function_calls.len());
+            for fc in &function_calls {
+                // Check cancellation before each tool call
+                if cancellation_token.is_cancelled() {
+                    return Err(LlmError::Cancelled);
+                }
+
+                let result = tool_executor(fc).await;
+                let call_id = fc.id.unwrap_or("unknown");
+
+                function_results.push(function_result_content(
+                    fc.name.to_string(),
+                    call_id.to_string(),
+                    result,
+                ));
+            }
+
+            // Send results back to LLM
+            let continuation = LlmRequest::continuation(
+                &interaction_id,
+                function_declarations.clone(),
+                function_results,
+            );
+
+            response = self
+                .generate_with_cancellation(continuation, cancellation_token)
+                .await?;
+
+            // Track tokens
+            if let Some(tokens) = crate::extract_total_tokens(&response) {
+                total_tokens += tokens as u64;
+            }
+        }
+
+        Ok(GenerateWithToolsResponse {
+            response,
+            total_tokens,
+            turns,
+        })
     }
 
     /// Execute a single generate request (no retries)
@@ -1093,6 +1263,52 @@ mod tests {
         assert!(
             debug_output2.contains("is_recording: false"),
             "Debug output should show is_recording: false"
+        );
+    }
+
+    // generate_with_tools tests
+
+    #[tokio::test]
+    async fn test_generate_with_tools_validates_empty_prompt() {
+        let genai_client = genai_rs::Client::builder("test-key".to_string())
+            .build()
+            .unwrap();
+        let client = LlmClient::new(genai_client, LlmConfig::default());
+        let token = CancellationToken::new();
+
+        // Request with empty prompt (not a continuation) should fail validation
+        let request = LlmRequest::new("");
+
+        let result = client
+            .generate_with_tools(request, |_fc| async { serde_json::json!({}) }, 10, &token)
+            .await;
+
+        assert!(result.is_err());
+        assert!(matches!(result, Err(LlmError::InvalidRequest(_))));
+    }
+
+    #[tokio::test]
+    async fn test_generate_with_tools_respects_cancellation_before_start() {
+        let genai_client = genai_rs::Client::builder("test-key".to_string())
+            .build()
+            .unwrap();
+        let client = LlmClient::new(genai_client, LlmConfig::default());
+        let token = CancellationToken::new();
+
+        // Cancel before calling
+        token.cancel();
+
+        let request = LlmRequest::new("Test prompt");
+
+        let result = client
+            .generate_with_tools(request, |_fc| async { serde_json::json!({}) }, 10, &token)
+            .await;
+
+        assert!(result.is_err());
+        assert!(
+            matches!(result, Err(LlmError::Cancelled)),
+            "Expected Cancelled error, got {:?}",
+            result
         );
     }
 }

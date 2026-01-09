@@ -69,7 +69,10 @@ pub use config::{GemicroConfig, LlmConfig, MODEL};
 pub use context::{ContextLevel, ContextUsage, DEFAULT_CONTEXT_WINDOW, DEFAULT_WARNING_THRESHOLD};
 pub use error::{AgentError, GemicroError, LlmError};
 pub use history::{ConversationHistory, HistoryEntry};
-pub use llm::{LlmClient, LlmRequest, LlmStreamChunk, Role, Turn, TurnContent};
+pub use llm::{
+    FunctionCallInfo, GenerateWithToolsResponse, LlmClient, LlmRequest, LlmStreamChunk, Role, Turn,
+    TurnContent,
+};
 pub use mock_llm::MockLlmClient;
 pub use tool::{
     tools_to_callables, AutoApprove, AutoDeny, BatchApproval, BatchConfirmationHandler,

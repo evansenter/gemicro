@@ -54,7 +54,16 @@ The `LlmClient` wraps genai_rs to provide:
 // Standard usage - goes through LlmClient
 let response = context.llm.generate(LlmRequest::new("What is 2+2?")).await?;
 
-// With function calling
+// With function calling (callback API - handles loop internally)
+let result = context.llm.generate_with_tools(
+    LlmRequest::with_system(query, system_prompt)
+        .with_functions(function_declarations),
+    |fc| async move { execute_tool(&fc.name, &fc.args).await },
+    10,  // max_turns
+    &cancellation_token,
+).await?;
+
+// Or use primitives for fine-grained control (event emission, custom flow)
 let response = context.llm.generate(
     LlmRequest::with_system(query, system_prompt)
         .with_functions(function_declarations)
@@ -65,6 +74,14 @@ let response = context.llm.generate(
     LlmRequest::continuation(interaction_id, functions, results)
 ).await?;
 ```
+
+#### Function Calling API Levels
+
+| API | Use When |
+|-----|----------|
+| `generate_with_tools()` | Simple callback-based tool execution, no per-tool events needed |
+| `with_functions()` + `continuation()` | Streaming agents that emit per-tool events (PromptAgent) |
+| `client()` | Advanced optimizations like skipping function re-declaration |
 
 #### Escape Hatch: `client()`
 

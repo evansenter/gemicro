@@ -29,8 +29,11 @@
 mod client;
 mod request;
 
-pub use client::LlmClient;
+pub use client::{GenerateWithToolsResponse, LlmClient};
 pub use request::{LlmRequest, LlmStreamChunk};
 
 // Re-export Turn types from rust-genai for multi-turn conversation support
 pub use genai_rs::{Role, Turn, TurnContent};
+
+// Re-export FunctionCallInfo for generate_with_tools callback signature
+pub use genai_rs::FunctionCallInfo;
