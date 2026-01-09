@@ -169,7 +169,8 @@ async fn run_single_query(args: &cli::Args, query: &str) -> Result<()> {
     };
 
     let mut tracker = agent.create_tracker();
-    let mut renderer = IndicatifRenderer::new(args.plain);
+    // Disable spinner in verbose mode to avoid interference with log output
+    let mut renderer = IndicatifRenderer::new(args.plain || args.verbose);
 
     // Connect to event bus if URL provided
     let mut coordination = if let Some(ref url) = args.event_bus_url {
