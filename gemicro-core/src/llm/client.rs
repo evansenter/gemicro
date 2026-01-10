@@ -397,27 +397,20 @@ impl LlmClient {
     ///
     /// # Example
     ///
-    /// ```ignore
-    /// use gemicro_core::{LlmClient, LlmRequest, FunctionCallInfo};
-    /// use serde_json::json;
-    ///
+    /// ```text
     /// let result = client.generate_with_tools(
-    ///     LlmRequest::with_system("What time is it?", "You have access to tools.")
+    ///     LlmRequest::with_system("What time is it?", "You have tools.")
     ///         .with_functions(function_declarations),
-    ///     |fc: &FunctionCallInfo| async move {
-    ///         match fc.name.as_str() {
-    ///             "get_time" => json!({"time": "12:00 PM"}),
-    ///             _ => json!({"error": format!("Unknown function: {}", fc.name)}),
-    ///         }
-    ///     },
-    ///     10,
+    ///     |fc| async move { json!({"time": "12:00 PM"}) },
+    ///     10,  // max_turns
     ///     &cancellation_token,
     /// ).await?;
     ///
-    /// println!("Final answer: {}", result.response.text().unwrap_or(""));
-    /// println!("Total tokens: {}", result.total_tokens);
-    /// println!("Tool-calling turns: {}", result.turns);
+    /// println!("Answer: {}", result.response.text().unwrap_or(""));
+    /// println!("Tokens: {}, Turns: {}", result.total_tokens, result.turns);
     /// ```
+    ///
+    /// For complete working examples, see `agents/gemicro-prompt-agent/src/lib.rs`.
     pub async fn generate_with_tools<F, Fut>(
         &self,
         request: LlmRequest,

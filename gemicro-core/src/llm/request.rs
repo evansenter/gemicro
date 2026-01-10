@@ -145,18 +145,29 @@ impl LlmRequest {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```
     /// use gemicro_core::LlmRequest;
-    /// use genai_rs::function_result_content;
+    /// use genai_rs::{function_result_content, FunctionDeclaration, FunctionParameters};
+    /// use serde_json::json;
     ///
-    /// // After executing the function...
+    /// // Assuming you have an interaction_id from a previous response
+    /// let interaction_id = "interaction_abc123";
+    ///
+    /// // And your function declarations
+    /// let function_declarations = vec![FunctionDeclaration::new(
+    ///     "get_weather".to_string(),
+    ///     "Get the weather".to_string(),
+    ///     FunctionParameters::new("object".to_string(), Default::default(), vec![]),
+    /// )];
+    ///
+    /// // After executing the function, create results
     /// let results = vec![
     ///     function_result_content("get_weather", "call_123", json!({"temp": 72})),
     /// ];
     ///
     /// let request = LlmRequest::continuation(
     ///     interaction_id,
-    ///     function_declarations.clone(),
+    ///     function_declarations,
     ///     results,
     /// );
     /// ```
