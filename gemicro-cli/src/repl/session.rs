@@ -521,20 +521,18 @@ impl Session {
 
     /// Get the current agent context with cancellation support.
     ///
-    /// For agents that need tools (like developer), the tool registry is provided.
+    /// Tools are always provided to agents. Each agent controls which tools it
+    /// uses via its `tool_filter` configuration:
+    /// - `ToolSet::None` → agent won't use any tools
+    /// - `ToolSet::Inherit` → use all available tools
+    /// - `ToolSet::Specific([...])` → use only listed tools
+    ///
     /// If sandbox paths are configured, interceptors are attached for security.
     fn agent_context(&self, cancellation_token: CancellationToken) -> AgentContext {
-        // Developer agent needs tools; others don't
-        let tools = if self.current_agent_name == "developer" {
-            Some(Arc::clone(&self.tool_registry))
-        } else {
-            None
-        };
-
         AgentContext {
             llm: self.llm.clone(),
             cancellation_token,
-            tools,
+            tools: Some(Arc::clone(&self.tool_registry)),
             confirmation_handler: Some(Arc::clone(&self.confirmation_handler)),
             execution: gemicro_core::ExecutionContext::root(),
             orchestration: None,
