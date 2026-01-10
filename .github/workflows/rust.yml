@@ -48,6 +48,8 @@ jobs:
             packages: "gemicro-react"
           - group: core-eval
             packages: "gemicro-core gemicro-eval"
+          - group: developer
+            packages: "gemicro-developer"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
