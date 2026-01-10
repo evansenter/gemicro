@@ -106,6 +106,12 @@ pub struct PromptAgentConfig {
     /// Only used when `AgentContext::tools` is provided.
     /// Defaults to `ToolSet::All` (use all available tools).
     pub tool_filter: ToolSet,
+
+    /// Custom description for the agent.
+    ///
+    /// If set, this description is returned by `Agent::description()` instead
+    /// of the default. Used by markdown-defined agents.
+    pub description: Option<String>,
 }
 
 impl Default for PromptAgentConfig {
@@ -116,6 +122,7 @@ impl Default for PromptAgentConfig {
                 "You are a helpful assistant. Answer questions concisely and accurately."
                     .to_string(),
             tool_filter: ToolSet::All,
+            description: None,
         }
     }
 }
@@ -157,6 +164,26 @@ impl PromptAgentConfig {
     #[must_use]
     pub fn with_tool_filter(mut self, tool_filter: ToolSet) -> Self {
         self.tool_filter = tool_filter;
+        self
+    }
+
+    /// Set a custom description for the agent.
+    ///
+    /// When set, this description is returned by `Agent::description()` instead
+    /// of the default. This is used by markdown-defined agents to show the
+    /// description from the markdown frontmatter.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use gemicro_prompt_agent::PromptAgentConfig;
+    ///
+    /// let config = PromptAgentConfig::default()
+    ///     .with_description("Answers questions about codebase structure");
+    /// ```
+    #[must_use]
+    pub fn with_description(mut self, description: impl Into<String>) -> Self {
+        self.description = Some(description.into());
         self
     }
 
@@ -397,7 +424,8 @@ impl PromptAgent {
 
         let config = PromptAgentConfig::default()
             .with_system_prompt(&def.system_prompt)
-            .with_tool_filter(def.tools.clone());
+            .with_tool_filter(def.tools.clone())
+            .with_description(&def.description);
 
         Self::new(config)
     }
@@ -409,7 +437,10 @@ impl Agent for PromptAgent {
     }
 
     fn description(&self) -> &str {
-        "An agent that executes prompts with optional tool support"
+        self.config
+            .description
+            .as_deref()
+            .unwrap_or("An agent that executes prompts with optional tool support")
     }
 
     fn execute(&self, query: &str, context: AgentContext) -> AgentStream<'_> {

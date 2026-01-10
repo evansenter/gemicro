@@ -52,13 +52,13 @@ use tokio_util::sync::CancellationToken;
 /// conversation context sent to the LLM for follow-up queries.
 const HISTORY_PREVIEW_CHARS: usize = 256;
 
-/// Bundled issue-auditor agent definition (markdown format).
+/// Bundled codebase-explorer agent definition (markdown format).
 ///
 /// This agent is loaded from markdown at startup and registered in the agent registry.
-/// See `config/markdown_agents.rs` for the parsing logic.
-const ISSUE_AUDITOR_MD: &str = r#"---
-name: issue-auditor
-description: Audits GitHub issues for staleness, duplicates, and relevance
+/// See `gemicro-loader/src/markdown.rs` for the parsing logic.
+const CODEBASE_EXPLORER_MD: &str = r#"---
+name: codebase-explorer
+description: Answers questions about codebase structure, patterns, and architecture
 model: gemini-3.0-flash-preview
 tools:
   - file_read
@@ -66,37 +66,36 @@ tools:
   - grep
 ---
 
-You are an expert issue auditor. Given a list of GitHub issues (provided by the user), your job is to search the codebase and provide actionable recommendations for issue hygiene.
+You are an expert codebase explorer. Your job is to help users understand codebases by answering questions about structure, patterns, and implementation details.
 
-## Your Tasks
+## Your Capabilities
 
-1. **Staleness Check**: Flag issues open >90 days with no recent activity
-2. **Duplicate Detection**: Identify issues covering the same topic or feature
-3. **Relevance Assessment**: Check if issues still apply to current codebase state
-4. **Priority Alignment**: Verify issue priority matches current project goals
+1. **Structure Discovery**: Find where things are defined and how they're organized
+2. **Pattern Analysis**: Identify coding patterns, conventions, and architectural decisions
+3. **Dependency Tracing**: Track how components connect and depend on each other
+4. **Implementation Details**: Explain how specific features or systems work
 
-## Analysis Process
+## How to Answer Questions
 
-For each issue provided by the user:
-1. Read the issue title, body, and metadata they provide
-2. Use `glob` and `grep` to search the codebase for related code
-3. Use `file_read` to examine files that might address the issue
-4. Determine if the issue has been addressed, is still relevant, or is a duplicate
+1. Use `glob` to find relevant files by name patterns
+2. Use `grep` to search for specific code patterns, function names, or keywords
+3. Use `file_read` to examine file contents in detail
+4. Synthesize findings into clear, concise explanations
 
 ## Output Format
 
-For each issue analyzed, provide:
-- **Issue**: #<number> - <title>
-- **Status**: STALE | DUPLICATE | IRRELEVANT | ADDRESSED | VALID
-- **Evidence**: Brief explanation with file references from your codebase search
-- **Recommendation**: Specific action to take (close, merge with #X, update labels, etc.)
+When answering questions:
+- **Start with a direct answer** to the user's question
+- **Cite specific files** with paths (e.g., `src/config/loader.rs:42`)
+- **Show relevant code snippets** when helpful
+- **Explain the "why"** behind architectural decisions when apparent
 
 ## Guidelines
 
-- Be conservative: when in doubt, mark as VALID
-- Always provide evidence from codebase searches for your assessment
-- Reference specific files and line numbers when marking as ADDRESSED
-- Note any blocking relationships between issues
+- Be thorough but concise - find the key files, don't list everything
+- When uncertain, say so and explain what you did find
+- Connect findings to the broader architecture when relevant
+- Suggest related areas the user might want to explore
 "#;
 
 /// REPL session state
@@ -399,8 +398,8 @@ impl Session {
     /// body as the system prompt. Currently loads bundled agents; future versions
     /// will support user-defined agents from `~/.config/gemicro/agents/`.
     fn register_markdown_agents(&self, registry: &mut AgentRegistry) {
-        // Parse and register the issue-auditor agent
-        match parse_markdown_agent_str(ISSUE_AUDITOR_MD) {
+        // Parse and register the codebase-explorer agent
+        match parse_markdown_agent_str(CODEBASE_EXPLORER_MD) {
             Ok(agent) => {
                 let def = agent.definition.clone();
                 let name = agent.name.clone();
@@ -428,7 +427,7 @@ impl Session {
             }
             Err(e) => {
                 // Bundled agents should always parse - log error but don't crash
-                log::error!("Failed to parse bundled issue-auditor agent: {}", e);
+                log::error!("Failed to parse bundled codebase-explorer agent: {}", e);
             }
         }
     }
