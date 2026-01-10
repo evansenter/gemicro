@@ -3,7 +3,7 @@
 //! Demonstrates how to record agent executions for offline replay and evaluation.
 //!
 //! Run with:
-//!   GEMINI_API_KEY=your_key cargo run -p gemicro-simple-qa --example trajectory_recording
+//!   GEMINI_API_KEY=your_key cargo run -p gemicro-prompt-agent --example trajectory_recording
 //!
 //! This example:
 //! 1. Records a trajectory during agent execution
@@ -12,8 +12,8 @@
 //! 4. Demonstrates replay with MockLlmClient
 
 use gemicro_core::{LlmConfig, LlmRequest, MockLlmClient, Trajectory};
+use gemicro_prompt_agent::{PromptAgent, PromptAgentConfig};
 use gemicro_runner::AgentRunner;
-use gemicro_simple_qa::{SimpleQaAgent, SimpleQaConfig};
 use serde_json::json;
 use std::env;
 use std::time::Duration;
@@ -31,11 +31,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("======================================\n");
 
     // Create agent
-    let config = SimpleQaConfig::default().with_timeout(Duration::from_secs(30));
-    let agent = SimpleQaAgent::new(config)?;
+    let config = PromptAgentConfig::default().with_timeout(Duration::from_secs(30));
+    let agent = PromptAgent::new(config)?;
 
     // Create LLM client with recording enabled
-    let genai_client = rust_genai::Client::builder(api_key).build()?;
+    let genai_client = genai_rs::Client::builder(api_key).build()?;
     let llm_config = LlmConfig::default()
         .with_timeout(Duration::from_secs(60))
         .with_max_tokens(1024)

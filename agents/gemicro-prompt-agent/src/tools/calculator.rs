@@ -15,7 +15,7 @@ const MAX_EXPRESSION_LENGTH: usize = 1000;
 /// # Example
 ///
 /// ```no_run
-/// use gemicro_tool_agent::tools::Calculator;
+/// use gemicro_prompt_agent::tools::Calculator;
 /// use gemicro_core::tool::Tool;
 /// use serde_json::json;
 ///

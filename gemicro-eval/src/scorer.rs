@@ -179,7 +179,7 @@ impl Default for Scorers {
 /// use std::sync::Arc;
 ///
 /// // Must be called within a tokio runtime
-/// # let genai = rust_genai::Client::builder("api-key".to_string()).build().unwrap();
+/// # let genai = genai_rs::Client::builder("api-key".to_string()).build().unwrap();
 /// let llm = Arc::new(LlmClient::new(genai, LlmConfig::default()));
 /// let scorer = CritiqueScorer::new(llm);
 ///

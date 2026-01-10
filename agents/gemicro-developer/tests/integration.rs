@@ -609,7 +609,7 @@ async fn test_developer_cancellation_mid_execution() {
 
     // Create context with cancellation token
     let cancellation_token = CancellationToken::new();
-    let genai_client = rust_genai::Client::builder(api_key).build().unwrap();
+    let genai_client = genai_rs::Client::builder(api_key).build().unwrap();
     let config = LlmConfig::default()
         .with_timeout(Duration::from_secs(120))
         .with_max_tokens(4096);

@@ -9,7 +9,7 @@ description = "Deep Research agent: query decomposition, parallel sub-query exec
 
 [dependencies]
 gemicro-core = { path = "../../gemicro-core" }
-rust-genai = { workspace = true }
+genai-rs = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 async-stream = { workspace = true }
@@ -24,7 +24,7 @@ path = "examples/deep_research.rs"
 
 [dev-dependencies]
 rstest = { workspace = true }
-rust-genai = { workspace = true }
+genai-rs = { workspace = true }
 tokio = { workspace = true, features = ["test-util", "macros"] }
 tokio-util = { workspace = true }
 futures-util = { workspace = true }

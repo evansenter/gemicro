@@ -12,7 +12,7 @@
 //! use gemicro_core::{LlmClient, LlmRequest, LlmConfig};
 //!
 //! # async fn example() -> Result<(), gemicro_core::LlmError> {
-//! let genai_client = rust_genai::Client::builder("api-key".to_string()).build()?;
+//! let genai_client = genai_rs::Client::builder("api-key".to_string()).build()?;
 //! let client = LlmClient::new(genai_client, LlmConfig::default());
 //!
 //! let request = LlmRequest::new("What is the capital of France?");
@@ -29,8 +29,11 @@
 mod client;
 mod request;
 
-pub use client::LlmClient;
+pub use client::{GenerateWithToolsResponse, LlmClient};
 pub use request::{LlmRequest, LlmStreamChunk};
 
 // Re-export Turn types from rust-genai for multi-turn conversation support
-pub use rust_genai::{Role, Turn, TurnContent};
+pub use genai_rs::{Role, Turn, TurnContent};
+
+// Re-export FunctionCallInfo for generate_with_tools callback signature
+pub use genai_rs::FunctionCallInfo;

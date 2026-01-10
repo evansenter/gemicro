@@ -1,7 +1,7 @@
 //! Tool registry for managing available tools.
 
 use super::{Tool, ToolSet};
-use rust_genai::FunctionDeclaration;
+use genai_rs::FunctionDeclaration;
 use std::collections::HashMap;
 use std::sync::Arc;
 

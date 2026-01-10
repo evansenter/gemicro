@@ -13,7 +13,7 @@ fn get_api_key() -> Option<String> {
 }
 
 fn create_test_scorer(api_key: &str) -> CritiqueScorer {
-    let genai_client = rust_genai::Client::builder(api_key.to_string())
+    let genai_client = genai_rs::Client::builder(api_key.to_string())
         .build()
         .unwrap();
     let config = LlmConfig::default()
@@ -168,7 +168,7 @@ async fn test_critique_scorer_numeric_answer() {
 #[test]
 fn test_critique_scorer_name() {
     // Unit test - doesn't need API key
-    let genai_client = rust_genai::Client::builder("fake-key".to_string())
+    let genai_client = genai_rs::Client::builder("fake-key".to_string())
         .build()
         .unwrap();
     let llm = Arc::new(LlmClient::new(genai_client, LlmConfig::default()));

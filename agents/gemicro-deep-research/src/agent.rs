@@ -55,7 +55,7 @@ const EVENT_SYNTHESIS_STARTED: &str = "synthesis_started";
 /// use futures_util::StreamExt;
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let genai_client = rust_genai::Client::builder("api-key".to_string()).build()?;
+/// let genai_client = genai_rs::Client::builder("api-key".to_string()).build()?;
 /// let context = AgentContext::new(LlmClient::new(genai_client, LlmConfig::default()));
 /// let agent = DeepResearchAgent::new(ResearchConfig::default())?;
 ///

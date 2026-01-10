@@ -9,7 +9,7 @@ description = "Developer agent with explicit function calling for real-time tool
 
 [dependencies]
 gemicro-core = { path = "../../gemicro-core" }
-rust-genai = { workspace = true }
+genai-rs = { workspace = true }
 tokio = { workspace = true }
 async-stream = { workspace = true }
 futures-util = { workspace = true }
@@ -27,7 +27,7 @@ gemicro-glob = { path = "../../tools/gemicro-glob" }
 gemicro-grep = { path = "../../tools/gemicro-grep" }
 gemicro-runner = { path = "../../gemicro-runner" }
 gemicro-task = { path = "../../tools/gemicro-task" }
-gemicro-tool-agent = { path = "../gemicro-tool-agent" }
+gemicro-prompt-agent = { path = "../gemicro-prompt-agent" }
 tokio-util = { workspace = true }
 textwrap = "0.16"
 async-trait = { workspace = true }

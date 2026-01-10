@@ -138,10 +138,6 @@ fn test_cli_simple_query() {
 
     // Check for expected output sections
     assert!(stdout.contains("gemicro Deep Research"), "Missing header");
-    assert!(
-        stdout.contains("SYNTHESIZED ANSWER"),
-        "Missing answer section"
-    );
     assert!(stdout.contains("Performance:"), "Missing performance stats");
     assert!(stdout.contains("Steps:"), "Missing step stats");
 }

@@ -17,6 +17,7 @@ use gemicro_core::{
     LlmClient,
 };
 use gemicro_deep_research::DeepResearchAgent;
+use gemicro_prompt_agent::{tools, PromptAgent, PromptAgentConfig};
 use repl::Session;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
@@ -32,8 +33,33 @@ async fn main() -> Result<()> {
     }
 
     // Initialize logging
+    // Filter out noisy third-party crates, show only gemicro-related debug output
     if args.verbose {
-        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug")).init();
+        env_logger::Builder::from_env(
+            env_logger::Env::default()
+                .default_filter_or("debug,rustyline=warn,hyper=warn,reqwest=warn,h2=warn"),
+        )
+        .write_style(env_logger::WriteStyle::Always) // Force colors even when piped
+        .format(|buf, record| {
+            use std::io::Write;
+            // Color-code by module: genai_rs = dim cyan, gemicro = bright
+            let style = buf.default_level_style(record.level());
+            let module = record.module_path().unwrap_or("unknown");
+            let is_wire = module.starts_with("genai_rs");
+            if is_wire {
+                // Dim style for wire-level debug (less important)
+                writeln!(buf, "\x1b[2m[{}] {}\x1b[0m", module, record.args())
+            } else {
+                // Normal style with level coloring for app logs
+                writeln!(
+                    buf,
+                    "{style}[{}]{style:#} {}",
+                    record.level(),
+                    record.args()
+                )
+            }
+        })
+        .init();
     } else {
         env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
     }
@@ -45,35 +71,42 @@ async fn main() -> Result<()> {
         );
     }
 
-    if args.interactive {
+    // Interactive mode: explicit -i flag OR no query provided (default)
+    let interactive_mode = args.interactive || args.query.is_none();
+
+    if interactive_mode {
         run_interactive(&args).await
     } else {
-        // Single-query mode currently only supports deep_research
-        // See #205 for AgentRegistry refactor
-        if args.agent != "deep_research" {
-            anyhow::bail!(
-                "Single-query mode currently only supports deep_research agent. \
-                 Use --interactive for other agents, or specify --agent deep_research."
-            );
-        }
-
-        // Print header for single query mode
-        println!("╔══════════════════════════════════════════════════════════════╗");
-        println!("║                    gemicro Deep Research                     ║");
-        println!("╚══════════════════════════════════════════════════════════════╝");
-        println!();
         // Safe to unwrap - validation ensures query exists when not interactive
         let query = args.query.as_ref().unwrap();
+
+        // Print header for single query mode
+        let agent_title = match args.agent.as_str() {
+            "deep_research" => "gemicro Deep Research",
+            "prompt_agent" => "gemicro Prompt Agent",
+            other => {
+                anyhow::bail!(
+                    "Single-query mode supports: deep_research, prompt_agent. \
+                     Use --interactive for other agents like '{}'.",
+                    other
+                );
+            }
+        };
+
+        println!("╔══════════════════════════════════════════════════════════════╗");
+        println!("║{:^62}║", agent_title);
+        println!("╚══════════════════════════════════════════════════════════════╝");
+        println!();
         println!("Query: {}", query);
         println!();
 
-        run_research(&args, query).await
+        run_single_query(&args, query).await
     }
 }
 
 /// Run the interactive REPL
 async fn run_interactive(args: &cli::Args) -> Result<()> {
-    let genai_client = rust_genai::Client::builder(args.api_key.clone())
+    let genai_client = genai_rs::Client::builder(args.api_key.clone())
         .build()
         .context("Failed to create Gemini client")?;
     let llm = LlmClient::new(genai_client, args.llm_config());
@@ -114,29 +147,50 @@ async fn run_interactive(args: &cli::Args) -> Result<()> {
     // Set the initial agent from CLI flag
     session.set_current_agent(&args.agent).unwrap_or_else(|_| {
         eprintln!("Error: Unknown agent '{}'. Available agents:", args.agent);
-        eprintln!("  deep_research, developer, tool_agent, react, simple_qa, critique");
+        eprintln!("  deep_research, developer, prompt_agent, react, critique");
         std::process::exit(1);
     });
 
     session.run().await
 }
 
-async fn run_research(args: &cli::Args, query: &str) -> Result<()> {
+async fn run_single_query(args: &cli::Args, query: &str) -> Result<()> {
     // Create cancellation token for cooperative shutdown
     let cancellation_token = CancellationToken::new();
 
-    // Create LLM client and context with cancellation support
-    let genai_client = rust_genai::Client::builder(args.api_key.clone())
+    // Create LLM client
+    let genai_client = genai_rs::Client::builder(args.api_key.clone())
         .build()
         .context("Failed to create Gemini client")?;
     let llm = LlmClient::new(genai_client, args.llm_config());
-    let context = AgentContext::new_with_cancellation(llm, cancellation_token.clone());
 
-    // Create agent and its tracker
-    let agent = DeepResearchAgent::new(args.research_config())
-        .context("Failed to create research agent")?;
+    // Create agent and context based on --agent flag
+    // Context is agent-specific: prompt_agent gets tools, others don't
+    let (agent, context): (Box<dyn Agent>, AgentContext) = match args.agent.as_str() {
+        "deep_research" => {
+            let agent = Box::new(
+                DeepResearchAgent::new(args.research_config())
+                    .context("Failed to create research agent")?,
+            );
+            let context = AgentContext::new_with_cancellation(llm, cancellation_token.clone());
+            (agent, context)
+        }
+        "prompt_agent" => {
+            let agent = Box::new(
+                PromptAgent::new(PromptAgentConfig::default())
+                    .context("Failed to create prompt agent")?,
+            );
+            // Add bundled tools (Calculator, CurrentDatetime)
+            let context = AgentContext::new_with_cancellation(llm, cancellation_token.clone())
+                .with_tools(tools::default_registry());
+            (agent, context)
+        }
+        other => anyhow::bail!("Unsupported agent for single-query mode: {}", other),
+    };
+
     let mut tracker = agent.create_tracker();
-    let mut renderer = IndicatifRenderer::new(args.plain);
+    // Disable spinner in verbose mode to avoid interference with log output
+    let mut renderer = IndicatifRenderer::new(args.plain || args.verbose);
 
     // Connect to event bus if URL provided
     let mut coordination = if let Some(ref url) = args.event_bus_url {

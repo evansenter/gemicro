@@ -13,7 +13,7 @@ pub fn get_api_key() -> Option<String> {
 
 /// Create a test AgentContext with appropriate settings for testing.
 pub fn create_test_context(api_key: &str) -> AgentContext {
-    let genai_client = rust_genai::Client::builder(api_key.to_string())
+    let genai_client = genai_rs::Client::builder(api_key.to_string())
         .build()
         .unwrap();
     let config = LlmConfig::default()

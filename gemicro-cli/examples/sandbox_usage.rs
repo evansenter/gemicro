@@ -42,7 +42,7 @@
 //! 1. CLI parses `--sandbox-path` arguments and validates they exist and are directories
 //! 2. Session builds a `PathSandbox` interceptor with the allowed paths
 //! 3. The interceptor chain is attached to `AgentContext.interceptors`
-//! 4. Agents (ToolAgent, DeveloperAgent) attach interceptors to their tool service
+//! 4. Agents (PromptAgent, DeveloperAgent) attach interceptors to their tool service
 //! 5. Every file operation passes through the interceptor before execution
 //!
 //! # Security Model

@@ -111,7 +111,7 @@ impl EvalConfig {
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// // Create agent and LLM client
 /// let agent = DeepResearchAgent::new(ResearchConfig::default())?;
-/// let genai_client = rust_genai::Client::builder("api-key".to_string()).build()?;
+/// let genai_client = genai_rs::Client::builder("api-key".to_string()).build()?;
 /// let llm = LlmClient::new(genai_client, LlmConfig::default());
 ///
 /// // Create harness
@@ -230,7 +230,7 @@ impl EvalHarness {
     ///
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// let agent = DeepResearchAgent::new(ResearchConfig::default())?;
-    /// let genai_client = rust_genai::Client::builder("api-key".to_string()).build()?;
+    /// let genai_client = genai_rs::Client::builder("api-key".to_string()).build()?;
     /// let llm = LlmClient::new(genai_client, LlmConfig::default());
     /// let harness = EvalHarness::new(EvalConfig::default());
     /// let dataset = HotpotQA::new()?;

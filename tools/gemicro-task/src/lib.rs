@@ -41,7 +41,7 @@ pub const DEFAULT_MAX_DEPTH: usize = 3;
 /// use std::sync::{Arc, RwLock};
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let genai_client = rust_genai::Client::builder("api-key".to_string()).build()?;
+/// let genai_client = genai_rs::Client::builder("api-key".to_string()).build()?;
 /// let llm = LlmClient::new(genai_client, LlmConfig::default());
 /// let registry = Arc::new(RwLock::new(AgentRegistry::new()));
 /// let task = Task::new(registry, Arc::new(llm));
@@ -522,10 +522,10 @@ impl Task {
             ToolError::InvalidInput(format!("Invalid prompt agent definition: {}", e))
         })?;
 
-        // Create the ephemeral agent using SimpleQaAgent
-        // Note: For now we use SimpleQaAgent with the custom system prompt.
+        // Create the ephemeral agent using PromptAgent
+        // Note: For now we use PromptAgent with the custom system prompt.
         // In the future, this could support different base agent types.
-        let agent = gemicro_simple_qa::SimpleQaAgent::with_system_prompt(&def.system_prompt)
+        let agent = gemicro_prompt_agent::PromptAgent::with_system_prompt(&def.system_prompt)
             .map_err(|e| ToolError::ExecutionFailed(format!("Failed to create agent: {}", e)))?;
 
         // Create context for the subagent with execution tracking and orchestration
@@ -646,7 +646,7 @@ mod tests {
     }
 
     fn create_test_llm() -> Arc<LlmClient> {
-        let genai_client = rust_genai::Client::builder("test-key".to_string())
+        let genai_client = genai_rs::Client::builder("test-key".to_string())
             .build()
             .unwrap();
         Arc::new(LlmClient::new(

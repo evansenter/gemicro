@@ -6,7 +6,7 @@ description = "Headless execution runtime for gemicro agents"
 
 [dependencies]
 gemicro-core = { path = "../gemicro-core" }
-rust-genai = { workspace = true }
+genai-rs = { workspace = true }
 tokio = { workspace = true }
 futures-util = { workspace = true }
 async-stream = { workspace = true }
@@ -16,5 +16,5 @@ log = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros"] }
-rust-genai = { workspace = true }
+genai-rs = { workspace = true }
 rstest = { workspace = true }

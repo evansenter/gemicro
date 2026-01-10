@@ -24,6 +24,6 @@ path = "examples/react.rs"
 
 [dev-dependencies]
 rstest = { workspace = true }
-rust-genai = { workspace = true }
+genai-rs = { workspace = true }
 tokio = { workspace = true, features = ["test-util", "macros"] }
 futures-util = { workspace = true }

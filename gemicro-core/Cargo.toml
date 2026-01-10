@@ -5,8 +5,8 @@ edition = "2021"
 description = "Core library for gemicro AI agent exploration platform"
 
 [dependencies]
-rust-genai = { workspace = true }
-rust-genai-macros = { workspace = true }
+genai-rs = { workspace = true }
+genai-rs-macros = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 async-trait = { workspace = true }
@@ -28,8 +28,7 @@ tempfile = { workspace = true }
 # Agent crates needed for integration tests
 gemicro-deep-research = { path = "../agents/gemicro-deep-research" }
 gemicro-react = { path = "../agents/gemicro-react" }
-gemicro-simple-qa = { path = "../agents/gemicro-simple-qa" }
-gemicro-tool-agent = { path = "../agents/gemicro-tool-agent" }
+gemicro-prompt-agent = { path = "../agents/gemicro-prompt-agent" }
 # Hook crates needed for integration tests
 gemicro-audit-log = { path = "../hooks/gemicro-audit-log" }
 gemicro-file-security = { path = "../hooks/gemicro-file-security" }

@@ -52,7 +52,7 @@ const EVENT_REACT_MAX_ITERATIONS: &str = "react_max_iterations";
 /// use futures_util::StreamExt;
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let genai_client = rust_genai::Client::builder("api-key".to_string()).build()?;
+/// let genai_client = genai_rs::Client::builder("api-key".to_string()).build()?;
 /// let context = AgentContext::new(LlmClient::new(genai_client, LlmConfig::default()));
 /// let agent = ReactAgent::new(ReactConfig::default())?;
 ///

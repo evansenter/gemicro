@@ -66,10 +66,6 @@ pub fn render_markdown(text: &str) -> String {
 /// as markdown with syntax highlighting and formatting.
 pub fn print_final_result(result: &FinalResult, elapsed: Duration, plain: bool) {
     println!();
-    println!("╔══════════════════════════════════════════════════════════════╗");
-    println!("║                    SYNTHESIZED ANSWER                        ║");
-    println!("╚══════════════════════════════════════════════════════════════╝");
-    println!();
 
     // Handle different result types
     match &result.result {
@@ -95,7 +91,6 @@ pub fn print_final_result(result: &FinalResult, elapsed: Duration, plain: bool) 
         }
     }
     println!();
-    println!("══════════════════════════════════════════════════════════════");
 
     // Extract step counts from extra field (agent-specific data)
     // Use .get() for safe access since extra field contents are agent-specific
@@ -144,7 +139,7 @@ pub fn print_final_result(result: &FinalResult, elapsed: Duration, plain: bool) 
 pub fn print_interrupted(status: Option<&str>) {
     println!();
     println!("╔══════════════════════════════════════════════════════════════╗");
-    println!("║                      INTERRUPTED                             ║");
+    println!("║{:^62}║", "INTERRUPTED");
     println!("╚══════════════════════════════════════════════════════════════╝");
     println!();
 

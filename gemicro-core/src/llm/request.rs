@@ -1,9 +1,9 @@
 //! LLM request and response types.
 
-use rust_genai::Turn;
+use genai_rs::{FunctionDeclaration, InteractionContent, Turn};
 
 /// Request to the LLM
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct LlmRequest {
     /// User prompt
@@ -22,7 +22,7 @@ pub struct LlmRequest {
     ///
     /// ```
     /// use gemicro_core::LlmRequest;
-    /// use rust_genai::Turn;
+    /// use genai_rs::Turn;
     ///
     /// let history = vec![
     ///     Turn::user("What is 2+2?"),
@@ -70,6 +70,31 @@ pub struct LlmRequest {
     ///     .with_response_format(schema);
     /// ```
     pub response_format: Option<serde_json::Value>,
+
+    /// Optional function declarations for function calling
+    ///
+    /// When provided, the model may choose to call these functions.
+    /// Check the response with `response.function_calls()` to see if
+    /// the model wants to call any functions.
+    pub functions: Option<Vec<FunctionDeclaration>>,
+
+    /// Optional previous interaction ID for chaining
+    ///
+    /// When provided along with `store_enabled`, the model receives context
+    /// from the previous interaction. Use this for multi-turn function calling.
+    pub previous_interaction_id: Option<String>,
+
+    /// Enable interaction storage for chaining
+    ///
+    /// When true, the interaction is stored and can be referenced by
+    /// subsequent requests using `previous_interaction_id`.
+    pub store_enabled: bool,
+
+    /// Optional function results to send back to the model
+    ///
+    /// Use this after executing function calls requested by the model.
+    /// Pass the results back so the model can continue.
+    pub function_results: Option<Vec<InteractionContent>>,
 }
 
 /// Chunk from streaming LLM response
@@ -87,10 +112,7 @@ impl LlmRequest {
     pub fn new(prompt: impl Into<String>) -> Self {
         Self {
             prompt: prompt.into(),
-            turns: None,
-            system_instruction: None,
-            use_google_search: false,
-            response_format: None,
+            ..Default::default()
         }
     }
 
@@ -98,11 +120,66 @@ impl LlmRequest {
     pub fn with_system(prompt: impl Into<String>, system: impl Into<String>) -> Self {
         Self {
             prompt: prompt.into(),
-            turns: None,
             system_instruction: Some(system.into()),
-            use_google_search: false,
-            response_format: None,
+            ..Default::default()
         }
+    }
+
+    /// Create a continuation request for function calling
+    ///
+    /// Use this after receiving function calls from the model.
+    /// Pass the interaction ID and function results to continue the conversation.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use gemicro_core::LlmRequest;
+    /// use genai_rs::{function_result_content, FunctionDeclaration, FunctionParameters};
+    /// use serde_json::json;
+    ///
+    /// // Assuming you have an interaction_id from a previous response
+    /// let interaction_id = "interaction_abc123";
+    ///
+    /// // And your function declarations
+    /// let function_declarations = vec![FunctionDeclaration::new(
+    ///     "get_weather".to_string(),
+    ///     "Get the weather".to_string(),
+    ///     FunctionParameters::new("object".to_string(), Default::default(), vec![]),
+    /// )];
+    ///
+    /// // After executing the function, create results
+    /// let results = vec![
+    ///     function_result_content("get_weather", "call_123", json!({"temp": 72})),
+    /// ];
+    ///
+    /// let request = LlmRequest::continuation(
+    ///     interaction_id,
+    ///     function_declarations,
+    ///     results,
+    /// );
+    /// ```
+    pub fn continuation(
+        previous_interaction_id: impl Into<String>,
+        functions: Vec<FunctionDeclaration>,
+        function_results: Vec<InteractionContent>,
+    ) -> Self {
+        Self {
+            functions: Some(functions),
+            previous_interaction_id: Some(previous_interaction_id.into()),
+            store_enabled: true,
+            function_results: Some(function_results),
+            ..Default::default()
+        }
+    }
+
+    /// Set function declarations for function calling
+    ///
+    /// When set, the model may choose to call these functions.
+    /// Also enables interaction storage automatically.
+    pub fn with_functions(mut self, functions: Vec<FunctionDeclaration>) -> Self {
+        self.functions = Some(functions);
+        self.store_enabled = true; // Required for function calling chains
+        self
     }
 
     /// Set conversation history for multi-turn conversations
@@ -114,7 +191,7 @@ impl LlmRequest {
     ///
     /// ```
     /// use gemicro_core::LlmRequest;
-    /// use rust_genai::Turn;
+    /// use genai_rs::Turn;
     ///
     /// let history = vec![
     ///     Turn::user("What is 2+2?"),
@@ -326,5 +403,63 @@ mod tests {
             text: String::new(),
         };
         assert!(empty_chunk.text.is_empty());
+    }
+
+    #[test]
+    fn test_llm_request_with_functions() {
+        use genai_rs::{FunctionDeclaration, FunctionParameters};
+
+        let params = FunctionParameters::new("object".to_string(), Default::default(), vec![]);
+        let func = FunctionDeclaration::new(
+            "test_func".to_string(),
+            "A test function".to_string(),
+            params,
+        );
+        let req = LlmRequest::new("Test prompt").with_functions(vec![func]);
+
+        assert_eq!(req.prompt, "Test prompt");
+        assert!(req.functions.is_some());
+        assert_eq!(req.functions.as_ref().unwrap().len(), 1);
+        assert!(req.store_enabled); // with_functions enables store
+    }
+
+    #[test]
+    fn test_llm_request_continuation() {
+        use genai_rs::{function_result_content, FunctionDeclaration, FunctionParameters};
+
+        let params = FunctionParameters::new("object".to_string(), Default::default(), vec![]);
+        let func = FunctionDeclaration::new(
+            "test_func".to_string(),
+            "A test function".to_string(),
+            params,
+        );
+        let result =
+            function_result_content("test_func", "call_123", serde_json::json!({"value": 42}));
+
+        let req = LlmRequest::continuation("interaction_abc", vec![func], vec![result]);
+
+        assert!(req.prompt.is_empty()); // Continuations don't use prompt
+        assert!(req.previous_interaction_id.is_some());
+        assert_eq!(
+            req.previous_interaction_id.as_ref().unwrap(),
+            "interaction_abc"
+        );
+        assert!(req.functions.is_some());
+        assert!(req.function_results.is_some());
+        assert!(req.store_enabled);
+    }
+
+    #[test]
+    fn test_llm_request_continuation_empty_functions() {
+        use genai_rs::function_result_content;
+
+        let result =
+            function_result_content("test_func", "call_123", serde_json::json!({"value": 42}));
+        let req = LlmRequest::continuation("interaction_abc", vec![], vec![result]);
+
+        assert!(req.functions.is_some());
+        assert!(req.functions.as_ref().unwrap().is_empty());
+        assert!(req.function_results.is_some());
+        assert_eq!(req.function_results.as_ref().unwrap().len(), 1);
     }
 }

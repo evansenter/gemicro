@@ -26,9 +26,9 @@ use gemicro_developer::{DeveloperAgent, DeveloperConfig};
 use gemicro_file_read::FileRead;
 use gemicro_glob::Glob;
 use gemicro_grep::Grep;
+use gemicro_prompt_agent::{PromptAgent, PromptAgentConfig};
 use gemicro_runner::AgentRegistry;
 use gemicro_task::Task;
-use gemicro_tool_agent::{ToolAgent, ToolAgentConfig};
 use serde_json::Value;
 use std::env;
 use std::sync::{Arc, RwLock};
@@ -92,7 +92,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_temperature(0.7);
 
     // Create LLM client for Task tool (needs Arc for sharing)
-    let genai_client_for_task = rust_genai::Client::builder(api_key.clone()).build()?;
+    let genai_client_for_task = genai_rs::Client::builder(api_key.clone()).build()?;
     let llm_for_task = Arc::new(LlmClient::new(genai_client_for_task, llm_config.clone()));
 
     // Register subagents using factory closures
@@ -107,10 +107,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Box::new(DeepResearchAgent::new(research_config.clone()).unwrap()) as Box<dyn Agent>
         });
 
-        // Tool agent for simpler tool-based tasks
-        let tool_config = ToolAgentConfig::default();
-        reg.register("tool_agent", move || {
-            Box::new(ToolAgent::new(tool_config.clone()).unwrap()) as Box<dyn Agent>
+        // Prompt agent for simpler prompt-based tasks
+        let prompt_config = PromptAgentConfig::default();
+        reg.register("prompt_agent", move || {
+            Box::new(PromptAgent::new(prompt_config.clone()).unwrap()) as Box<dyn Agent>
         });
 
         // Critique agent for self-validation against project conventions
@@ -140,7 +140,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
 
     // Create a separate LLM client for the agent context
-    let genai_client = rust_genai::Client::builder(api_key).build()?;
+    let genai_client = genai_rs::Client::builder(api_key).build()?;
     let llm = LlmClient::new(genai_client, llm_config);
 
     // Create context

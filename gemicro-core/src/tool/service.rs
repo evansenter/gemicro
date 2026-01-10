@@ -5,7 +5,7 @@
 
 use super::{BatchConfirmationHandler, ToolCallableAdapter, ToolRegistry, ToolResult, ToolSet};
 use crate::interceptor::{InterceptorChain, ToolCall};
-use rust_genai::{CallableFunction, ToolService};
+use genai_rs::{CallableFunction, ToolService};
 use std::sync::Arc;
 
 /// Gemicro's implementation of rust-genai's [`ToolService`].

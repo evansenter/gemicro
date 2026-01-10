@@ -9,10 +9,9 @@ use gemicro_eval::{
     Contains, CritiqueScorer, Dataset, EvalConfig, EvalHarness, EvalProgress, EvalSummary,
     HotpotQA, JsonFileDataset, Scorers, GSM8K,
 };
+use gemicro_prompt_agent::{PromptAgent, PromptAgentConfig};
 use gemicro_react::{ReactAgent, ReactConfig};
 use gemicro_runner::AgentRegistry;
-use gemicro_simple_qa::{SimpleQaAgent, SimpleQaConfig};
-use gemicro_tool_agent::{ToolAgent, ToolAgentConfig};
 use indicatif::{ProgressBar, ProgressStyle};
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -36,7 +35,7 @@ struct Args {
     #[arg(long, default_value = "contains,critique")]
     scorer: String,
 
-    /// Agent to evaluate: deep_research, react, simple_qa, tool_agent
+    /// Agent to evaluate: deep_research, react, prompt_agent
     #[arg(long, short = 'a')]
     agent: String,
 
@@ -100,9 +99,9 @@ impl Args {
         }
 
         // Validate agent
-        if !["deep_research", "react", "simple_qa", "tool_agent"].contains(&self.agent.as_str()) {
+        if !["deep_research", "react", "prompt_agent"].contains(&self.agent.as_str()) {
             return Err(format!(
-                "Invalid agent '{}'. Use deep_research, react, simple_qa, or tool_agent.",
+                "Invalid agent '{}'. Use deep_research, react, or prompt_agent.",
                 self.agent
             ));
         }
@@ -168,12 +167,8 @@ fn create_registry() -> AgentRegistry {
         Box::new(ReactAgent::new(ReactConfig::default()).unwrap())
     });
 
-    registry.register("simple_qa", || {
-        Box::new(SimpleQaAgent::new(SimpleQaConfig::default()).unwrap())
-    });
-
-    registry.register("tool_agent", || {
-        Box::new(ToolAgent::new(ToolAgentConfig::default()).unwrap())
+    registry.register("prompt_agent", || {
+        Box::new(PromptAgent::new(PromptAgentConfig::default()).unwrap())
     });
 
     registry
@@ -182,13 +177,13 @@ fn create_registry() -> AgentRegistry {
 /// Run evaluation with progress display.
 async fn run_evaluation(args: &Args) -> Result<EvalSummary, String> {
     // Create LLM client for agent execution
-    let genai_client = rust_genai::Client::builder(args.api_key.clone())
+    let genai_client = genai_rs::Client::builder(args.api_key.clone())
         .build()
         .map_err(|e| format!("Failed to create Gemini client: {}", e))?;
     let llm = LlmClient::new(genai_client, args.llm_config());
 
     // Create separate LLM client for scorer (critique needs its own client)
-    let scorer_genai_client = rust_genai::Client::builder(args.api_key.clone())
+    let scorer_genai_client = genai_rs::Client::builder(args.api_key.clone())
         .build()
         .map_err(|e| format!("Failed to create scorer Gemini client: {}", e))?;
     let scorer_llm = std::sync::Arc::new(LlmClient::new(scorer_genai_client, args.llm_config()));
@@ -436,7 +431,7 @@ mod tests {
         args.scorer = "contains".to_string();
 
         // Create a dummy LlmClient for the scorer (not used for contains scorer)
-        let genai_client = rust_genai::Client::builder("test-key".to_string())
+        let genai_client = genai_rs::Client::builder("test-key".to_string())
             .build()
             .unwrap();
         let llm = std::sync::Arc::new(LlmClient::new(genai_client, args.llm_config()));
@@ -451,8 +446,7 @@ mod tests {
         let registry = create_registry();
         assert!(registry.contains("deep_research"));
         assert!(registry.contains("react"));
-        assert!(registry.contains("simple_qa"));
-        assert!(registry.contains("tool_agent"));
+        assert!(registry.contains("prompt_agent"));
     }
 
     #[test]

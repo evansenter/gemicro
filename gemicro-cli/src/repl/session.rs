@@ -11,6 +11,7 @@ use crate::error::ErrorFormatter;
 use crate::format::truncate;
 use anyhow::{Context, Result};
 use futures_util::StreamExt;
+use gemicro_audit_log::AuditLog;
 use gemicro_core::{
     enforce_final_result_contract,
     interceptor::{InterceptorChain, ToolCall},
@@ -23,9 +24,18 @@ use gemicro_deep_research::DeepResearchAgent;
 use gemicro_developer::{DeveloperAgent, DeveloperConfig};
 use gemicro_echo::EchoAgent;
 use gemicro_path_sandbox::PathSandbox;
+use gemicro_prompt_agent::{tools as prompt_tools, PromptAgent, PromptAgentConfig};
 use gemicro_runner::AgentRegistry;
 use gemicro_task::Task;
-use gemicro_tool_agent::{ToolAgent, ToolAgentConfig};
+// Explicit tool imports (per "Explicit Over Implicit" principle)
+use gemicro_bash::Bash;
+use gemicro_file_edit::FileEdit;
+use gemicro_file_read::FileRead;
+use gemicro_file_write::FileWrite;
+use gemicro_glob::Glob;
+use gemicro_grep::Grep;
+use gemicro_web_fetch::WebFetch;
+use gemicro_web_search::WebSearch;
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 use std::path::PathBuf;
@@ -147,6 +157,13 @@ impl Session {
             Arc::clone(&registry),
         ));
 
+        // Initialize interceptor chain with AuditLog for LOUD_WIRE support
+        let interceptors = {
+            let chain: InterceptorChain<ToolCall, ToolResult> =
+                InterceptorChain::new().with(AuditLog);
+            Some(Arc::new(chain))
+        };
+
         Self {
             registry,
             current_agent_name: String::new(),
@@ -160,7 +177,7 @@ impl Session {
             session_tokens: 0,
             confirmation_handler: Arc::new(InteractiveConfirmation::default()),
             tool_registry,
-            interceptors: None,
+            interceptors,
         }
     }
 
@@ -172,17 +189,34 @@ impl Session {
     /// - Write tools that require confirmation (file_write, file_edit, bash)
     /// - Task tool for spawning subagents (shares the Session's agent registry,
     ///   enabling recursive delegation to any registered agent)
+    ///
+    /// Per "Explicit Over Implicit" principle, all tools are registered explicitly
+    /// rather than using default registries.
     fn create_tool_registry(
         llm: Arc<LlmClient>,
         agent_registry: Arc<RwLock<AgentRegistry>>,
     ) -> ToolRegistry {
-        use gemicro_tool_agent::tools;
+        let mut registry = ToolRegistry::new();
 
-        let mut registry = tools::default_registry();
-        tools::register_web_search_tool(&mut registry, Arc::clone(&llm));
-        tools::register_write_tools(&mut registry);
+        // Built-in tools from prompt-agent crate
+        registry.register(prompt_tools::Calculator);
+        registry.register(prompt_tools::CurrentDatetime);
 
-        // Add Task tool for subagent spawning
+        // Read-only tools (no confirmation needed)
+        registry.register(FileRead);
+        registry.register(WebFetch::new());
+        registry.register(Glob);
+        registry.register(Grep);
+
+        // Web search tool (requires LlmClient)
+        registry.register(WebSearch::new(Arc::clone(&llm)));
+
+        // Write tools (require confirmation)
+        registry.register(FileWrite);
+        registry.register(FileEdit);
+        registry.register(Bash);
+
+        // Task tool for subagent spawning
         registry.register(Task::new(agent_registry, llm));
 
         registry
@@ -199,16 +233,20 @@ impl Session {
     /// all file operations to the specified paths. This is a security feature
     /// controlled by the CLI --sandbox-path flag.
     ///
-    /// If paths is empty, no interceptor is configured.
+    /// The interceptor chain always includes AuditLog for LOUD_WIRE debugging
+    /// support. When sandbox paths are provided, PathSandbox is added to enforce
+    /// the file access restrictions.
     pub fn set_sandbox_paths(&mut self, paths: Vec<PathBuf>) {
-        if paths.is_empty() {
-            self.interceptors = None;
-        } else {
-            let sandbox = PathSandbox::new(paths);
-            let chain: InterceptorChain<ToolCall, ToolResult> =
-                InterceptorChain::new().with(sandbox);
-            self.interceptors = Some(Arc::new(chain));
+        // Always include AuditLog for LOUD_WIRE support
+        let mut chain: InterceptorChain<ToolCall, ToolResult> =
+            InterceptorChain::new().with(AuditLog);
+
+        // Add PathSandbox if paths are provided
+        if !paths.is_empty() {
+            chain = chain.with(PathSandbox::new(paths));
         }
+
+        self.interceptors = Some(Arc::new(chain));
     }
 
     /// Load config and register agents.
@@ -251,19 +289,19 @@ impl Session {
             }
         };
 
-        // Build tool_agent config from file or defaults
-        let tool_config = if let Some(file_config) = &config.tool_agent {
-            file_config.to_tool_agent_config()
+        // Build prompt_agent config from file or defaults
+        let prompt_config = if let Some(file_config) = &config.prompt_agent {
+            file_config.to_prompt_agent_config()
         } else {
-            ToolAgentConfig::default()
+            PromptAgentConfig::default()
         };
 
         // Validate config before registering - fallback to defaults on error
-        let tool_config = match ToolAgent::new(tool_config.clone()) {
-            Ok(_) => tool_config,
+        let prompt_config = match PromptAgent::new(prompt_config.clone()) {
+            Ok(_) => prompt_config,
             Err(e) => {
-                log::warn!("Invalid tool_agent config: {}. Using defaults.", e);
-                ToolAgentConfig::default()
+                log::warn!("Invalid prompt_agent config: {}. Using defaults.", e);
+                PromptAgentConfig::default()
             }
         };
 
@@ -281,10 +319,11 @@ impl Session {
             )
         });
 
-        // Register tool_agent (config is pre-validated, unwrap is safe)
-        registry.register("tool_agent", move || {
+        // Register prompt_agent (config is pre-validated, unwrap is safe)
+        registry.register("prompt_agent", move || {
             Box::new(
-                ToolAgent::new(tool_config.clone()).expect("pre-validated config should not fail"),
+                PromptAgent::new(prompt_config.clone())
+                    .expect("pre-validated config should not fail"),
             )
         });
 
@@ -918,7 +957,7 @@ mod tests {
     #[test]
     fn test_session_stale_detection_fresh() {
         // A fresh session should not be stale
-        let genai_client = rust_genai::Client::builder("test-key".to_string())
+        let genai_client = genai_rs::Client::builder("test-key".to_string())
             .build()
             .unwrap();
         let llm = LlmClient::new(genai_client, LlmConfig::default());
@@ -930,7 +969,7 @@ mod tests {
 
     #[test]
     fn test_session_initial_token_count() {
-        let genai_client = rust_genai::Client::builder("test-key".to_string())
+        let genai_client = genai_rs::Client::builder("test-key".to_string())
             .build()
             .unwrap();
         let llm = LlmClient::new(genai_client, LlmConfig::default());
@@ -1059,7 +1098,7 @@ mod tests {
         let cancel_token_clone = cancellation_token.clone();
 
         // Create agent context
-        let genai_client = rust_genai::Client::builder("test-key".to_string())
+        let genai_client = genai_rs::Client::builder("test-key".to_string())
             .build()
             .unwrap();
         let llm = LlmClient::new(genai_client, LlmConfig::default());
@@ -1156,7 +1195,7 @@ mod tests {
         }
 
         // Execute the stream
-        let genai_client = rust_genai::Client::builder("test-key".to_string())
+        let genai_client = genai_rs::Client::builder("test-key".to_string())
             .build()
             .unwrap();
         let llm = LlmClient::new(genai_client, LlmConfig::default());
@@ -1207,7 +1246,7 @@ mod tests {
         let cancellation_token = CancellationToken::new();
         let cancel_token_clone = cancellation_token.clone();
 
-        let genai_client = rust_genai::Client::builder("test-key".to_string())
+        let genai_client = genai_rs::Client::builder("test-key".to_string())
             .build()
             .unwrap();
         let llm = LlmClient::new(genai_client, LlmConfig::default());
@@ -1325,7 +1364,7 @@ mod tests {
         let cancellation_token = CancellationToken::new();
         cancellation_token.cancel();
 
-        let genai_client = rust_genai::Client::builder("test-key".to_string())
+        let genai_client = genai_rs::Client::builder("test-key".to_string())
             .build()
             .unwrap();
         let llm = LlmClient::new(genai_client, LlmConfig::default());
@@ -1364,7 +1403,7 @@ mod tests {
     async fn test_normal_completion_without_cancellation() {
         let mock_agent = MockCancellableAgent::new(3);
 
-        let genai_client = rust_genai::Client::builder("test-key".to_string())
+        let genai_client = genai_rs::Client::builder("test-key".to_string())
             .build()
             .unwrap();
         let llm = LlmClient::new(genai_client, LlmConfig::default());

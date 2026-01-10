@@ -32,7 +32,7 @@ use std::time::Instant;
 /// let runner = AgentRunner::new();
 /// let agent = DeepResearchAgent::new(ResearchConfig::default())?;
 ///
-/// let genai_client = rust_genai::Client::builder("api-key".to_string()).build();
+/// let genai_client = genai_rs::Client::builder("api-key".to_string()).build();
 /// let llm = LlmClient::new(genai_client, LlmConfig::default());
 /// let context = AgentContext::new(llm);
 ///
@@ -266,7 +266,7 @@ impl AgentRunner {
     ///
     /// async fn example(agent: &dyn Agent) -> Result<(), Box<dyn std::error::Error>> {
     ///     let runner = AgentRunner::new();
-    ///     let genai_client = rust_genai::Client::builder("key".to_string()).build();
+    ///     let genai_client = genai_rs::Client::builder("key".to_string()).build();
     ///
     ///     let (metrics, trajectory) = runner.execute_with_trajectory(
     ///         agent,
@@ -286,7 +286,7 @@ impl AgentRunner {
         agent: &dyn Agent,
         query: &str,
         agent_config: serde_json::Value,
-        genai_client: rust_genai::Client,
+        genai_client: genai_rs::Client,
         llm_config: LlmConfig,
     ) -> Result<(ExecutionMetrics, Trajectory), AgentError> {
         // Create recording LLM client
@@ -410,7 +410,7 @@ mod tests {
         // Note: In real tests, you'd use a proper test helper
         use gemicro_core::{LlmClient, LlmConfig};
 
-        let genai_client = rust_genai::Client::builder("test-key".to_string())
+        let genai_client = genai_rs::Client::builder("test-key".to_string())
             .build()
             .unwrap();
         let llm = LlmClient::new(genai_client, LlmConfig::default());
@@ -482,7 +482,7 @@ mod tests {
     async fn test_runner_execute_with_trajectory() {
         let runner = AgentRunner::new();
         let agent = MockAgent::new(create_successful_events());
-        let genai_client = rust_genai::Client::builder("test-key".to_string())
+        let genai_client = genai_rs::Client::builder("test-key".to_string())
             .build()
             .unwrap();
         let llm_config = LlmConfig::default();

@@ -61,7 +61,7 @@ pub use registry::ToolRegistry;
 pub use service::GemicroToolService;
 
 use async_trait::async_trait;
-use rust_genai::{FunctionDeclaration, FunctionParameters};
+use genai_rs::{FunctionDeclaration, FunctionParameters};
 use serde_json::Value;
 use std::fmt;
 use thiserror::Error;

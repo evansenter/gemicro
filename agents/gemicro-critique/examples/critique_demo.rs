@@ -19,7 +19,7 @@ use std::env;
 use std::time::Duration;
 
 fn create_llm_client(api_key: &str) -> LlmClient {
-    let genai_client = rust_genai::Client::builder(api_key.to_string())
+    let genai_client = genai_rs::Client::builder(api_key.to_string())
         .build()
         .unwrap();
     LlmClient::new(
@@ -115,7 +115,7 @@ fn hash_password(password: &str) -> String {
             .with_context(
                 CritiqueContext::new()
                     .with_query("Implement password hashing")
-                    .with_agent("tool_agent"),
+                    .with_agent("prompt_agent"),
             )
             .with_criteria(CritiqueCriteria::Specification { spec: spec.into() });
 

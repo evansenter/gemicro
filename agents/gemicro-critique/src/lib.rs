@@ -34,7 +34,7 @@
 //! let input = CritiqueInput::new(generated_code)
 //!     .with_context(CritiqueContext::new()
 //!         .with_query("Implement user authentication")
-//!         .with_agent("tool_agent"))
+//!         .with_agent("prompt_agent"))
 //!     .with_criteria(CritiqueCriteria::Specification {
 //!         spec: "Must use bcrypt for password hashing".into()
 //!     });
@@ -766,7 +766,7 @@ impl CritiqueAgent {
     ///         expected: "Paris".into()
     ///     });
     ///
-    /// # let genai_client = rust_genai::Client::builder("key".to_string()).build().unwrap();
+    /// # let genai_client = genai_rs::Client::builder("key".to_string()).build().unwrap();
     /// # let llm = LlmClient::new(genai_client, LlmConfig::default());
     /// let context = AgentContext::new(llm);
     /// let output = agent.critique(&input, context).await?;

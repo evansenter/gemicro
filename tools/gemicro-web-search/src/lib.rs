@@ -24,7 +24,7 @@ use std::sync::Arc;
 /// use std::sync::Arc;
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let genai_client = rust_genai::Client::builder("api-key".to_string()).build()?;
+/// let genai_client = genai_rs::Client::builder("api-key".to_string()).build()?;
 /// let llm = Arc::new(LlmClient::new(genai_client, LlmConfig::default()));
 /// let search = WebSearch::new(llm);
 ///
@@ -125,7 +125,7 @@ mod tests {
     use gemicro_core::LlmConfig;
 
     fn create_test_llm() -> Arc<LlmClient> {
-        let genai_client = rust_genai::Client::builder("test-key".to_string())
+        let genai_client = genai_rs::Client::builder("test-key".to_string())
             .build()
             .unwrap();
         Arc::new(LlmClient::new(genai_client, LlmConfig::default()))
