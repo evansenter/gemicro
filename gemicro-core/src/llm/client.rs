@@ -537,14 +537,7 @@ impl LlmClient {
                 .map_err(LlmError::from)?
         };
 
-        // Log response in debug mode
-        // Note: Styling differs from genai_rs request logs. For consistent styling,
-        // response logging should be added to genai_rs upstream.
-        if log::log_enabled!(log::Level::Debug) {
-            if let Ok(response_json) = serde_json::to_string_pretty(&response) {
-                log::debug!("Response Body (JSON):\n{}", response_json);
-            }
-        }
+        // Response logging is handled by genai-rs upstream
 
         // Validate response has content (text or function calls)
         // Function calling responses may have function_calls but no text

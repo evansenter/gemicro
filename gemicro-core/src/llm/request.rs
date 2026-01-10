@@ -3,7 +3,7 @@
 use genai_rs::{FunctionDeclaration, InteractionContent, Turn};
 
 /// Request to the LLM
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct LlmRequest {
     /// User prompt
@@ -112,14 +112,7 @@ impl LlmRequest {
     pub fn new(prompt: impl Into<String>) -> Self {
         Self {
             prompt: prompt.into(),
-            turns: None,
-            system_instruction: None,
-            use_google_search: false,
-            response_format: None,
-            functions: None,
-            previous_interaction_id: None,
-            store_enabled: false,
-            function_results: None,
+            ..Default::default()
         }
     }
 
@@ -127,14 +120,8 @@ impl LlmRequest {
     pub fn with_system(prompt: impl Into<String>, system: impl Into<String>) -> Self {
         Self {
             prompt: prompt.into(),
-            turns: None,
             system_instruction: Some(system.into()),
-            use_google_search: false,
-            response_format: None,
-            functions: None,
-            previous_interaction_id: None,
-            store_enabled: false,
-            function_results: None,
+            ..Default::default()
         }
     }
 
@@ -177,15 +164,11 @@ impl LlmRequest {
         function_results: Vec<InteractionContent>,
     ) -> Self {
         Self {
-            prompt: String::new(), // Not used for continuations
-            turns: None,
-            system_instruction: None,
-            use_google_search: false,
-            response_format: None,
             functions: Some(functions),
             previous_interaction_id: Some(previous_interaction_id.into()),
             store_enabled: true,
             function_results: Some(function_results),
+            ..Default::default()
         }
     }
 
