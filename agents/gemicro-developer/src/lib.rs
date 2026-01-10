@@ -859,9 +859,10 @@ mod tests {
             name,
             call_id,
             result,
+            ..
         } = &results[0]
         {
-            assert_eq!(name, "bash");
+            assert_eq!(name.as_deref(), Some("bash"));
             assert_eq!(call_id, "call_123");
             assert_eq!(result, &json!({"error": "User denied execution"}));
         } else {
@@ -892,9 +893,7 @@ mod tests {
         // Check both are FunctionResult
         for (i, result) in results.iter().enumerate() {
             if let InteractionContent::FunctionResult {
-                name: _,
-                call_id,
-                result,
+                call_id, result, ..
             } = result
             {
                 assert_eq!(result, &json!({"error": "Batch denied"}));
@@ -917,12 +916,7 @@ mod tests {
         let results = build_denial_results(&calls, "Denied");
 
         assert_eq!(results.len(), 1);
-        if let InteractionContent::FunctionResult {
-            name: _,
-            call_id,
-            result: _,
-        } = &results[0]
-        {
+        if let InteractionContent::FunctionResult { call_id, .. } = &results[0] {
             assert_eq!(call_id, "unknown"); // Falls back to "unknown"
         } else {
             panic!("Expected FunctionResult content");
@@ -1005,9 +999,10 @@ mod tests {
             name,
             call_id,
             result,
+            ..
         } = &result.function_result
         {
-            assert_eq!(name, "glob");
+            assert_eq!(name.as_deref(), Some("glob"));
             assert_eq!(call_id, "call_abc");
             assert_eq!(result, &json!({"files": ["a.rs", "b.rs"]}));
         } else {
@@ -1033,13 +1028,8 @@ mod tests {
         assert_eq!(result.completed_event.data["success"], false);
 
         // Check function result contains error
-        if let InteractionContent::FunctionResult {
-            name,
-            call_id: _,
-            result,
-        } = &result.function_result
-        {
-            assert_eq!(name, "bash");
+        if let InteractionContent::FunctionResult { name, result, .. } = &result.function_result {
+            assert_eq!(name.as_deref(), Some("bash"));
             // Error message should be in the content
             let error_str = result["error"].as_str().unwrap();
             assert!(error_str.contains("Command timed out"));
@@ -1063,12 +1053,7 @@ mod tests {
         assert!(!result.success);
 
         // Error should indicate denial
-        if let InteractionContent::FunctionResult {
-            name: _,
-            call_id: _,
-            result,
-        } = &result.function_result
-        {
+        if let InteractionContent::FunctionResult { result, .. } = &result.function_result {
             let error_str = result["error"].as_str().unwrap();
             assert!(error_str.contains("file_write"));
         } else {
