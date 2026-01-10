@@ -34,7 +34,7 @@ pub struct DeveloperConfig {
     /// Default: `[]` (empty - system prompt is self-contained for tool guidance)
     ///
     /// Configure this to load project-specific context when needed:
-    /// ```ignore
+    /// ```text
     /// config.with_di_paths(vec![PathBuf::from("./CLAUDE.md")])
     /// ```
     pub di_paths: Vec<PathBuf>,
