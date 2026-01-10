@@ -132,6 +132,16 @@ Reference implementations:
 - **Integration tests**: `#[ignore]`, require `GEMINI_API_KEY`, run with `--include-ignored`
 - **Test helpers**: Each crate has `tests/common/mod.rs` with `create_test_context()`
 
+### Doc Test Fences
+
+| Fence | Behavior |
+|-------|----------|
+| ` ```rust ` | Runs as test (default) |
+| ` ```ignore ` | Still compiles with `--include-ignored`, just doesn't run by default |
+| ` ```text ` | Pure documentation, no compilation |
+
+Use `ignore` for examples that compile but require runtime dependencies (API keys, network). Use `text` for pseudo-code or conceptual examples that shouldn't compile.
+
 ## `#[non_exhaustive]` Guidelines
 
 **Add to**: Error enums, config structs, public data structs, serialized types
@@ -143,6 +153,10 @@ Reference implementations:
 - **rust-genai**: Git dependency (`evansenter/rust-genai`, main branch)
 - **tokio**: Async runtime
 - **async-stream**: Streaming agent implementations
+
+### Updating rust-genai
+
+After changes merge to rust-genai main, run `cargo update -p genai-rs` to pull them into gemicro. Check for breaking changes in the rust-genai changelog before updating.
 
 ## rust-genai Integration
 
