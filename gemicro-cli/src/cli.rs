@@ -92,6 +92,19 @@ pub struct Args {
     /// Can be specified multiple times: --sandbox-path /workspace --sandbox-path /tmp
     #[arg(long = "sandbox-path", value_name = "PATH")]
     pub sandbox_paths: Vec<PathBuf>,
+
+    /// Auto-approve all tool confirmations without prompting
+    ///
+    /// When enabled, tools that normally require confirmation (like bash commands)
+    /// will be automatically approved. This is useful for:
+    /// - Scripted/piped input where stdin is not a terminal
+    /// - Trusted automation contexts
+    /// - Testing and development
+    ///
+    /// SECURITY WARNING: Use with caution - this allows agents to execute
+    /// arbitrary bash commands and modify files without human review.
+    #[arg(long)]
+    pub auto_approve: bool,
 }
 
 impl Args {
@@ -206,6 +219,7 @@ mod tests {
             google_search: false,
             event_bus_url: None,
             sandbox_paths: vec![],
+            auto_approve: false,
         }
     }
 

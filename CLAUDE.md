@@ -14,8 +14,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | **Graceful Unknowns** | Unknown event types logged, not errors |
 | **Agent Isolation** | Agents depend only on core, never on each other |
 | **Config at Construction** | Agent-specific config in constructors, not shared context |
+| **Hermetic Implementations** | Agent/tool/hook implementations live in files, not embedded in library code |
 
 **Corollary**: Breaking changes are preferred over backwards-compatibility shims. Clean breaks, no deprecation warnings.
+
+**Hermetic Rule**: Never embed agent definitions, tool configs, or hook logic as string constants in library code. Implementations must live in their own files:
+- Rust agents → `agents/gemicro-{name}/`
+- Markdown agents → `agents/runtime-agents/{name}.md`
+- Tools → `tools/gemicro-{name}/`
+- Hooks → `hooks/gemicro-{name}/`
 
 ## Repository Overview
 
@@ -28,7 +35,7 @@ Gemicro is a CLI agent exploration platform for AI agent patterns, powered by Ge
 ## Build Commands
 
 ```bash
-make check      # Format + clippy + tests (run before pushing)
+make check      # Format + clippy + tests (run before making a PR)
 make fmt        # Check formatting
 make clippy     # Clippy with -D warnings
 make test       # Unit + doc tests

@@ -25,5 +25,6 @@ pub mod markdown;
 
 // Re-export commonly used types at crate root
 pub use markdown::{
-    parse_markdown_agent, parse_markdown_agent_str, MarkdownAgent, MarkdownAgentError,
+    load_markdown_agents_from_dir, parse_markdown_agent, parse_markdown_agent_str, MarkdownAgent,
+    MarkdownAgentError,
 };

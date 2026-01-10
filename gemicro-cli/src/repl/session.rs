@@ -16,14 +16,14 @@ use gemicro_core::{
     enforce_final_result_contract,
     interceptor::{InterceptorChain, ToolCall},
     tool::{ToolRegistry, ToolResult},
-    AgentContext, AgentError, AgentUpdate, BatchConfirmationHandler, ConversationHistory,
-    HistoryEntry, LlmClient,
+    AgentContext, AgentError, AgentUpdate, AutoApprove, BatchConfirmationHandler,
+    ConversationHistory, HistoryEntry, LlmClient,
 };
 use gemicro_critique::CritiqueAgent;
 use gemicro_deep_research::DeepResearchAgent;
 use gemicro_developer::{DeveloperAgent, DeveloperConfig};
 use gemicro_echo::EchoAgent;
-use gemicro_loader::parse_markdown_agent_str;
+use gemicro_loader::load_markdown_agents_from_dir;
 use gemicro_path_sandbox::PathSandbox;
 use gemicro_prompt_agent::{tools as prompt_tools, PromptAgent, PromptAgentConfig};
 use gemicro_runner::AgentRegistry;
@@ -52,53 +52,11 @@ use tokio_util::sync::CancellationToken;
 /// conversation context sent to the LLM for follow-up queries.
 const HISTORY_PREVIEW_CHARS: usize = 256;
 
-/// Bundled codebase-explorer agent definition (markdown format).
+/// Default directory for runtime-loaded markdown agents.
 ///
-/// This agent is loaded from markdown at startup and registered in the agent registry.
-/// See `gemicro-loader/src/markdown.rs` for the parsing logic.
-const CODEBASE_EXPLORER_MD: &str = r#"---
-name: codebase-explorer
-description: Answers questions about codebase structure, patterns, and architecture
-model: gemini-3.0-flash-preview
-tools:
-  - file_read
-  - glob
-  - grep
----
-
-You are an expert codebase explorer. Your job is to help users understand codebases by answering questions about structure, patterns, and implementation details.
-
-## Your Capabilities
-
-1. **Structure Discovery**: Find where things are defined and how they're organized
-2. **Pattern Analysis**: Identify coding patterns, conventions, and architectural decisions
-3. **Dependency Tracing**: Track how components connect and depend on each other
-4. **Implementation Details**: Explain how specific features or systems work
-
-## How to Answer Questions
-
-1. Use `glob` to find relevant files by name patterns (e.g., `**/*.rs`)
-2. Use `grep` to search for specific code patterns, function names, or keywords
-3. Use `file_read` to examine file contents in detail
-4. Synthesize findings into clear, concise explanations
-
-Note: `glob` returns absolute paths that can be used directly with `file_read` and `grep`.
-
-## Output Format
-
-When answering questions:
-- **Start with a direct answer** to the user's question
-- **Cite specific files** with paths (e.g., `src/config/loader.rs:42`)
-- **Show relevant code snippets** when helpful
-- **Explain the "why"** behind architectural decisions when apparent
-
-## Guidelines
-
-- Be thorough but concise - find the key files, don't list everything
-- When uncertain, say so and explain what you did find
-- Connect findings to the broader architecture when relevant
-- Suggest related areas the user might want to explore
-"#;
+/// This path is relative to the workspace root. Agents in this directory
+/// are loaded at startup and registered in the agent registry.
+const RUNTIME_AGENTS_DIR: &str = "agents/runtime-agents";
 
 /// REPL session state
 pub struct Session {
@@ -276,6 +234,24 @@ impl Session {
         self.cli_overrides = overrides;
     }
 
+    /// Enable auto-approve mode for tool confirmations.
+    ///
+    /// When enabled, tools that normally require confirmation (like bash commands)
+    /// are automatically approved without user prompting. This is useful for:
+    /// - Scripted/piped input where stdin is not a terminal
+    /// - Trusted automation contexts
+    /// - Testing and development
+    ///
+    /// SECURITY WARNING: Use with caution - this bypasses human review.
+    pub fn set_auto_approve(&mut self, enabled: bool) {
+        if enabled {
+            log::info!("Auto-approve mode enabled - tool confirmations will be automatic");
+            self.confirmation_handler = Arc::new(AutoApprove);
+        } else {
+            self.confirmation_handler = Arc::new(InteractiveConfirmation::default());
+        }
+    }
+
     /// Set sandbox paths for file access restriction.
     ///
     /// When paths are provided, builds a PathSandbox interceptor that restricts
@@ -396,41 +372,44 @@ impl Session {
 
     /// Register agents defined in markdown format.
     ///
-    /// Markdown agents use YAML frontmatter for configuration and the markdown
-    /// body as the system prompt. Currently loads bundled agents; future versions
-    /// will support user-defined agents from `~/.config/gemicro/agents/`.
+    /// Loads markdown agents from `agents/runtime-agents/` directory. Each `.md` file
+    /// with YAML frontmatter becomes a registered agent. Future versions will support
+    /// user-defined agents from `~/.config/gemicro/agents/`.
     fn register_markdown_agents(&self, registry: &mut AgentRegistry) {
-        // Parse and register the codebase-explorer agent
-        match parse_markdown_agent_str(CODEBASE_EXPLORER_MD) {
-            Ok(agent) => {
-                let def = agent.definition.clone();
-                let name = agent.name.clone();
+        use std::path::Path;
 
-                // Log tool availability warnings at load time
-                // (graceful handling at runtime - missing tools will error when called)
-                if let gemicro_core::ToolSet::Specific(ref tools) = def.tools {
-                    for tool in tools {
-                        log::debug!("Markdown agent '{}' requests tool: {}", name, tool);
-                    }
+        let agents_dir = Path::new(RUNTIME_AGENTS_DIR);
+        let (agents, errors) = load_markdown_agents_from_dir(agents_dir);
+
+        // Log any parsing errors (don't crash - graceful degradation)
+        for (path, err) in errors {
+            log::warn!("Failed to parse markdown agent {:?}: {}", path, err);
+        }
+
+        // Register each successfully parsed agent
+        for agent in agents {
+            let def = agent.definition.clone();
+            let name = agent.name.clone();
+
+            // Log tool availability warnings at load time
+            if let gemicro_core::ToolSet::Specific(ref tools) = def.tools {
+                for tool in tools {
+                    log::debug!("Markdown agent '{}' requests tool: {}", name, tool);
                 }
-
-                registry.register(&name, move || {
-                    Box::new(
-                        PromptAgent::with_definition(&def)
-                            .expect("pre-validated markdown agent definition"),
-                    )
-                });
-
-                log::info!(
-                    "Registered markdown agent: {} - {}",
-                    agent.name,
-                    agent.definition.description
-                );
             }
-            Err(e) => {
-                // Bundled agents should always parse - log error but don't crash
-                log::error!("Failed to parse bundled codebase-explorer agent: {}", e);
-            }
+
+            registry.register(&name, move || {
+                Box::new(
+                    PromptAgent::with_definition(&def)
+                        .expect("pre-validated markdown agent definition"),
+                )
+            });
+
+            log::info!(
+                "Registered markdown agent: {} - {}",
+                agent.name,
+                agent.definition.description
+            );
         }
     }
 

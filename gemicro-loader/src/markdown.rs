@@ -216,6 +216,71 @@ pub fn parse_markdown_agent_str(content: &str) -> Result<MarkdownAgent, Markdown
     })
 }
 
+/// Load all markdown agents from a directory.
+///
+/// Scans the directory for `.md` files (excluding `CLAUDE.md` and other non-agent files)
+/// and parses each one as a markdown agent.
+///
+/// # Returns
+///
+/// A vector of successfully parsed agents and a vector of errors for files that failed.
+///
+/// # Example
+///
+/// ```no_run
+/// use gemicro_loader::markdown::load_markdown_agents_from_dir;
+/// use std::path::Path;
+///
+/// let (agents, errors) = load_markdown_agents_from_dir(Path::new("agents/runtime-agents"));
+/// println!("Loaded {} agents, {} errors", agents.len(), errors.len());
+/// ```
+pub fn load_markdown_agents_from_dir(
+    dir: &Path,
+) -> (
+    Vec<MarkdownAgent>,
+    Vec<(std::path::PathBuf, MarkdownAgentError)>,
+) {
+    let mut agents = Vec::new();
+    let mut errors = Vec::new();
+
+    // Return empty if directory doesn't exist
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(e) => {
+            log::debug!("Could not read agents directory {:?}: {}", dir, e);
+            return (agents, errors);
+        }
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+
+        // Only process .md files
+        if path.extension().and_then(|s| s.to_str()) != Some("md") {
+            continue;
+        }
+
+        // Skip CLAUDE.md (instructions file, not an agent)
+        if path.file_name().and_then(|s| s.to_str()) == Some("CLAUDE.md") {
+            continue;
+        }
+
+        // Try to parse the agent
+        match parse_markdown_agent(&path) {
+            Ok(agent) => {
+                log::info!("Loaded markdown agent: {} from {:?}", agent.name, path);
+                agents.push(agent);
+            }
+            Err(e) => {
+                log::warn!("Failed to parse markdown agent {:?}: {}", path, e);
+                errors.push((path, e));
+            }
+        }
+    }
+
+    (agents, errors)
+}
+
 /// Split markdown content into frontmatter and body.
 ///
 /// Expects format:
