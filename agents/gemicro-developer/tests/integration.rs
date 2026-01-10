@@ -549,8 +549,8 @@ async fn test_developer_batch_approval_events() {
                     batch_plan_count += 1;
                     // Verify batch_plan has expected fields
                     assert!(
-                        update.data.get("tools").is_some(),
-                        "batch_plan should have tools field"
+                        update.data.get("tool_counts").is_some(),
+                        "batch_plan should have tool_counts field"
                     );
                     assert!(
                         update.data.get("total").is_some(),
