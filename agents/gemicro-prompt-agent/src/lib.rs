@@ -70,7 +70,9 @@ const EVENT_TOOL_RESULT: &str = "tool_result";
 ///
 /// This limits how many times the agent can send function results back to the model.
 /// The initial LLM call is not counted, so total LLM calls = 1 + MAX_ITERATIONS.
-const MAX_ITERATIONS: usize = 10;
+///
+/// Note: A time-based limit would be more appropriate. See #249.
+const MAX_ITERATIONS: usize = 100;
 
 // ============================================================================
 // Configuration
