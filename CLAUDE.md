@@ -183,6 +183,16 @@ Use rust-genai types directly when passing through. Wrap when adding functionali
 | "Unknown event type" warnings | Expected - consumers ignore unknowns |
 | Tool confirmation hangs in tests | Use `AutoApprove` handler |
 
-## README Maintenance
+## Documentation Maintenance
 
-When adding cross-cutting features (observability, error handling, security), update the "Cross-Cutting Concerns" table in `README.md`.
+Keep docs updated when making user-facing changes:
+
+| Change Type | Update |
+|-------------|--------|
+| New/modified agent patterns | `docs/AGENT_AUTHORING.md` |
+| New/modified markdown agent format | `docs/MARKDOWN_AGENTS.md` |
+| New/modified tools | `docs/TOOL_AUTHORING.md` |
+| New/modified hooks | `docs/INTERCEPTOR_AUTHORING.md` |
+| Cross-cutting features | `README.md` "Cross-Cutting Concerns" table |
+
+Rule: If you change how something works, update the doc that explains it.
