@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "gemicro-core",
+    "gemicro-loader",
     "gemicro-runner",
     "gemicro-cli",
     "gemicro-eval",

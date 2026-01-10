@@ -9,8 +9,8 @@
 //! ---
 //! name: my-agent
 //! description: What this agent does
-//! model: gemini-2.0-flash  # optional
-//! tools:                   # optional, see below for behavior
+//! model: gemini-3.0-flash-preview  # optional
+//! tools:                           # optional, see below for behavior
 //!   - file_read
 //!   - grep
 //! ---
@@ -29,8 +29,8 @@
 //!
 //! # Example
 //!
-//! ```ignore
-//! use gemicro_cli::config::markdown_agents::parse_markdown_agent_str;
+//! ```
+//! use gemicro_loader::markdown::parse_markdown_agent_str;
 //!
 //! let markdown = r#"---
 //! name: code-reviewer
@@ -119,7 +119,7 @@ struct MarkdownFrontmatter {
     #[serde(default)]
     description: Option<String>,
 
-    /// Model override (e.g., "gemini-2.0-flash").
+    /// Model override (e.g., "gemini-3.0-flash-preview").
     #[serde(default)]
     model: Option<String>,
 
@@ -280,7 +280,7 @@ You are a helpful assistant."#;
         let markdown = r#"---
 name: code-reviewer
 description: Reviews code for quality issues
-model: gemini-2.0-flash
+model: gemini-3.0-flash-preview
 tools:
   - file_read
   - grep
@@ -303,7 +303,10 @@ Review the code carefully."#;
             .system_prompt
             .contains("expert code reviewer"));
         assert!(agent.definition.system_prompt.contains("## Instructions"));
-        assert_eq!(agent.definition.model, Some("gemini-2.0-flash".to_string()));
+        assert_eq!(
+            agent.definition.model,
+            Some("gemini-3.0-flash-preview".to_string())
+        );
 
         if let ToolSet::Specific(tools) = &agent.definition.tools {
             assert_eq!(tools.len(), 2);

@@ -158,6 +158,10 @@ Use `ignore` for examples that compile but require runtime dependencies (API key
 
 After changes merge to rust-genai main, run `cargo update -p genai-rs` to pull them into gemicro. Check for breaking changes in the rust-genai changelog before updating.
 
+## Model Selection
+
+Always use `gemini-3.0-flash-preview` as the default model. Do not use older models like `gemini-2.0-flash`.
+
 ## rust-genai Integration
 
 | Layer | Responsibility |

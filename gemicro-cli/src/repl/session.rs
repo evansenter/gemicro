@@ -4,7 +4,7 @@
 
 use super::commands::Command;
 use crate::config::loader::ConfigChange;
-use crate::config::{parse_markdown_agent_str, ConfigLoader, GemicroConfig};
+use crate::config::{ConfigLoader, GemicroConfig};
 use crate::confirmation::InteractiveConfirmation;
 use crate::display::{IndicatifRenderer, Renderer};
 use crate::error::ErrorFormatter;
@@ -23,6 +23,7 @@ use gemicro_critique::CritiqueAgent;
 use gemicro_deep_research::DeepResearchAgent;
 use gemicro_developer::{DeveloperAgent, DeveloperConfig};
 use gemicro_echo::EchoAgent;
+use gemicro_loader::parse_markdown_agent_str;
 use gemicro_path_sandbox::PathSandbox;
 use gemicro_prompt_agent::{tools as prompt_tools, PromptAgent, PromptAgentConfig};
 use gemicro_runner::AgentRegistry;
@@ -58,7 +59,7 @@ const HISTORY_PREVIEW_CHARS: usize = 256;
 const ISSUE_AUDITOR_MD: &str = r#"---
 name: issue-auditor
 description: Audits GitHub issues for staleness, duplicates, and relevance
-model: gemini-2.0-flash
+model: gemini-3.0-flash-preview
 tools:
   - file_read
   - glob

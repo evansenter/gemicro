@@ -41,11 +41,7 @@
 //! ```
 
 pub mod loader;
-pub mod markdown_agents;
 mod types;
 
 pub use loader::{ConfigChange, ConfigLoader, ConfigSource};
-pub use markdown_agents::{
-    parse_markdown_agent, parse_markdown_agent_str, MarkdownAgent, MarkdownAgentError,
-};
 pub use types::{DeepResearchToml, GemicroConfig, PromptAgentToml, PromptsToml};
