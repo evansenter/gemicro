@@ -10,7 +10,7 @@
 //! name: my-agent
 //! description: What this agent does
 //! model: gemini-2.0-flash  # optional
-//! tools:                   # optional, defaults to inherit
+//! tools:                   # optional, see below for behavior
 //!   - file_read
 //!   - grep
 //! ---
@@ -18,6 +18,14 @@
 //! You are an expert assistant...
 //! (rest of markdown becomes the system prompt)
 //! ```
+//!
+//! # Tool Configuration
+//!
+//! The `tools` field controls which tools the agent can use:
+//!
+//! - **Omitted**: Inherit tools from parent context (`ToolSet::Inherit`)
+//! - **Empty array `[]`**: No tools allowed (`ToolSet::None`)
+//! - **List of names**: Only those specific tools (`ToolSet::Specific`)
 //!
 //! # Example
 //!
@@ -115,9 +123,13 @@ struct MarkdownFrontmatter {
     #[serde(default)]
     model: Option<String>,
 
-    /// Tool names to make available. Empty = inherit from parent.
+    /// Tool names to make available.
+    ///
+    /// - `None` (omitted): Inherit tools from parent context
+    /// - `Some([])` (empty array): No tools allowed
+    /// - `Some([...])` (list): Only those specific tools
     #[serde(default)]
-    tools: Vec<String>,
+    tools: Option<Vec<String>>,
 }
 
 // ============================================================================
@@ -161,11 +173,11 @@ pub fn parse_markdown_agent(path: &Path) -> Result<MarkdownAgent, MarkdownAgentE
 /// - The YAML cannot be parsed
 /// - Required fields are missing
 pub fn parse_markdown_agent_str(content: &str) -> Result<MarkdownAgent, MarkdownAgentError> {
-    // Split frontmatter from body
+    // Split frontmatter from body (handles CRLF normalization)
     let (frontmatter, body) = split_frontmatter(content)?;
 
     // Parse YAML frontmatter
-    let fm: MarkdownFrontmatter = serde_yaml::from_str(frontmatter)?;
+    let fm: MarkdownFrontmatter = serde_yaml::from_str(&frontmatter)?;
 
     // Validate name
     if fm.name.trim().is_empty() {
@@ -174,11 +186,14 @@ pub fn parse_markdown_agent_str(content: &str) -> Result<MarkdownAgent, Markdown
         ));
     }
 
-    // Convert tools list to ToolSet
-    let tools = if fm.tools.is_empty() {
-        ToolSet::Inherit
-    } else {
-        ToolSet::Specific(fm.tools)
+    // Convert tools list to ToolSet:
+    // - None (omitted): Inherit from parent
+    // - Some([]) (empty array): No tools
+    // - Some([...]) (list): Specific tools
+    let tools = match fm.tools {
+        None => ToolSet::Inherit,
+        Some(list) if list.is_empty() => ToolSet::None,
+        Some(list) => ToolSet::Specific(list),
     };
 
     // Build the definition
@@ -210,7 +225,12 @@ pub fn parse_markdown_agent_str(content: &str) -> Result<MarkdownAgent, Markdown
 /// ---
 /// body content
 /// ```
-fn split_frontmatter(content: &str) -> Result<(&str, &str), MarkdownAgentError> {
+///
+/// Handles both Unix (`\n`) and Windows (`\r\n`) line endings.
+fn split_frontmatter(content: &str) -> Result<(String, String), MarkdownAgentError> {
+    // Normalize line endings for cross-platform compatibility
+    let content = content.replace("\r\n", "\n");
+
     // Must start with ---
     if !content.starts_with("---") {
         return Err(MarkdownAgentError::MissingFrontmatter);
@@ -222,8 +242,8 @@ fn split_frontmatter(content: &str) -> Result<(&str, &str), MarkdownAgentError> 
         .find("\n---")
         .ok_or(MarkdownAgentError::MissingFrontmatter)?;
 
-    let frontmatter = rest[..end].trim();
-    let body = &rest[end + 4..]; // Skip "\n---"
+    let frontmatter = rest[..end].trim().to_string();
+    let body = rest[end + 4..].to_string(); // Skip "\n---"
 
     Ok((frontmatter, body))
 }
@@ -383,5 +403,41 @@ name: test
         let err = MarkdownAgentError::Validation("test error".into());
         let msg = format!("{}", err);
         assert!(msg.contains("test error"));
+    }
+
+    #[test]
+    fn test_windows_line_endings() {
+        // CRLF line endings should be handled
+        let markdown = "---\r\nname: test\r\n---\r\n\r\nYou are a helper.";
+        let agent = parse_markdown_agent_str(markdown).unwrap();
+        assert_eq!(agent.name, "test");
+        assert_eq!(agent.definition.system_prompt, "You are a helper.");
+    }
+
+    #[test]
+    fn test_empty_tools_means_none() {
+        // Explicit empty tools array means no tools (ToolSet::None)
+        let markdown = r#"---
+name: no-tools-agent
+tools: []
+---
+
+You have no tools."#;
+
+        let agent = parse_markdown_agent_str(markdown).unwrap();
+        assert!(matches!(agent.definition.tools, ToolSet::None));
+    }
+
+    #[test]
+    fn test_omitted_tools_means_inherit() {
+        // Omitted tools field means inherit from parent (ToolSet::Inherit)
+        let markdown = r#"---
+name: inherit-tools-agent
+---
+
+You inherit tools."#;
+
+        let agent = parse_markdown_agent_str(markdown).unwrap();
+        assert!(matches!(agent.definition.tools, ToolSet::Inherit));
     }
 }
