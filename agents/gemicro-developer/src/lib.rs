@@ -52,11 +52,11 @@ use gemicro_core::{
     tool::{AutoApprove, AutoDeny, ToolCallableAdapter, ToolError},
     Agent, AgentContext, AgentError, AgentStream, AgentUpdate, BatchApproval,
     BatchConfirmationHandler, ContextLevel, ContextUsage, DefaultTracker, ExecutionTracking,
-    LlmError, PendingToolCall, ResultMetadata, ToolBatch, MODEL,
+    LlmRequest, PendingToolCall, ResultMetadata, ToolBatch,
 };
 use genai_rs::{
     function_result_content, CallableFunction, FunctionDeclaration, InteractionContent,
-    InteractionResponse, OwnedFunctionCallInfo,
+    OwnedFunctionCallInfo,
 };
 use serde_json::json;
 use std::sync::Arc;
@@ -434,8 +434,6 @@ impl Agent for DeveloperAgent {
                 .map(|t| t.to_function_declaration())
                 .collect();
 
-            let genai_client = context.llm.client();
-
             let mut total_tool_calls = 0usize;
             let mut iteration = 0usize;
             let mut previous_interaction_id: Option<String> = None;
@@ -470,36 +468,22 @@ impl Agent for DeveloperAgent {
                 let function_calls_to_process = if !pending_function_calls.is_empty() {
                     // Process pending function calls from previous iteration
                     std::mem::take(&mut pending_function_calls)
+                } else if previous_interaction_id.is_some() {
+                    // Defensive: this shouldn't happen in normal flow
+                    // If we have a previous interaction but no pending calls, something is wrong
+                    Err(AgentError::Other(
+                        "Unexpected state: previous_interaction_id set but no pending calls".into(),
+                    ))?
                 } else {
-                    // No pending calls - make LLM request
-                    // Type-state pattern: FirstTurn vs Chained builders are different types
-                    let response: InteractionResponse = match &previous_interaction_id {
-                        Some(prev_id) => {
-                            // Subsequent turns: chain to previous interaction
-                            genai_client
-                                .interaction()
-                                .with_model(MODEL)
-                                .with_functions(function_declarations.clone())
-                                .with_store_enabled()
-                                .with_previous_interaction(prev_id)
-                                .create()
-                                .await
-                                .map_err(|e| AgentError::Llm(LlmError::GenAi(e)))?
-                        }
-                        None => {
-                            // First turn: set system instruction and user query
-                            genai_client
-                                .interaction()
-                                .with_model(MODEL)
-                                .with_system_instruction(&system_prompt)
-                                .with_functions(function_declarations.clone())
-                                .with_store_enabled()
-                                .with_text(&query)
-                                .create()
-                                .await
-                                .map_err(|e| AgentError::Llm(LlmError::GenAi(e)))?
-                        }
-                    };
+                    // First turn: make initial LLM request with system instruction and query
+                    let initial_request = LlmRequest::with_system(&query, &system_prompt)
+                        .with_functions(function_declarations.clone());
+
+                    let response = context
+                        .llm
+                        .generate_with_cancellation(initial_request, &context.cancellation_token)
+                        .await
+                        .map_err(AgentError::Llm)?;
 
                     // Track context usage
                     if let Some(tokens) = gemicro_core::extract_total_tokens(&response) {
@@ -575,34 +559,26 @@ impl Agent for DeveloperAgent {
                     let denial_results =
                         build_denial_results(&function_calls_to_process, "User denied batch execution");
 
-                    // Send denial back to LLM and continue loop
-                    // Type-state pattern: with_previous_interaction changes builder type
-                    let denial_response: InteractionResponse = match &previous_interaction_id {
-                        Some(prev_id) => {
-                            genai_client
-                                .interaction()
-                                .with_model(MODEL)
-                                .with_functions(function_declarations.clone())
-                                .with_store_enabled()
-                                .with_previous_interaction(prev_id)
-                                .with_content(denial_results)
-                                .create()
-                                .await
-                                .map_err(|e| AgentError::Llm(LlmError::GenAi(e)))?
-                        }
-                        None => {
-                            genai_client
-                                .interaction()
-                                .with_model(MODEL)
-                                .with_system_instruction(&system_prompt)
-                                .with_functions(function_declarations.clone())
-                                .with_store_enabled()
-                                .with_content(denial_results)
-                                .create()
-                                .await
-                                .map_err(|e| AgentError::Llm(LlmError::GenAi(e)))?
-                        }
-                    };
+                    // Invariant: we must have a previous interaction ID since we got here
+                    // by processing function calls from a response
+                    let prev_id = previous_interaction_id.as_ref().ok_or_else(|| {
+                        AgentError::Other(
+                            "previous_interaction_id was None when sending denial results".into(),
+                        )
+                    })?;
+
+                    // Send denial back to LLM using continuation request
+                    let denial_request = LlmRequest::continuation(
+                        prev_id,
+                        function_declarations.clone(),
+                        denial_results,
+                    );
+
+                    let denial_response = context
+                        .llm
+                        .generate_with_cancellation(denial_request, &context.cancellation_token)
+                        .await
+                        .map_err(AgentError::Llm)?;
 
                     // Track context usage
                     if let Some(tokens) = gemicro_core::extract_total_tokens(&denial_response) {
@@ -777,9 +753,6 @@ impl Agent for DeveloperAgent {
                 // SECTION 2c: Send Results to LLM and Check for More Calls
                 // ─────────────────────────────────────────────────────────────
 
-                // Function result returns don't need tools re-sent - the model already
-                // knows about available tools from the interaction that triggered the call.
-                // System instruction is also inherited from the first turn.
                 // Invariant: we have a previous_interaction_id because we got here by processing
                 // function calls from a prior response. If this is ever None, it's a bug.
                 let prev_id = previous_interaction_id.as_ref().ok_or_else(|| {
@@ -788,15 +761,18 @@ impl Agent for DeveloperAgent {
                     )
                 })?;
 
-                let follow_up_response: InteractionResponse = genai_client
-                    .interaction()
-                    .with_model(MODEL)
-                    .with_store_enabled()
-                    .with_previous_interaction(prev_id)
-                    .with_content(function_results)
-                    .create()
+                // Send function results back to LLM using continuation request
+                let continuation_request = LlmRequest::continuation(
+                    prev_id,
+                    function_declarations.clone(),
+                    function_results,
+                );
+
+                let follow_up_response = context
+                    .llm
+                    .generate_with_cancellation(continuation_request, &context.cancellation_token)
                     .await
-                    .map_err(|e| AgentError::Llm(LlmError::GenAi(e)))?;
+                    .map_err(AgentError::Llm)?;
 
                 // Track context usage
                 if let Some(tokens) = gemicro_core::extract_total_tokens(&follow_up_response) {
