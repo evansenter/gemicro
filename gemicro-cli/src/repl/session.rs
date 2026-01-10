@@ -4,7 +4,7 @@
 
 use super::commands::Command;
 use crate::config::loader::ConfigChange;
-use crate::config::{ConfigLoader, GemicroConfig};
+use crate::config::{parse_markdown_agent_str, ConfigLoader, GemicroConfig};
 use crate::confirmation::InteractiveConfirmation;
 use crate::display::{IndicatifRenderer, Renderer};
 use crate::error::ErrorFormatter;
@@ -50,6 +50,53 @@ use tokio_util::sync::CancellationToken;
 /// previous answer is shown. Full answers are always available in the
 /// conversation context sent to the LLM for follow-up queries.
 const HISTORY_PREVIEW_CHARS: usize = 256;
+
+/// Bundled issue-auditor agent definition (markdown format).
+///
+/// This agent is loaded from markdown at startup and registered in the agent registry.
+/// See `config/markdown_agents.rs` for the parsing logic.
+const ISSUE_AUDITOR_MD: &str = r#"---
+name: issue-auditor
+description: Audits GitHub issues for staleness, duplicates, and relevance
+model: gemini-2.0-flash
+tools:
+  - file_read
+  - glob
+  - grep
+---
+
+You are an expert issue auditor. Your job is to review GitHub issues and provide actionable recommendations for issue hygiene.
+
+## Your Tasks
+
+1. **Staleness Check**: Flag issues open >90 days with no recent activity
+2. **Duplicate Detection**: Identify issues covering the same topic or feature
+3. **Relevance Assessment**: Check if issues still apply to current codebase state
+4. **Priority Alignment**: Verify issue priority matches current project goals
+
+## Analysis Process
+
+For each issue:
+1. Read the issue title and body
+2. Check the issue creation date and last activity
+3. Search the codebase to see if the issue has been addressed
+4. Look for similar issues that might be duplicates
+
+## Output Format
+
+For each issue analyzed, provide:
+- **Issue**: #<number> - <title>
+- **Status**: STALE | DUPLICATE | IRRELEVANT | ADDRESSED | VALID
+- **Evidence**: Brief explanation of your assessment
+- **Recommendation**: Specific action to take (close, merge with #X, update labels, etc.)
+
+## Guidelines
+
+- Be conservative: when in doubt, mark as VALID
+- Always provide evidence for your assessment
+- Cross-reference with codebase changes when checking relevance
+- Note any blocking relationships between issues
+"#;
 
 /// REPL session state
 pub struct Session {
@@ -340,6 +387,49 @@ impl Session {
 
         // Register critique agent (for self-validation via Task tool)
         registry.register("critique", || Box::new(CritiqueAgent::default_agent()));
+
+        // Register bundled markdown agents
+        self.register_markdown_agents(&mut registry);
+    }
+
+    /// Register agents defined in markdown format.
+    ///
+    /// Markdown agents use YAML frontmatter for configuration and the markdown
+    /// body as the system prompt. Currently loads bundled agents; future versions
+    /// will support user-defined agents from `~/.config/gemicro/agents/`.
+    fn register_markdown_agents(&self, registry: &mut AgentRegistry) {
+        // Parse and register the issue-auditor agent
+        match parse_markdown_agent_str(ISSUE_AUDITOR_MD) {
+            Ok(agent) => {
+                let def = agent.definition.clone();
+                let name = agent.name.clone();
+
+                // Log tool availability warnings at load time
+                // (graceful handling at runtime - missing tools will error when called)
+                if let gemicro_core::ToolSet::Specific(ref tools) = def.tools {
+                    for tool in tools {
+                        log::debug!("Markdown agent '{}' requests tool: {}", name, tool);
+                    }
+                }
+
+                registry.register(&name, move || {
+                    Box::new(
+                        PromptAgent::with_definition(&def)
+                            .expect("pre-validated markdown agent definition"),
+                    )
+                });
+
+                log::info!(
+                    "Registered markdown agent: {} - {}",
+                    agent.name,
+                    agent.definition.description
+                );
+            }
+            Err(e) => {
+                // Bundled agents should always parse - log error but don't crash
+                log::error!("Failed to parse bundled issue-auditor agent: {}", e);
+            }
+        }
     }
 
     /// Reload configuration from files.

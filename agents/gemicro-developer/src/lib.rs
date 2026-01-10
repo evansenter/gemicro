@@ -567,7 +567,8 @@ impl Agent for DeveloperAgent {
                         )
                     })?;
 
-                    // Send denial back to LLM using continuation request
+                    // Send denial back to LLM using continuation request.
+                    // Functions are re-sent on each request (they could change per-turn).
                     let denial_request = LlmRequest::continuation(
                         prev_id,
                         function_declarations.clone(),
@@ -761,7 +762,8 @@ impl Agent for DeveloperAgent {
                     )
                 })?;
 
-                // Send function results back to LLM using continuation request
+                // Send function results back to LLM using continuation request.
+                // Functions are re-sent on each request (they could change per-turn).
                 let continuation_request = LlmRequest::continuation(
                     prev_id,
                     function_declarations.clone(),

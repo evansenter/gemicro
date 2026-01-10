@@ -359,6 +359,48 @@ impl PromptAgent {
             .with_tool_filter(tool_filter);
         Self::new(config)
     }
+
+    /// Create a Prompt agent from a [`PromptAgentDef`].
+    ///
+    /// This constructor is used by the markdown agent loader to create agents
+    /// from parsed markdown definitions.
+    ///
+    /// # Note
+    ///
+    /// The `model` field in [`PromptAgentDef`] is not used directly by this constructor.
+    /// Model selection is handled at the runner/context level. The caller should use
+    /// the model information when configuring the `AgentContext`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AgentError::InvalidConfig` if the definition fails validation.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use gemicro_prompt_agent::PromptAgent;
+    /// use gemicro_core::agent::PromptAgentDef;
+    /// use gemicro_core::ToolSet;
+    ///
+    /// let def = PromptAgentDef::new("Code reviewer")
+    ///     .with_system_prompt("You review code for quality issues.")
+    ///     .with_tools(ToolSet::Specific(vec!["file_read".into()]));
+    ///
+    /// let agent = PromptAgent::with_definition(&def).unwrap();
+    /// ```
+    ///
+    /// [`PromptAgentDef`]: gemicro_core::agent::PromptAgentDef
+    pub fn with_definition(def: &gemicro_core::agent::PromptAgentDef) -> Result<Self, AgentError> {
+        // Validate the definition first
+        def.validate()
+            .map_err(|e| AgentError::InvalidConfig(e.to_string()))?;
+
+        let config = PromptAgentConfig::default()
+            .with_system_prompt(&def.system_prompt)
+            .with_tool_filter(def.tools.clone());
+
+        Self::new(config)
+    }
 }
 
 impl Agent for PromptAgent {
@@ -706,5 +748,27 @@ mod tests {
     fn test_default_tool_filter_is_all() {
         let config = PromptAgentConfig::default();
         assert!(matches!(config.tool_filter, ToolSet::All));
+    }
+
+    #[test]
+    fn test_with_definition_constructor() {
+        use gemicro_core::agent::PromptAgentDef;
+
+        let def = PromptAgentDef::new("Test agent")
+            .with_system_prompt("You are a helpful assistant.")
+            .with_tools(ToolSet::Specific(vec!["file_read".into()]));
+
+        let agent = PromptAgent::with_definition(&def).unwrap();
+        assert_eq!(agent.name(), "prompt_agent");
+    }
+
+    #[test]
+    fn test_with_definition_rejects_invalid() {
+        use gemicro_core::agent::PromptAgentDef;
+
+        // Missing system prompt
+        let def = PromptAgentDef::new("Test agent");
+        let result = PromptAgent::with_definition(&def);
+        assert!(result.is_err());
     }
 }
