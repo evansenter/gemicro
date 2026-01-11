@@ -38,8 +38,8 @@ Gemicro is a CLI agent exploration platform for AI agent patterns, powered by Ge
 make check      # Format + clippy + tests (pre-push gate)
 make fmt        # Check formatting
 make clippy     # Clippy with -D warnings
-make test       # Unit + doc tests (uses cargo-nextest for parallel execution)
-make test-all   # Include LLM integration tests (requires GEMINI_API_KEY)
+make test       # Unit tests only (excludes doctests for speed)
+make test-all   # Full suite including integration tests (requires GEMINI_API_KEY)
 ```
 
 ### During Development: Target Changed Crates
