@@ -54,7 +54,7 @@
 
 use gemicro_core::{
     remaining_time, timeout_error, truncate, with_timeout_and_cancellation, Agent, AgentContext,
-    AgentError, AgentStream, AgentUpdate, LlmRequest, ResultMetadata,
+    AgentError, AgentStream, AgentUpdate, ResultMetadata,
 };
 
 use async_stream::try_stream;
@@ -852,8 +852,11 @@ impl Agent for CritiqueAgent {
             // Calculate remaining time and execute LLM call
             let timeout = remaining_time(start, config.timeout, "critique")?;
 
-            let request = LlmRequest::with_system(&prompt, &system)
-                .with_response_format(CritiqueOutput::schema());
+            let request = context.llm.client().interaction()
+                .with_system_instruction(&system)
+                .with_text(&prompt)
+                .with_response_format(CritiqueOutput::schema())
+                .build().map_err(|e| AgentError::Other(e.to_string()))?;
 
             let generate_future = async {
                 context

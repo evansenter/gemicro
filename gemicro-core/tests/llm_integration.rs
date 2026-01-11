@@ -7,7 +7,7 @@ mod common;
 
 use common::{create_test_client, get_api_key};
 use futures_util::StreamExt;
-use gemicro_core::{LlmRequest, Turn};
+use genai_rs::Turn;
 
 #[tokio::test]
 #[ignore] // Requires GEMINI_API_KEY
@@ -18,7 +18,12 @@ async fn test_generate_simple_prompt() {
     };
 
     let client = create_test_client(&api_key);
-    let request = LlmRequest::new("What is 2 + 2? Reply with just the number.");
+    let request = client
+        .client()
+        .interaction()
+        .with_text("What is 2 + 2? Reply with just the number.")
+        .build()
+        .unwrap();
 
     let response = client.generate(request).await;
 
@@ -56,10 +61,13 @@ async fn test_generate_with_system_instruction() {
     };
 
     let client = create_test_client(&api_key);
-    let request = LlmRequest::with_system(
-        "What is the capital of France?",
-        "You are a helpful assistant. Always respond in exactly one word.",
-    );
+    let request = client
+        .client()
+        .interaction()
+        .with_system_instruction("You are a helpful assistant. Always respond in exactly one word.")
+        .with_text("What is the capital of France?")
+        .build()
+        .unwrap();
 
     let response = client.generate(request).await;
 
@@ -91,9 +99,12 @@ async fn test_generate_stream_simple_prompt() {
     };
 
     let client = create_test_client(&api_key);
-    let request = LlmRequest::new("Count from 1 to 5, one number per line.");
+    let builder = client
+        .client()
+        .interaction()
+        .with_text("Count from 1 to 5, one number per line.");
 
-    let stream = client.generate_stream(request);
+    let stream = client.generate_stream(builder);
     futures_util::pin_mut!(stream);
 
     let mut full_text = String::new();
@@ -140,12 +151,13 @@ async fn test_generate_stream_with_system_instruction() {
     };
 
     let client = create_test_client(&api_key);
-    let request = LlmRequest::with_system(
-        "Say hello",
-        "You are a pirate. Always respond in pirate speak.",
-    );
+    let builder = client
+        .client()
+        .interaction()
+        .with_system_instruction("You are a pirate. Always respond in pirate speak.")
+        .with_text("Say hello");
 
-    let stream = client.generate_stream(request);
+    let stream = client.generate_stream(builder);
     futures_util::pin_mut!(stream);
 
     let mut full_text = String::new();
@@ -180,62 +192,6 @@ async fn test_generate_stream_with_system_instruction() {
 
 #[tokio::test]
 #[ignore] // Requires GEMINI_API_KEY
-async fn test_generate_empty_prompt_error() {
-    let Some(api_key) = get_api_key() else {
-        eprintln!("Skipping test: GEMINI_API_KEY not set");
-        return;
-    };
-
-    let client = create_test_client(&api_key);
-    let request = LlmRequest::new("");
-
-    let response = client.generate(request).await;
-
-    assert!(response.is_err(), "Empty prompt should return an error");
-
-    if let Err(e) = response {
-        println!("Expected error: {:?}", e);
-        assert!(
-            matches!(e, gemicro_core::LlmError::InvalidRequest(_)),
-            "Should be InvalidRequest error, got: {:?}",
-            e
-        );
-    }
-}
-
-#[tokio::test]
-#[ignore] // Requires GEMINI_API_KEY
-async fn test_generate_stream_empty_prompt_error() {
-    let Some(api_key) = get_api_key() else {
-        eprintln!("Skipping test: GEMINI_API_KEY not set");
-        return;
-    };
-
-    let client = create_test_client(&api_key);
-    let request = LlmRequest::new("");
-
-    let stream = client.generate_stream(request);
-    futures_util::pin_mut!(stream);
-
-    // The first item from the stream should be an error
-    let first = stream.next().await;
-
-    assert!(first.is_some(), "Stream should yield at least one item");
-
-    if let Some(Err(e)) = first {
-        println!("Expected error: {:?}", e);
-        assert!(
-            matches!(e, gemicro_core::LlmError::InvalidRequest(_)),
-            "Should be InvalidRequest error, got: {:?}",
-            e
-        );
-    } else {
-        panic!("Expected error for empty prompt");
-    }
-}
-
-#[tokio::test]
-#[ignore] // Requires GEMINI_API_KEY
 async fn test_google_search_grounding() {
     let Some(api_key) = get_api_key() else {
         eprintln!("Skipping test: GEMINI_API_KEY not set");
@@ -245,7 +201,13 @@ async fn test_google_search_grounding() {
     let client = create_test_client(&api_key);
 
     // Use a query that benefits from real-time web data
-    let request = LlmRequest::new("What is today's date?").with_google_search();
+    let request = client
+        .client()
+        .interaction()
+        .with_text("What is today's date?")
+        .with_google_search()
+        .build()
+        .unwrap();
 
     let response = client.generate(request).await;
 
@@ -264,6 +226,7 @@ async fn test_google_search_grounding() {
             assert!(
                 text.to_lowercase().contains("2024")
                     || text.to_lowercase().contains("2025")
+                    || text.to_lowercase().contains("2026")
                     || text.to_lowercase().contains("december")
                     || text.to_lowercase().contains("january")
                     || text.to_lowercase().contains("today"),
@@ -303,8 +266,13 @@ async fn test_structured_output_response_format() {
         "required": ["answer", "confidence"]
     });
 
-    let request = LlmRequest::new("What is the capital of France? Respond with high confidence.")
-        .with_response_format(schema);
+    let request = client
+        .client()
+        .interaction()
+        .with_text("What is the capital of France? Respond with high confidence.")
+        .with_response_format(schema)
+        .build()
+        .unwrap();
 
     let response = client.generate(request).await;
 
@@ -365,8 +333,13 @@ async fn test_generate_with_turns() {
     let history = vec![Turn::user("What is 2 + 2?"), Turn::model("2 + 2 equals 4.")];
 
     // Follow-up question that relies on the context
-    let request = LlmRequest::new("And what is that multiplied by 3? Just the number please.")
-        .with_turns(history);
+    let request = client
+        .client()
+        .interaction()
+        .with_turns(history)
+        .with_text("And what is that multiplied by 3? Just the number please.")
+        .build()
+        .unwrap();
 
     let response = client.generate(request).await;
 

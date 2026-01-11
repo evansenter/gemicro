@@ -52,7 +52,7 @@ use gemicro_core::{
     tool::{AutoApprove, AutoDeny, ToolCallableAdapter, ToolError},
     Agent, AgentContext, AgentError, AgentStream, AgentUpdate, BatchApproval,
     BatchConfirmationHandler, ContextLevel, ContextUsage, DefaultTracker, ExecutionTracking,
-    LlmRequest, PendingToolCall, ResultMetadata, ToolBatch,
+    PendingToolCall, ResultMetadata, ToolBatch,
 };
 use genai_rs::{
     function_result_content, CallableFunction, FunctionDeclaration, InteractionContent,
@@ -482,8 +482,15 @@ impl Agent for DeveloperAgent {
                     ))?
                 } else {
                     // First turn: make initial LLM request with system instruction and query
-                    let initial_request = LlmRequest::with_system(&query, &system_prompt)
-                        .with_functions(function_declarations.clone());
+                    let initial_request = context
+                        .llm
+                        .client()
+                        .interaction()
+                        .with_system_instruction(&system_prompt)
+                        .with_text(&query)
+                        .with_functions(function_declarations.clone())
+                        .with_store_enabled() // Enable storage for function calling chains
+                        .build().map_err(|e| AgentError::Other(e.to_string()))?;
 
                     let response = context
                         .llm
@@ -575,11 +582,15 @@ impl Agent for DeveloperAgent {
 
                     // Send denial back to LLM using continuation request.
                     // Functions are re-sent on each request (they could change per-turn).
-                    let denial_request = LlmRequest::continuation(
-                        prev_id,
-                        function_declarations.clone(),
-                        denial_results,
-                    );
+                    let denial_request = context
+                        .llm
+                        .client()
+                        .interaction()
+                        .with_previous_interaction(prev_id)
+                        .with_functions(function_declarations.clone())
+                        .with_content(denial_results)
+                        .with_store_enabled()
+                        .build().map_err(|e| AgentError::Other(e.to_string()))?;
 
                     let denial_response = context
                         .llm
@@ -771,11 +782,15 @@ impl Agent for DeveloperAgent {
 
                 // Send function results back to LLM using continuation request.
                 // Functions are re-sent on each request (they could change per-turn).
-                let continuation_request = LlmRequest::continuation(
-                    prev_id,
-                    function_declarations.clone(),
-                    function_results,
-                );
+                let continuation_request = context
+                    .llm
+                    .client()
+                    .interaction()
+                    .with_previous_interaction(prev_id)
+                    .with_functions(function_declarations.clone())
+                    .with_content(function_results)
+                    .with_store_enabled()
+                    .build().map_err(|e| AgentError::Other(e.to_string()))?;
 
                 let follow_up_response = context
                     .llm

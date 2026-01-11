@@ -6,11 +6,11 @@
 use crate::config::ReactConfig;
 use gemicro_core::{
     remaining_time, timeout_error, truncate, with_timeout_and_cancellation, Agent, AgentContext,
-    AgentError, AgentStream, AgentUpdate, LlmRequest, ResultMetadata,
+    AgentError, AgentStream, AgentUpdate, ResultMetadata,
 };
 
 use async_stream::try_stream;
-use futures_util::Stream;
+use futures_util::{Stream, StreamExt};
 use serde::Deserialize;
 use serde_json::json;
 use std::time::Instant;
@@ -29,6 +29,7 @@ const EVENT_REACT_ACTION: &str = "react_action";
 const EVENT_REACT_OBSERVATION: &str = "react_observation";
 const EVENT_REACT_COMPLETE: &str = "react_complete";
 const EVENT_REACT_MAX_ITERATIONS: &str = "react_max_iterations";
+const EVENT_WEB_SEARCH_CHUNK: &str = "web_search_chunk";
 
 /// ReAct Agent implementing the Reasoning + Acting pattern.
 ///
@@ -52,7 +53,7 @@ const EVENT_REACT_MAX_ITERATIONS: &str = "react_max_iterations";
 /// use futures_util::StreamExt;
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let genai_client = genai_rs::Client::builder("api-key".to_string()).build()?;
+/// let genai_client = genai_rs::Client::builder("api-key".to_string()).build().map_err(|e| AgentError::Other(e.to_string()))?;
 /// let context = AgentContext::new(LlmClient::new(genai_client, LlmConfig::default()));
 /// let agent = ReactAgent::new(ReactConfig::default())?;
 ///
@@ -128,8 +129,11 @@ impl ReactAgent {
                 let prompt = config.prompts.render_iteration(&query, &scratchpad);
                 let schema = Self::react_step_schema(&config.available_tools);
 
-                let request = LlmRequest::with_system(&prompt, &config.prompts.system)
-                    .with_response_format(schema);
+                let request = context.llm.client().interaction()
+                    .with_system_instruction(&config.prompts.system)
+                    .with_text(&prompt)
+                    .with_response_format(schema)
+                    .build().map_err(|e| AgentError::Other(e.to_string()))?;
 
                 // Execute LLM call with timeout/cancellation
                 // Map LlmError to AgentError for the helper function
@@ -202,13 +206,58 @@ impl ReactAgent {
 
                 // Execute tool and get observation
                 let remaining = remaining_time(start_time, config.total_timeout, "tool_execution")?;
-                let (observation, is_error) = Self::execute_tool(
-                    &step.action.tool,
-                    &step.action.input,
-                    &context,
-                    &config,
-                    remaining,
-                ).await;
+                let (observation, is_error) = if step.action.tool == "web_search" && config.use_google_search {
+                    // Stream web search for real-time output
+                    let builder = context.llm.client().interaction()
+                        .with_system_instruction("You are a research assistant. Provide a concise, factual answer based on web search results. Include key facts and numbers.")
+                        .with_text(&step.action.input)
+                        .with_google_search();
+
+                    let deadline = Instant::now() + remaining;
+                    let mut accumulated = String::new();
+                    let mut had_error = false;
+
+                    let stream = context.llm.generate_stream_with_cancellation(
+                        builder,
+                        context.cancellation_token.clone(),
+                    );
+                    futures_util::pin_mut!(stream);
+
+                    while let Some(chunk_result) = stream.next().await {
+                        // Check deadline
+                        if Instant::now() > deadline {
+                            accumulated = "Web search timed out".to_string();
+                            had_error = true;
+                            break;
+                        }
+
+                        match chunk_result {
+                            Ok(chunk) => {
+                                accumulated.push_str(&chunk.text);
+                                yield AgentUpdate::custom(
+                                    EVENT_WEB_SEARCH_CHUNK,
+                                    chunk.text.clone(),
+                                    json!({ "text": chunk.text }),
+                                );
+                            }
+                            Err(e) => {
+                                accumulated = format!("Web search failed: {}", e);
+                                had_error = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    (accumulated, had_error)
+                } else {
+                    Self::execute_tool(
+                        &step.action.tool,
+                        &step.action.input,
+                        &context,
+                        &config,
+                        remaining,
+                    ).await
+                };
 
                 // Emit observation event
                 yield AgentUpdate::custom(
@@ -346,11 +395,15 @@ impl ReactAgent {
             return ("Web search is disabled in configuration".to_string(), true);
         }
 
-        let request = LlmRequest::with_system(
-            query,
-            "You are a research assistant. Provide a concise, factual answer based on web search results. Include key facts and numbers.",
-        )
-        .with_google_search();
+        let request = match context.llm.client().interaction()
+            .with_system_instruction("You are a research assistant. Provide a concise, factual answer based on web search results. Include key facts and numbers.")
+            .with_text(query)
+            .with_google_search()
+            .build()
+        {
+            Ok(r) => r,
+            Err(e) => return (format!("Failed to build request: {e}"), true),
+        };
 
         match tokio::time::timeout(timeout, context.llm.generate(request)).await {
             Ok(Ok(response)) => (response.text().unwrap_or("").to_string(), false),

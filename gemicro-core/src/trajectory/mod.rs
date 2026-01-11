@@ -39,8 +39,7 @@ mod data;
 
 pub use builder::TrajectoryBuilder;
 pub use data::{
-    LlmResponseData, SerializableLlmRequest, SerializableStreamChunk, Trajectory,
-    TrajectoryMetadata, TrajectoryStep,
+    LlmResponseData, SerializableStreamChunk, Trajectory, TrajectoryMetadata, TrajectoryStep,
 };
 
 /// Current schema version for trajectory files
@@ -48,4 +47,5 @@ pub use data::{
 /// Version history:
 /// - 1.0.0: Initial release with dual Option pattern for response/stream_chunks
 /// - 2.0.0: Changed to LlmResponseData enum for type-safe response mode
-pub const SCHEMA_VERSION: &str = "2.0.0";
+/// - 3.0.0: Changed TrajectoryStep.request from SerializableLlmRequest to serde_json::Value
+pub const SCHEMA_VERSION: &str = "3.0.0";

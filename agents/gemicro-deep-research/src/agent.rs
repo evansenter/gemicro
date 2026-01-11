@@ -8,12 +8,11 @@ use crate::events::{EVENT_DECOMPOSITION_COMPLETE, EVENT_SUB_QUERY_COMPLETED};
 
 use gemicro_core::agent::{remaining_time, timeout_error, with_timeout_and_cancellation};
 use gemicro_core::{
-    extract_total_tokens, Agent, AgentContext, AgentError, AgentStream, AgentUpdate, LlmRequest,
-    ResultMetadata,
+    extract_total_tokens, Agent, AgentContext, AgentError, AgentStream, AgentUpdate, ResultMetadata,
 };
 
 use async_stream::try_stream;
-use futures_util::Stream;
+use futures_util::{Stream, StreamExt};
 use serde_json::json;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -31,6 +30,7 @@ const EVENT_DECOMPOSITION_STARTED: &str = "decomposition_started";
 const EVENT_SUB_QUERY_STARTED: &str = "sub_query_started";
 const EVENT_SUB_QUERY_FAILED: &str = "sub_query_failed";
 const EVENT_SYNTHESIS_STARTED: &str = "synthesis_started";
+const EVENT_SYNTHESIS_CHUNK: &str = "synthesis_chunk";
 
 /// Deep Research Agent.
 ///
@@ -55,7 +55,7 @@ const EVENT_SYNTHESIS_STARTED: &str = "synthesis_started";
 /// use futures_util::StreamExt;
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let genai_client = genai_rs::Client::builder("api-key".to_string()).build()?;
+/// let genai_client = genai_rs::Client::builder("api-key".to_string()).build().map_err(|e| AgentError::Other(e.to_string()))?;
 /// let context = AgentContext::new(LlmClient::new(genai_client, LlmConfig::default()));
 /// let agent = DeepResearchAgent::new(ResearchConfig::default())?;
 ///
@@ -150,19 +150,63 @@ impl DeepResearchAgent {
                 Err(AgentError::AllSubQueriesFailed)?;
             }
 
-            // Phase 3: Synthesis (with timeout and cancellation)
+            // Phase 3: Synthesis (streaming with cancellation)
             yield AgentUpdate::custom(
                 EVENT_SYNTHESIS_STARTED,
                 "Synthesizing results",
                 json!({}),
             );
+
+            // Build synthesis prompt
+            let findings = execution_result.results
+                .iter()
+                .enumerate()
+                .map(|(i, r)| format!("Finding {}:\n{}", i + 1, r))
+                .collect::<Vec<_>>()
+                .join("\n\n---\n\n");
+            let synthesis_prompt = config.prompts.render_synthesis(&query, &findings);
+
+            // Stream synthesis response
+            let builder = context
+                .llm
+                .client()
+                .interaction()
+                .with_system_instruction(&config.prompts.synthesis_system)
+                .with_text(synthesis_prompt);
+
             let synth_timeout = remaining_time(start_time, config.total_timeout, "synthesis")?;
-            let (answer, synthesis_tokens) = with_timeout_and_cancellation(
-                synthesize(&query, &execution_result.results, &context, &config),
-                synth_timeout,
-                &context.cancellation_token,
-                || timeout_error(start_time, config.total_timeout, "synthesis"),
-            ).await?;
+            let synth_deadline = Instant::now() + synth_timeout;
+
+            let mut answer = String::new();
+            let stream = context.llm.generate_stream_with_cancellation(
+                builder,
+                context.cancellation_token.clone(),
+            );
+            futures_util::pin_mut!(stream);
+
+            while let Some(chunk_result) = stream.next().await {
+                // Check deadline
+                if Instant::now() > synth_deadline {
+                    Err(timeout_error(start_time, config.total_timeout, "synthesis"))?;
+                }
+
+                let chunk = chunk_result.map_err(|e| AgentError::SynthesisFailed(e.to_string()))?;
+                answer.push_str(&chunk.text);
+
+                // Yield streaming chunk event
+                yield AgentUpdate::custom(
+                    EVENT_SYNTHESIS_CHUNK,
+                    chunk.text.clone(),
+                    json!({ "text": chunk.text }),
+                );
+            }
+
+            if answer.trim().is_empty() {
+                Err(AgentError::SynthesisFailed("Empty synthesis response".to_string()))?;
+            }
+
+            // Token count unavailable for streaming responses
+            let synthesis_tokens: Option<u32> = None;
 
             // Calculate final metadata
             let mut total_tokens = execution_result.total_tokens;
@@ -260,8 +304,15 @@ async fn decompose(
         "items": { "type": "string" }
     });
 
-    let request = LlmRequest::with_system(prompt, &config.prompts.decomposition_system)
-        .with_response_format(schema);
+    let request = context
+        .llm
+        .client()
+        .interaction()
+        .with_system_instruction(&config.prompts.decomposition_system)
+        .with_text(prompt)
+        .with_response_format(schema)
+        .build()
+        .map_err(|e| AgentError::Other(e.to_string()))?;
 
     let response = context
         .llm
@@ -343,10 +394,23 @@ async fn execute_parallel(
                 None => None,
             };
 
-            let mut request = LlmRequest::with_system(&query, &sub_query_system);
+            let mut builder = llm
+                .client()
+                .interaction()
+                .with_system_instruction(&sub_query_system)
+                .with_text(&query);
             if use_google_search {
-                request = request.with_google_search();
+                builder = builder.with_google_search();
             }
+            let request = match builder.build() {
+                Ok(r) => r,
+                Err(e) => {
+                    let _ = tx
+                        .send((id, Err(format!("Failed to build request: {e}"))))
+                        .await;
+                    return;
+                }
+            };
 
             // Execute LLM call with cancellation support
             let result = match llm
@@ -511,42 +575,6 @@ async fn execute_parallel(
         updates,
         aborted_early,
     }
-}
-
-/// Synthesize sub-query results into a final answer
-async fn synthesize(
-    original_query: &str,
-    results: &[String],
-    context: &AgentContext,
-    config: &ResearchConfig,
-) -> Result<(String, Option<u32>), AgentError> {
-    let findings = results
-        .iter()
-        .enumerate()
-        .map(|(i, r)| format!("Finding {}:\n{}", i + 1, r))
-        .collect::<Vec<_>>()
-        .join("\n\n---\n\n");
-
-    let prompt = config.prompts.render_synthesis(original_query, &findings);
-
-    let request = LlmRequest::with_system(prompt, &config.prompts.synthesis_system);
-
-    let response = context
-        .llm
-        .generate(request)
-        .await
-        .map_err(|e| AgentError::SynthesisFailed(e.to_string()))?;
-
-    let response_text = response.text().unwrap_or("");
-    if response_text.trim().is_empty() {
-        return Err(AgentError::SynthesisFailed(
-            "Empty synthesis response".to_string(),
-        ));
-    }
-
-    let tokens_used = extract_total_tokens(&response);
-
-    Ok((response_text.to_string(), tokens_used))
 }
 
 #[cfg(test)]

@@ -128,18 +128,16 @@ impl TrajectoryBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::trajectory::data::{SerializableLlmRequest, SerializableStreamChunk};
+    use crate::trajectory::data::SerializableStreamChunk;
     use crate::update::ResultMetadata;
     use serde_json::json;
 
-    fn sample_request() -> SerializableLlmRequest {
-        SerializableLlmRequest {
-            prompt: "Test prompt".to_string(),
-            turns: None,
-            system_instruction: None,
-            use_google_search: false,
-            response_format: None,
-        }
+    fn sample_request() -> serde_json::Value {
+        json!({
+            "prompt": "Test prompt",
+            "system_instruction": null,
+            "use_google_search": false
+        })
     }
 
     fn sample_step() -> TrajectoryStep {

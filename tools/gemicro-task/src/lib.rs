@@ -135,7 +135,7 @@ impl TaskContext {
 /// use std::sync::{Arc, RwLock};
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let genai_client = genai_rs::Client::builder("api-key".to_string()).build()?;
+/// let genai_client = genai_rs::Client::builder("api-key".to_string()).build().map_err(|e| AgentError::Other(e.to_string()))?;
 /// let llm = LlmClient::new(genai_client, LlmConfig::default());
 /// let registry = Arc::new(RwLock::new(AgentRegistry::new()));
 /// let (task, _task_context) = Task::new(registry, Arc::new(llm));

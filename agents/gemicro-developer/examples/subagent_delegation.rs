@@ -19,7 +19,7 @@
 use futures_util::StreamExt;
 use gemicro_bash::Bash;
 use gemicro_core::tool::{AutoApprove, ToolRegistry};
-use gemicro_core::{Agent, AgentContext, LlmClient, LlmConfig, MODEL};
+use gemicro_core::{Agent, AgentContext, AgentError, LlmClient, LlmConfig, MODEL};
 use gemicro_critique::CritiqueAgent;
 use gemicro_deep_research::{DeepResearchAgent, ResearchConfig};
 use gemicro_developer::{DeveloperAgent, DeveloperConfig};
@@ -92,7 +92,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_temperature(0.7);
 
     // Create LLM client for Task tool (needs Arc for sharing)
-    let genai_client_for_task = genai_rs::Client::builder(api_key.clone()).build()?;
+    let genai_client_for_task = genai_rs::Client::builder(api_key.clone())
+        .build()
+        .map_err(|e| AgentError::Other(e.to_string()))?;
     let llm_for_task = Arc::new(LlmClient::new(genai_client_for_task, llm_config.clone()));
 
     // Register subagents using factory closures
@@ -141,7 +143,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
 
     // Create a separate LLM client for the agent context
-    let genai_client = genai_rs::Client::builder(api_key).build()?;
+    let genai_client = genai_rs::Client::builder(api_key)
+        .build()
+        .map_err(|e| AgentError::Other(e.to_string()))?;
     let llm = LlmClient::new(genai_client, llm_config);
 
     // Create context

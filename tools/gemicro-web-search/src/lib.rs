@@ -6,7 +6,7 @@
 
 use async_trait::async_trait;
 use gemicro_core::tool::{Tool, ToolError, ToolResult};
-use gemicro_core::{LlmClient, LlmRequest};
+use gemicro_core::LlmClient;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
@@ -100,8 +100,15 @@ impl Tool for WebSearch {
         }
 
         // Build request with Google Search grounding enabled
-        let request =
-            LlmRequest::with_system(query, SEARCH_SYSTEM_INSTRUCTION).with_google_search();
+        let request = self
+            .llm
+            .client()
+            .interaction()
+            .with_system_instruction(SEARCH_SYSTEM_INSTRUCTION)
+            .with_text(query)
+            .with_google_search()
+            .build()
+            .map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;
 
         // Execute the grounded search
         let response = self

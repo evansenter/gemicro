@@ -51,28 +51,43 @@ The `LlmClient` wraps genai_rs to provide:
 - **Timeout enforcement**: Per-request timeout handling
 
 ```rust
-// Standard usage - goes through LlmClient
-let response = context.llm.generate(LlmRequest::new("What is 2+2?")).await?;
+// Standard usage - build with InteractionBuilder, execute with generate()
+let request = context.llm.client().interaction()
+    .user_text("What is 2+2?")
+    .build();
+let response = context.llm.generate(request).await?;
 
 // With function calling (callback API - handles loop internally)
+let request = context.llm.client().interaction()
+    .system_instruction(system_prompt)
+    .user_text(query)
+    .functions(&function_declarations)
+    .store(true)  // Enable continuation
+    .build();
 let result = context.llm.generate_with_tools(
-    LlmRequest::with_system(query, system_prompt)
-        .with_functions(function_declarations),
+    request,
     |fc| async move { execute_tool(&fc.name, &fc.args).await },
     10,  // max_turns
     &cancellation_token,
 ).await?;
 
 // Or use primitives for fine-grained control (event emission, custom flow)
-let response = context.llm.generate(
-    LlmRequest::with_system(query, system_prompt)
-        .with_functions(function_declarations)
-).await?;
+let request = context.llm.client().interaction()
+    .system_instruction(system_prompt)
+    .user_text(query)
+    .functions(&function_declarations)
+    .store(true)
+    .build();
+let response = context.llm.generate(request).await?;
 
 // Continuation (sending function results back)
-let response = context.llm.generate(
-    LlmRequest::continuation(interaction_id, functions, results)
-).await?;
+let continuation = context.llm.client().interaction()
+    .previous_interaction_id(interaction_id)
+    .functions(&function_declarations)
+    .function_results(results)
+    .store(true)
+    .build();
+let response = context.llm.generate(continuation).await?;
 ```
 
 #### Function Calling API Levels
@@ -80,8 +95,8 @@ let response = context.llm.generate(
 | API | Use When |
 |-----|----------|
 | `generate_with_tools()` | Simple callback-based tool execution, no per-tool events needed |
-| `with_functions()` + `continuation()` | Streaming agents that emit per-tool events (PromptAgent) |
-| `client()` | Advanced optimizations like skipping function re-declaration |
+| `InteractionBuilder` + `generate()` | Streaming agents that emit per-tool events (PromptAgent) |
+| Direct `client().interaction()` | Advanced optimizations like skipping function re-declaration |
 
 #### Escape Hatch: `client()`
 
@@ -165,14 +180,23 @@ The adapter:
 Single or multi-turn LLM calls with optional tools:
 
 ```rust
-let request = LlmRequest::with_system(&query, &system_prompt)
-    .with_functions(declarations);
+let request = context.llm.client().interaction()
+    .system_instruction(&system_prompt)
+    .user_text(&query)
+    .functions(&declarations)
+    .store(true)
+    .build();
 let response = context.llm.generate(request).await?;
 
 // If function calls returned, execute and continue
 if !response.function_calls().is_empty() {
     // Execute tools, collect results
-    let continuation = LlmRequest::continuation(id, declarations, results);
+    let continuation = context.llm.client().interaction()
+        .previous_interaction_id(id)
+        .functions(&declarations)
+        .function_results(results)
+        .store(true)
+        .build();
     let response = context.llm.generate(continuation).await?;
 }
 ```

@@ -64,7 +64,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     // Create LLM client with cancellation support
-    let genai_client = genai_rs::Client::builder(api_key).build()?;
+    let genai_client = genai_rs::Client::builder(api_key)
+        .build()
+        .map_err(|e| AgentError::Other(e.to_string()))?;
     let llm_config = LlmConfig::default()
         .with_timeout(Duration::from_secs(60))
         .with_max_tokens(1024)

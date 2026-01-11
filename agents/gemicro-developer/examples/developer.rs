@@ -14,7 +14,7 @@
 use futures_util::StreamExt;
 use gemicro_bash::Bash;
 use gemicro_core::tool::{AutoApprove, ToolRegistry};
-use gemicro_core::{Agent, AgentContext, LlmClient, LlmConfig, MODEL};
+use gemicro_core::{Agent, AgentContext, AgentError, LlmClient, LlmConfig, MODEL};
 use gemicro_developer::{DeveloperAgent, DeveloperConfig};
 use gemicro_file_read::FileRead;
 use gemicro_glob::Glob;
@@ -100,7 +100,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
 
     // Create LLM client
-    let genai_client = genai_rs::Client::builder(api_key).build()?;
+    let genai_client = genai_rs::Client::builder(api_key)
+        .build()
+        .map_err(|e| AgentError::Other(e.to_string()))?;
     let llm_config = LlmConfig::default()
         .with_timeout(Duration::from_secs(60))
         .with_max_tokens(4096)

@@ -70,8 +70,7 @@ pub use context::{ContextLevel, ContextUsage, DEFAULT_CONTEXT_WINDOW, DEFAULT_WA
 pub use error::{AgentError, GemicroError, LlmError};
 pub use history::{ConversationHistory, HistoryEntry};
 pub use llm::{
-    FunctionCallInfo, GenerateWithToolsResponse, LlmClient, LlmRequest, LlmStreamChunk, Role, Turn,
-    TurnContent,
+    FunctionCallInfo, GenerateWithToolsResponse, LlmClient, LlmStreamChunk, Role, Turn, TurnContent,
 };
 pub use mock_llm::MockLlmClient;
 pub use tool::{
@@ -81,8 +80,8 @@ pub use tool::{
 };
 pub use tracking::{DefaultTracker, ExecutionTracking};
 pub use trajectory::{
-    LlmResponseData, SerializableLlmRequest, SerializableStreamChunk, Trajectory,
-    TrajectoryBuilder, TrajectoryMetadata, TrajectoryStep, SCHEMA_VERSION,
+    LlmResponseData, SerializableStreamChunk, Trajectory, TrajectoryBuilder, TrajectoryMetadata,
+    TrajectoryStep, SCHEMA_VERSION,
 };
 pub use update::{AgentUpdate, FinalResult, ResultMetadata};
 pub use utils::{extract_total_tokens, first_sentence, truncate, truncate_with_count};
