@@ -1,24 +1,5 @@
-# Build optimization for faster development cycles
+# Fast linker configuration for faster builds
 # See: https://github.com/evansenter/gemicro/issues/251
 
-# === OPTIONAL: Fast Linker Configuration ===
-# Uncomment ONE of the following sections based on your system.
-# These can provide 30-50% faster linking but require additional tools.
-#
-# --- Option 1: lld (recommended, requires: sudo apt install lld clang) ---
-# [target.x86_64-unknown-linux-gnu]
-# linker = "clang"
-# rustflags = ["-C", "link-arg=-fuse-ld=lld"]
-#
-# [target.aarch64-unknown-linux-gnu]
-# linker = "clang"
-# rustflags = ["-C", "link-arg=-fuse-ld=lld"]
-#
-# --- Option 2: mold (fastest, requires: sudo apt install mold) ---
-# [target.x86_64-unknown-linux-gnu]
-# linker = "clang"
-# rustflags = ["-C", "link-arg=-fuse-ld=mold"]
-#
-# --- Option 3: gold (available on most systems) ---
-# [target.x86_64-unknown-linux-gnu]
-# rustflags = ["-C", "link-arg=-fuse-ld=gold"]
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]

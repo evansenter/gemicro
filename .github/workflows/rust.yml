@@ -17,6 +17,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Install mold linker
+        run: sudo apt-get update && sudo apt-get install -y mold
       - uses: Swatinem/rust-cache@v2
       - name: Check workspace
         run: cargo check --workspace --all-targets --all-features
@@ -27,6 +29,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Install mold linker
+        run: sudo apt-get update && sudo apt-get install -y mold
       - uses: Swatinem/rust-cache@v2
       - name: Run unit tests
         run: cargo test --workspace --verbose
@@ -53,6 +57,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Install mold linker
+        run: sudo apt-get update && sudo apt-get install -y mold
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: integration-${{ matrix.group }}
