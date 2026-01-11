@@ -44,15 +44,15 @@ make test-all   # Full suite including integration tests (requires GEMINI_API_KE
 
 ### During Development: Target Changed Crates
 
-Full suite runs 26 crates (~2-3 min). Target changed crates for fast iteration; CI catches the rest:
+Don't run the full suite after every change. Target only the crates you modified:
 
 ```bash
-cargo nextest run -p gemicro-core                 # Single crate (~3s vs ~15s full)
+cargo nextest run -p gemicro-core                    # Single crate (~3s)
 cargo nextest run -p gemicro-core -p gemicro-runner  # Multiple crates
-cargo nextest run test_name                       # Single test by name
+cargo nextest run test_name                          # Single test by name
 ```
 
-Run `make check` once before `git push`, not after every change.
+Run `make check` once before `git push`. CI catches cross-crate issues.
 
 ### Running Examples
 
