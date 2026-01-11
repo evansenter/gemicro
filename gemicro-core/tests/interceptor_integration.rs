@@ -52,7 +52,7 @@ async fn test_interceptors_integrated_with_adapter() {
     let tool = Arc::new(TestTool);
     let adapter = ToolCallableAdapter::new(tool).with_interceptors(interceptors);
 
-    // Execute via adapter (as rust-genai would)
+    // Execute via adapter (as genai-rs would)
     let result = adapter.call(json!({"input": "test"})).await.unwrap();
     assert_eq!(result.as_str().unwrap(), "Result: test");
 }

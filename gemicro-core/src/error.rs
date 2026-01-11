@@ -130,7 +130,7 @@ impl AgentError {
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum LlmError {
-    /// Error from the underlying rust-genai library
+    /// Error from the underlying genai-rs library
     #[error("GenAI error: {0}")]
     GenAi(genai_rs::GenaiError),
 

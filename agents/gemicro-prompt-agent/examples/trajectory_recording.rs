@@ -111,7 +111,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let request = LlmRequest::new("Any prompt - the recorded response is returned");
     let response = mock.generate(request).await?;
 
-    // Extract text from rust-genai's InteractionResponse structure
+    // Extract text from genai-rs's InteractionResponse structure
     // The response has outputs: [{type: "thought"}, {type: "text", text: "..."}]
     let text = response
         .get("outputs")

@@ -30,13 +30,13 @@ pub struct GenerateWithToolsResponse {
     pub turns: usize,
 }
 
-/// LLM client wrapping rust-genai with timeout and configuration
+/// LLM client wrapping genai-rs with timeout and configuration
 ///
 /// Optionally supports trajectory recording for offline replay and evaluation.
 /// Recording is disabled by default for zero overhead. Use [`LlmClient::with_recording`]
 /// to enable it.
 pub struct LlmClient {
-    /// Underlying rust-genai client
+    /// Underlying genai-rs client
     client: genai_rs::Client,
 
     /// LLM configuration (timeout, tokens, temperature, etc.)
@@ -68,7 +68,7 @@ impl std::fmt::Debug for LlmClient {
 }
 
 impl LlmClient {
-    /// Create a new LLM client with the given rust-genai client and configuration
+    /// Create a new LLM client with the given genai-rs client and configuration
     ///
     /// Recording is disabled by default. Use [`with_recording`](Self::with_recording)
     /// to create a client that captures LLM interactions.

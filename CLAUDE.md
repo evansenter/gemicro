@@ -26,7 +26,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository Overview
 
-Gemicro is a CLI agent exploration platform for AI agent patterns, powered by Gemini API via rust-genai.
+Gemicro is a CLI agent exploration platform for AI agent patterns, powered by Gemini API via genai-rs.
 
 **Architecture**: 26-crate workspace (7 agents, 10 tools, 5 hooks, 4 core)
 
@@ -53,7 +53,7 @@ cargo run -p gemicro-deep-research --example deep_research  # Run example
 ```bash
 export GEMINI_API_KEY="your-api-key"  # Required for integration tests
 
-# Debug rust-genai HTTP traffic
+# Debug genai-rs HTTP traffic
 LOUD_WIRE=1 cargo run -p gemicro-developer --example developer
 ```
 
@@ -157,28 +157,28 @@ Use `ignore` for examples that compile but require runtime dependencies (API key
 
 ## Dependencies
 
-- **rust-genai**: Git dependency (`evansenter/rust-genai`, main branch)
+- **genai-rs**: Git dependency (`evansenter/genai-rs`, main branch)
 - **tokio**: Async runtime
 - **async-stream**: Streaming agent implementations
 
-### Updating rust-genai
+### Updating genai-rs
 
-After changes merge to rust-genai main, run `cargo update -p genai-rs` to pull them into gemicro. Check for breaking changes in the rust-genai changelog before updating.
+After changes merge to genai-rs main, run `cargo update -p genai-rs` to pull them into gemicro. Check for breaking changes in the genai-rs changelog before updating.
 
 ## Model Selection
 
 Always use `gemini-3.0-flash-preview` as the default model. Do not use older models like `gemini-2.0-flash`.
 
-## rust-genai Integration
+## genai-rs Integration
 
 | Layer | Responsibility |
 |-------|----------------|
-| **rust-genai** | Gemini API client, function calling, streaming |
+| **genai-rs** | Gemini API client, function calling, streaming |
 | **gemicro** | Agent patterns, observability, tool orchestration |
 
-Use rust-genai types directly when passing through. Wrap when adding functionality (recording, metadata).
+Use genai-rs types directly when passing through. Wrap when adding functionality (recording, metadata).
 
-**Don't add to gemicro**: Alternative LLM backends, Gemini API wrappers, complex workarounds (fix rust-genai instead).
+**Don't add to gemicro**: Alternative LLM backends, Gemini API wrappers, complex workarounds (fix genai-rs instead).
 
 ## Troubleshooting
 

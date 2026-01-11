@@ -110,7 +110,7 @@ impl ToolRegistry {
 
     /// Get FunctionDeclarations for tools matching a filter.
     ///
-    /// Useful for rust-genai integration where you need to pass
+    /// Useful for genai-rs integration where you need to pass
     /// function declarations to the LLM.
     pub fn to_function_declarations(&self, tool_set: &ToolSet) -> Vec<FunctionDeclaration> {
         self.filter(tool_set)

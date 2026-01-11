@@ -2,7 +2,7 @@
 
 **CLI agent exploration platform for experimenting with AI agent implementation patterns**
 
-Gemicro allows you to explore and interact with different AI agent patterns through a command-line interface, powered by the Gemini API via the [rust-genai](https://github.com/evansenter/rust-genai) library.
+Gemicro allows you to explore and interact with different AI agent patterns through a command-line interface, powered by the Gemini API via the [genai-rs](https://github.com/evansenter/genai-rs) library.
 
 ## Why Gemicro?
 

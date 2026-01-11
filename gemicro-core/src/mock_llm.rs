@@ -186,7 +186,7 @@ impl MockLlmClient {
                 }
                 LlmResponseData::Buffered(response) => {
                     // Fallback: if buffered response, yield the full response as one chunk
-                    // rust-genai InteractionResponse: { "outputs": [{"type": "text", "text": "..."}] }
+                    // genai-rs InteractionResponse: { "outputs": [{"type": "text", "text": "..."}] }
                     let text = response
                         .get("outputs")
                         .and_then(|outputs| outputs.as_array())
@@ -227,7 +227,7 @@ mod tests {
                 use_google_search: false,
                 response_format: None,
             },
-            // Use rust-genai InteractionResponse structure
+            // Use genai-rs InteractionResponse structure
             response: LlmResponseData::Buffered(json!({
                 "outputs": [{"type": "text", "text": "The answer is 4."}],
                 "usage": {"total_tokens": 10}
@@ -292,7 +292,7 @@ mod tests {
         assert_eq!(mock.step_count(), 2);
     }
 
-    /// Helper to extract text from rust-genai InteractionResponse structure
+    /// Helper to extract text from genai-rs InteractionResponse structure
     fn extract_text(response: &serde_json::Value) -> Option<&str> {
         response
             .get("outputs")?

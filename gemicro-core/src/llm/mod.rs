@@ -1,6 +1,6 @@
-//! LLM client wrapper for rust-genai
+//! LLM client wrapper for genai-rs
 //!
-//! Provides a simplified interface to the rust-genai Interactions API with:
+//! Provides a simplified interface to the genai-rs Interactions API with:
 //! - Automatic timeout enforcement from config
 //! - Full access to `InteractionResponse` including `UsageMetadata`
 //! - Both buffered (`generate`) and streaming (`generate_stream`) modes
@@ -32,7 +32,7 @@ mod request;
 pub use client::{GenerateWithToolsResponse, LlmClient};
 pub use request::{LlmRequest, LlmStreamChunk};
 
-// Re-export Turn types from rust-genai for multi-turn conversation support
+// Re-export Turn types from genai-rs for multi-turn conversation support
 pub use genai_rs::{Role, Turn, TurnContent};
 
 // Re-export FunctionCallInfo for generate_with_tools callback signature
