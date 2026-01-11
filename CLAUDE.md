@@ -54,6 +54,14 @@ cargo nextest run test_name                          # Single test by name
 
 Run `make check` once before `git push`. CI catches cross-crate issues.
 
+### Nextest vs Cargo Test Flags
+
+| Purpose | cargo test | cargo nextest |
+|---------|-----------|---------------|
+| Include ignored | `-- --include-ignored` | `--run-ignored all` |
+| Single test | `test_name` | `test_name` (or `-E 'test(/regex/)'`) |
+| Release mode | `--release` | `--cargo-profile release` |
+
 ### Running Examples
 
 ```bash
