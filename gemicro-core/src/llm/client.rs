@@ -998,6 +998,52 @@ mod tests {
         assert!(!LlmError::Cancelled.is_retryable());
     }
 
+    // Tests for GenAi variant delegation to genai-rs is_retryable()
+    #[test]
+    fn test_is_retryable_genai_rate_limit() {
+        let genai_err = genai_rs::GenaiError::Api {
+            status_code: 429,
+            message: "Rate limited".to_string(),
+            request_id: None,
+            retry_after: Some(std::time::Duration::from_secs(60)),
+        };
+        assert!(LlmError::GenAi(genai_err).is_retryable());
+    }
+
+    #[test]
+    fn test_is_retryable_genai_server_error() {
+        let genai_err = genai_rs::GenaiError::Api {
+            status_code: 500,
+            message: "Internal server error".to_string(),
+            request_id: None,
+            retry_after: None,
+        };
+        assert!(LlmError::GenAi(genai_err).is_retryable());
+    }
+
+    #[test]
+    fn test_is_retryable_genai_timeout() {
+        let genai_err = genai_rs::GenaiError::Timeout(std::time::Duration::from_secs(30));
+        assert!(LlmError::GenAi(genai_err).is_retryable());
+    }
+
+    #[test]
+    fn test_is_not_retryable_genai_bad_request() {
+        let genai_err = genai_rs::GenaiError::Api {
+            status_code: 400,
+            message: "Invalid model".to_string(),
+            request_id: None,
+            retry_after: None,
+        };
+        assert!(!LlmError::GenAi(genai_err).is_retryable());
+    }
+
+    #[test]
+    fn test_is_not_retryable_genai_parse_error() {
+        let genai_err = genai_rs::GenaiError::Parse("Invalid SSE".to_string());
+        assert!(!LlmError::GenAi(genai_err).is_retryable());
+    }
+
     #[test]
     fn test_validate_request_empty_prompt() {
         let genai_client = genai_rs::Client::builder("test-key".to_string())
