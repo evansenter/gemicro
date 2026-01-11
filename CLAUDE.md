@@ -47,7 +47,7 @@ make test-all   # Full suite including integration tests (requires GEMINI_API_KE
 Don't run the full suite after every change. Target only the crates you modified:
 
 ```bash
-cargo nextest run -p gemicro-core                    # Single crate (~3s)
+cargo nextest run -p gemicro-core                    # Single crate (~30s)
 cargo nextest run -p gemicro-core -p gemicro-runner  # Multiple crates
 cargo nextest run test_name                          # Single test by name
 ```
