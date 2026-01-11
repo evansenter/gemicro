@@ -7,6 +7,7 @@ mod common;
 
 use common::{create_test_client, get_api_key};
 use futures_util::StreamExt;
+use gemicro_core::MODEL;
 use genai_rs::Turn;
 
 #[tokio::test]
@@ -21,6 +22,7 @@ async fn test_generate_simple_prompt() {
     let request = client
         .client()
         .interaction()
+        .with_model(MODEL)
         .with_text("What is 2 + 2? Reply with just the number.")
         .build()
         .unwrap();
@@ -64,6 +66,7 @@ async fn test_generate_with_system_instruction() {
     let request = client
         .client()
         .interaction()
+        .with_model(MODEL)
         .with_system_instruction("You are a helpful assistant. Always respond in exactly one word.")
         .with_text("What is the capital of France?")
         .build()
@@ -102,6 +105,7 @@ async fn test_generate_stream_simple_prompt() {
     let builder = client
         .client()
         .interaction()
+        .with_model(MODEL)
         .with_text("Count from 1 to 5, one number per line.");
 
     let stream = client.generate_stream(builder);
@@ -154,6 +158,7 @@ async fn test_generate_stream_with_system_instruction() {
     let builder = client
         .client()
         .interaction()
+        .with_model(MODEL)
         .with_system_instruction("You are a pirate. Always respond in pirate speak.")
         .with_text("Say hello");
 
@@ -204,6 +209,7 @@ async fn test_google_search_grounding() {
     let request = client
         .client()
         .interaction()
+        .with_model(MODEL)
         .with_text("What is today's date?")
         .with_google_search()
         .build()
@@ -269,6 +275,7 @@ async fn test_structured_output_response_format() {
     let request = client
         .client()
         .interaction()
+        .with_model(MODEL)
         .with_text("What is the capital of France? Respond with high confidence.")
         .with_response_format(schema)
         .build()
@@ -336,6 +343,7 @@ async fn test_generate_with_turns() {
     let request = client
         .client()
         .interaction()
+        .with_model(MODEL)
         .with_turns(history)
         .with_text("And what is that multiplied by 3? Just the number please.")
         .build()
