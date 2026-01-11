@@ -52,7 +52,7 @@ cargo nextest run -p gemicro-core -p gemicro-runner  # Multiple crates
 cargo nextest run test_name                       # Single test by name
 ```
 
-Save `make check` for pre-push validation.
+Run `make check` once before `git push`, not after every change.
 
 ### Running Examples
 
