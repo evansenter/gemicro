@@ -44,7 +44,7 @@ make test-all   # Full suite including integration tests (requires GEMINI_API_KE
 
 ### During Development: Target Changed Crates
 
-The workspace has 26 crates. `make test` runs all of them. During development, test only crates you changed:
+Full suite runs 26 crates (~2-3 min). Target changed crates for fast iteration; CI catches the rest:
 
 ```bash
 cargo nextest run -p gemicro-core                 # Single crate (~3s vs ~15s full)
