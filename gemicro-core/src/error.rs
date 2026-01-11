@@ -163,6 +163,36 @@ pub enum LlmError {
     Other(String),
 }
 
+impl LlmError {
+    /// Get the retry-after duration if this is a rate limit error.
+    ///
+    /// Returns `Some(Duration)` if the underlying GenAI error has a Retry-After
+    /// header (typically from a 429 response). Use this for smarter backoff.
+    ///
+    /// Returns `None` for non-rate-limit errors or if no Retry-After was provided.
+    pub fn retry_after(&self) -> Option<std::time::Duration> {
+        match self {
+            LlmError::GenAi(e) => e.retry_after(),
+            _ => None,
+        }
+    }
+
+    /// Check if this error is retryable.
+    ///
+    /// Returns `true` for transient errors that might succeed on retry:
+    /// - Timeouts
+    /// - Rate limits
+    /// - GenAI errors that are marked as retryable (5xx, network issues, etc.)
+    pub fn is_retryable(&self) -> bool {
+        match self {
+            LlmError::Timeout(_) => true,
+            LlmError::RateLimit(_) => true,
+            LlmError::GenAi(e) => e.is_retryable(),
+            _ => false,
+        }
+    }
+}
+
 impl From<genai_rs::GenaiError> for LlmError {
     fn from(error: genai_rs::GenaiError) -> Self {
         // Map GenaiError::Timeout to LlmError::Timeout for consistent API

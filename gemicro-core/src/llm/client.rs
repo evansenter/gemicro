@@ -271,15 +271,19 @@ impl LlmClient {
         for attempt in 0..=self.config.max_retries {
             match self.generate_once(&request).await {
                 Ok(response) => return Ok(response),
-                Err(e) if Self::is_retryable(&e) && attempt < self.config.max_retries => {
+                Err(e) if e.is_retryable() && attempt < self.config.max_retries => {
                     log::warn!(
                         "LLM request failed (attempt {}/{}): {}, retrying...",
                         attempt + 1,
                         self.config.max_retries + 1,
                         e
                     );
+                    // Use server-specified retry delay if available, otherwise exponential backoff
+                    let delay = e
+                        .retry_after()
+                        .unwrap_or_else(|| self.config.retry_delay(attempt));
                     last_error = Some(e);
-                    tokio::time::sleep(self.config.retry_delay(attempt)).await;
+                    tokio::time::sleep(delay).await;
                 }
                 Err(e) => return Err(e),
             }
@@ -342,18 +346,22 @@ impl LlmClient {
 
             match result {
                 Ok(response) => return Ok(response),
-                Err(e) if Self::is_retryable(&e) && attempt < self.config.max_retries => {
+                Err(e) if e.is_retryable() && attempt < self.config.max_retries => {
                     log::warn!(
                         "LLM request failed (attempt {}/{}): {}, retrying...",
                         attempt + 1,
                         self.config.max_retries + 1,
                         e
                     );
+                    // Use server-specified retry delay if available, otherwise exponential backoff
+                    let delay = e
+                        .retry_after()
+                        .unwrap_or_else(|| self.config.retry_delay(attempt));
                     last_error = Some(e);
 
                     // Race retry delay against cancellation
                     tokio::select! {
-                        _ = tokio::time::sleep(self.config.retry_delay(attempt)) => {}
+                        _ = tokio::time::sleep(delay) => {}
                         _ = cancellation_token.cancelled() => {
                             return Err(LlmError::Cancelled);
                         }
@@ -567,23 +575,6 @@ impl LlmClient {
         }
 
         Ok(response)
-    }
-
-    /// Determine if an error is retryable
-    fn is_retryable(error: &LlmError) -> bool {
-        match error {
-            // Transient failures that may succeed on retry
-            LlmError::Timeout(_) => true,
-            LlmError::RateLimit(_) => true,
-            // API errors may be transient (network issues, server overload)
-            LlmError::GenAi(_) => true,
-            // These are not retryable
-            LlmError::InvalidRequest(_) => false,
-            LlmError::ResponseProcessing(_) => false,
-            LlmError::NoContent => false,
-            LlmError::Cancelled => false,
-            LlmError::Other(_) => false,
-        }
     }
 
     /// Generate a streaming response
@@ -974,38 +965,32 @@ mod tests {
 
     #[test]
     fn test_is_retryable_timeout() {
-        assert!(LlmClient::is_retryable(&LlmError::Timeout(5000)));
+        assert!(LlmError::Timeout(5000).is_retryable());
     }
 
     #[test]
     fn test_is_retryable_rate_limit() {
-        assert!(LlmClient::is_retryable(&LlmError::RateLimit(
-            "Too many requests".to_string()
-        )));
+        assert!(LlmError::RateLimit("Too many requests".to_string()).is_retryable());
     }
 
     #[test]
     fn test_is_not_retryable_invalid_request() {
-        assert!(!LlmClient::is_retryable(&LlmError::InvalidRequest(
-            "Bad prompt".to_string()
-        )));
+        assert!(!LlmError::InvalidRequest("Bad prompt".to_string()).is_retryable());
     }
 
     #[test]
     fn test_is_not_retryable_no_content() {
-        assert!(!LlmClient::is_retryable(&LlmError::NoContent));
+        assert!(!LlmError::NoContent.is_retryable());
     }
 
     #[test]
     fn test_is_not_retryable_other() {
-        assert!(!LlmClient::is_retryable(&LlmError::Other(
-            "Unknown error".to_string()
-        )));
+        assert!(!LlmError::Other("Unknown error".to_string()).is_retryable());
     }
 
     #[test]
     fn test_is_not_retryable_cancelled() {
-        assert!(!LlmClient::is_retryable(&LlmError::Cancelled));
+        assert!(!LlmError::Cancelled.is_retryable());
     }
 
     #[test]
