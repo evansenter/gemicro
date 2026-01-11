@@ -375,7 +375,7 @@ let service = GemicroToolService::new(registry)
     .with_interceptors(interceptors)
     .with_confirmation_handler(Arc::new(AutoApprove));
 
-// Use with rust-genai
+// Use with genai-rs
 client.interaction()
     .with_tool_service(Arc::new(service))
     .create_with_auto_functions()

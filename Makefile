@@ -11,13 +11,14 @@ fmt:
 clippy:
 	cargo clippy --workspace --all-targets --all-features -- -D warnings
 
-# Run unit and doc tests (matches CI)
+# Unit tests only (doctests run in CI - excluded locally for speed)
 test:
-	cargo test --workspace
+	cargo nextest run --workspace
 
-# Run all tests including LLM integration tests (requires GEMINI_API_KEY)
+# Full test suite including integration tests (requires GEMINI_API_KEY)
+# Doctests excluded locally - they add compile overhead and CI catches them
 test-all:
-	cargo test --workspace -- --include-ignored
+	cargo nextest run --workspace --run-ignored all
 
 # Build documentation
 docs:

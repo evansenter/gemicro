@@ -6,7 +6,7 @@
 //! # LOUD_WIRE Support
 //!
 //! When `LOUD_WIRE` environment variable is set, outputs pretty-printed
-//! colored JSON to stderr with the same formatting as rust-genai's wire
+//! colored JSON to stderr with the same formatting as genai-rs's wire
 //! debugging. This provides full visibility into tool arguments and results
 //! without truncation.
 //!
@@ -138,7 +138,7 @@ fn colorize_json(value: &Value) -> Option<String> {
 /// Logs both pre and post execution for complete audit trail.
 /// Uses the `log` crate by default. When `LOUD_WIRE` environment variable
 /// is set, outputs pretty-printed colored JSON to stderr (matching
-/// rust-genai's wire debugging format).
+/// genai-rs's wire debugging format).
 ///
 /// # Output Format
 ///

@@ -197,7 +197,7 @@ fn test_cli_token_counts_displayed() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    // Token counts should be displayed (now that rust-genai is fixed)
+    // Token counts should be displayed (now that genai-rs is fixed)
     assert!(
         stdout.contains("tokens)") || stdout.contains("Tokens used:"),
         "Token counts should be displayed in output"

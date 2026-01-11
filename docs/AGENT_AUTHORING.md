@@ -697,7 +697,7 @@ async fn test_prompt_agent_full_flow() {
 
 Run integration tests with:
 ```bash
-cargo test --package gemicro-prompt-agent -- --include-ignored
+cargo nextest run -p gemicro-prompt-agent --run-ignored all
 ```
 
 ## Registry Integration
@@ -957,9 +957,9 @@ impl Agent for MyToolAgent {
 }
 ```
 
-### Using rust-genai's Automatic Function Calling
+### Using genai-rs's Automatic Function Calling
 
-For LLM-driven tool use (where the model decides which tools to call), use `GemicroToolService` with rust-genai:
+For LLM-driven tool use (where the model decides which tools to call), use `GemicroToolService` with genai-rs:
 
 ```rust
 use gemicro_core::tool::{GemicroToolService, ToolSet};
@@ -970,7 +970,7 @@ impl Agent for PromptAgent {
         Box::pin(try_stream! {
             let tools = context.tools.clone().unwrap();
 
-            // Create tool service for rust-genai
+            // Create tool service for genai-rs
             let service = Arc::new(
                 GemicroToolService::new(tools)
                     .with_filter(ToolSet::All)

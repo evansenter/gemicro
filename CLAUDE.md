@@ -26,7 +26,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository Overview
 
-Gemicro is a CLI agent exploration platform for AI agent patterns, powered by Gemini API via rust-genai.
+Gemicro is a CLI agent exploration platform for AI agent patterns, powered by Gemini API via genai-rs.
 
 **Architecture**: 26-crate workspace (7 agents, 10 tools, 5 hooks, 4 core)
 
@@ -35,17 +35,37 @@ Gemicro is a CLI agent exploration platform for AI agent patterns, powered by Ge
 ## Build Commands
 
 ```bash
-make check      # Format + clippy + tests (run before making a PR)
+make check      # Format + clippy + tests (pre-push gate)
 make fmt        # Check formatting
 make clippy     # Clippy with -D warnings
-make test       # Unit + doc tests
-make test-all   # Include LLM integration tests (requires GEMINI_API_KEY)
+make test       # Unit tests only (excludes doctests for speed)
+make test-all   # Full suite including integration tests (requires GEMINI_API_KEY)
 ```
 
+### During Development: Target Changed Crates
+
+Don't run the full suite after every change. Target only the crates you modified:
+
 ```bash
-cargo test test_name                              # Single test
-cargo test -p gemicro-runner                      # Specific crate
-cargo run -p gemicro-deep-research --example deep_research  # Run example
+cargo nextest run -p gemicro-core                    # Single crate (~30s)
+cargo nextest run -p gemicro-core -p gemicro-runner  # Multiple crates
+cargo nextest run test_name                          # Single test by name
+```
+
+Run `make check` once before `git push`. CI catches cross-crate issues.
+
+### Nextest vs Cargo Test Flags
+
+| Purpose | cargo test | cargo nextest |
+|---------|-----------|---------------|
+| Include ignored | `-- --include-ignored` | `--run-ignored all` |
+| Single test | `test_name` | `test_name` (or `-E 'test(/regex/)'`) |
+| Release mode | `--release` | `--cargo-profile release` |
+
+### Running Examples
+
+```bash
+cargo run -p gemicro-deep-research --example deep_research
 ```
 
 ## Environment
@@ -53,7 +73,7 @@ cargo run -p gemicro-deep-research --example deep_research  # Run example
 ```bash
 export GEMINI_API_KEY="your-api-key"  # Required for integration tests
 
-# Debug rust-genai HTTP traffic
+# Debug genai-rs HTTP traffic
 LOUD_WIRE=1 cargo run -p gemicro-developer --example developer
 ```
 
@@ -157,28 +177,28 @@ Use `ignore` for examples that compile but require runtime dependencies (API key
 
 ## Dependencies
 
-- **rust-genai**: Git dependency (`evansenter/rust-genai`, main branch)
+- **genai-rs**: Published on [crates.io](https://crates.io/crates/genai-rs)
 - **tokio**: Async runtime
 - **async-stream**: Streaming agent implementations
 
-### Updating rust-genai
+### Updating genai-rs
 
-After changes merge to rust-genai main, run `cargo update -p genai-rs` to pull them into gemicro. Check for breaking changes in the rust-genai changelog before updating.
+Bump the version in `Cargo.toml` when new releases are published. Check the [changelog](https://github.com/evansenter/genai-rs/releases) for breaking changes before updating.
 
 ## Model Selection
 
 Always use `gemini-3.0-flash-preview` as the default model. Do not use older models like `gemini-2.0-flash`.
 
-## rust-genai Integration
+## genai-rs Integration
 
 | Layer | Responsibility |
 |-------|----------------|
-| **rust-genai** | Gemini API client, function calling, streaming |
+| **genai-rs** | Gemini API client, function calling, streaming |
 | **gemicro** | Agent patterns, observability, tool orchestration |
 
-Use rust-genai types directly when passing through. Wrap when adding functionality (recording, metadata).
+Use genai-rs types directly when passing through. Wrap when adding functionality (recording, metadata).
 
-**Don't add to gemicro**: Alternative LLM backends, Gemini API wrappers, complex workarounds (fix rust-genai instead).
+**Don't add to gemicro**: Alternative LLM backends, Gemini API wrappers, complex workarounds (fix genai-rs instead).
 
 ## Troubleshooting
 

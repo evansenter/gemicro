@@ -21,7 +21,7 @@ Following Evergreen principles:
 | **One tool per crate** | Each tool is an independent crate in `tools/` |
 | **Minimal interface** | Tools implement a single `Tool` trait |
 | **Async execution** | Tools are async for I/O-bound operations |
-| **rust-genai integration** | Tools generate `FunctionDeclaration` for native function calling |
+| **genai-rs integration** | Tools generate `FunctionDeclaration` for native function calling |
 
 ## Quick Start Checklist
 
@@ -386,7 +386,7 @@ let specific = ToolSet::Specific(vec!["file_read".into(), "calculator".into()]);
 let safe = ToolSet::Except(vec!["bash".into()]);
 ```
 
-### Integration with rust-genai
+### Integration with genai-rs
 
 Tools automatically generate `FunctionDeclaration` for native function calling:
 
@@ -398,7 +398,7 @@ let registry = Arc::new(registry);
 let service = GemicroToolService::new(registry)
     .with_filter(ToolSet::All);
 
-// Use with rust-genai's interaction builder
+// Use with genai-rs's interaction builder
 client.interaction()
     .with_tool_service(Arc::new(service))
     .create_with_auto_functions()

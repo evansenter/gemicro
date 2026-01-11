@@ -10,7 +10,7 @@
 //! - **Async execution**: Tools use async for I/O-bound operations (web fetch, file read)
 //! - **Instance-based registry**: Tools are stateless, stored as instances not factories
 //! - **Per-agent filtering**: [`ToolSet`] allows agents to specify which tools they need
-//! - **rust-genai integration**: Tools can generate [`FunctionDeclaration`] for native function calling
+//! - **genai-rs integration**: Tools can generate [`FunctionDeclaration`] for native function calling
 //!
 //! # Example
 //!
@@ -375,10 +375,10 @@ pub enum ToolError {
 /// web fetching or file operations. For synchronous tools (like calculator),
 /// simply don't use `.await` in the implementation.
 ///
-/// # rust-genai Integration
+/// # genai-rs Integration
 ///
 /// Tools can generate a [`FunctionDeclaration`] via [`to_function_declaration`](Tool::to_function_declaration)
-/// for use with rust-genai's native function calling. The default implementation
+/// for use with genai-rs's native function calling. The default implementation
 /// builds this from the trait methods.
 #[async_trait]
 pub trait Tool: Send + Sync + fmt::Debug {
@@ -442,7 +442,7 @@ pub trait Tool: Send + Sync + fmt::Debug {
         )
     }
 
-    /// Generate a rust-genai FunctionDeclaration for this tool.
+    /// Generate a genai-rs FunctionDeclaration for this tool.
     ///
     /// The default implementation builds from [`name`](Tool::name),
     /// [`description`](Tool::description), and [`parameters_schema`](Tool::parameters_schema).

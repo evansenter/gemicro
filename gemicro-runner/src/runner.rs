@@ -281,7 +281,7 @@ impl AgentRunner {
     /// Execute an agent and capture a full trajectory for offline replay.
     ///
     /// This method:
-    /// - Creates a recording LLM client from the provided rust-genai client
+    /// - Creates a recording LLM client from the provided genai-rs client
     /// - Executes the agent while capturing all LLM interactions
     /// - Returns both execution metrics and a complete trajectory
     ///
@@ -292,7 +292,7 @@ impl AgentRunner {
     /// * `agent` - The agent to execute
     /// * `query` - The user's query
     /// * `agent_config` - Agent configuration as JSON (for trajectory metadata)
-    /// * `genai_client` - The rust-genai client to use
+    /// * `genai_client` - The genai-rs client to use
     /// * `llm_config` - LLM configuration
     ///
     /// # Returns

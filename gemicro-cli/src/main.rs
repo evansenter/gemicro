@@ -79,6 +79,7 @@ async fn main() -> Result<()> {
     } else {
         // Safe to unwrap - validation ensures query exists when not interactive
         let query = args.query.as_ref().unwrap();
+        log::debug!("Starting single-query execution with agent: {}", args.agent);
 
         // Print header for single query mode
         // Note: Only hardcoded agents (deep_research, prompt_agent) are supported in single-query mode.

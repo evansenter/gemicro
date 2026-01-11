@@ -27,7 +27,7 @@ use genai_rs::InteractionResponse;
 /// # }
 /// ```
 pub fn extract_total_tokens(response: &InteractionResponse) -> Option<u32> {
-    // Delegate to rust-genai's native method
+    // Delegate to genai-rs's native method
     response.total_tokens()
 }
 
@@ -153,7 +153,7 @@ mod tests {
     }
 
     // Note: test_extract_total_tokens_negative was removed because
-    // rust-genai changed total_tokens from i32 to u32, making negative values impossible.
+    // genai-rs changed total_tokens from i32 to u32, making negative values impossible.
 
     #[test]
     fn test_truncate_short_string() {

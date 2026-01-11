@@ -49,7 +49,7 @@ impl ToolCall {
 /// User message - the trigger that starts agent execution.
 ///
 /// Designed for multimodal extension. Currently text-only, but the structure
-/// allows adding image/audio/video support when rust-genai's multimodal
+/// allows adding image/audio/video support when genai-rs's multimodal
 /// capabilities are integrated.
 ///
 /// # Why This Is Not a Tool Call

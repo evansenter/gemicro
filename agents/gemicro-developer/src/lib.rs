@@ -1,6 +1,6 @@
 //! Developer agent with explicit function calling for real-time tool events.
 //!
-//! Uses an explicit function calling loop (rather than rust-genai's automatic mode)
+//! Uses an explicit function calling loop (rather than genai-rs's automatic mode)
 //! to emit `tool_call_started` and `tool_result` events for real-time CLI feedback.
 //!
 //! # Architecture

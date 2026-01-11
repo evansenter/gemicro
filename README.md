@@ -2,7 +2,7 @@
 
 **CLI agent exploration platform for experimenting with AI agent implementation patterns**
 
-Gemicro allows you to explore and interact with different AI agent patterns through a command-line interface, powered by the Gemini API via the [rust-genai](https://github.com/evansenter/rust-genai) library.
+Gemicro allows you to explore and interact with different AI agent patterns through a command-line interface, powered by the Gemini API via the [genai-rs](https://github.com/evansenter/genai-rs) library.
 
 ## Why Gemicro?
 
@@ -219,15 +219,25 @@ cargo build --workspace
 # Build workspace
 cargo build --workspace
 
-# Run all quality gates (format, clippy, tests)
+# Run all quality gates (format, clippy, tests) - pre-push gate
 make check
 
 # Individual quality gates
 make fmt        # Check formatting
 make clippy     # Run clippy with -D warnings
-make test       # Run unit + doc tests
+make test       # Run unit + doc tests (uses cargo-nextest)
 make test-all   # Include LLM integration tests (requires GEMINI_API_KEY)
 ```
+
+**During development**, target only changed crates for faster feedback:
+
+```bash
+cargo nextest run -p gemicro-core              # Single crate (~3s vs ~15s full)
+cargo nextest run -p gemicro-core -p gemicro-runner  # Multiple crates
+cargo nextest run test_name                    # Single test by name
+```
+
+Install nextest: `cargo install cargo-nextest`
 
 ### Running Examples
 

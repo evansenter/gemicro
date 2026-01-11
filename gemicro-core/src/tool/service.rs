@@ -1,6 +1,6 @@
-//! GemicroToolService for rust-genai integration.
+//! GemicroToolService for genai-rs integration.
 //!
-//! Provides [`GemicroToolService`] which implements rust-genai's `ToolService` trait,
+//! Provides [`GemicroToolService`] which implements genai-rs's `ToolService` trait,
 //! enabling gemicro tools to work with `create_with_auto_functions()`.
 
 use super::{BatchConfirmationHandler, ToolCallableAdapter, ToolRegistry, ToolResult, ToolSet};
@@ -8,7 +8,7 @@ use crate::interceptor::{InterceptorChain, ToolCall};
 use genai_rs::{CallableFunction, ToolService};
 use std::sync::Arc;
 
-/// Gemicro's implementation of rust-genai's [`ToolService`].
+/// Gemicro's implementation of genai-rs's [`ToolService`].
 ///
 /// Combines [`ToolRegistry`] with [`ToolSet`] filtering and optional
 /// [`BatchConfirmationHandler`] for dangerous tools.
@@ -33,7 +33,7 @@ use std::sync::Arc;
 /// let service = GemicroToolService::new(Arc::new(registry))
 ///     .with_confirmation_handler(Arc::new(AutoApprove));
 ///
-/// // Use with rust-genai:
+/// // Use with genai-rs:
 /// // client.interaction()
 /// //     .with_tool_service(Arc::new(service))
 /// //     .create_with_auto_functions()

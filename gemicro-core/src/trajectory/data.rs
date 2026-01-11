@@ -48,13 +48,13 @@ impl LlmResponseData {
 
     /// Extract text content from either mode
     ///
-    /// For buffered mode, extracts text from rust-genai's InteractionResponse structure
+    /// For buffered mode, extracts text from genai-rs's InteractionResponse structure
     /// (outputs array with type="text" items).
     /// For streaming mode, concatenates all chunk texts.
     pub fn text(&self) -> Option<String> {
         match self {
             LlmResponseData::Buffered(v) => {
-                // rust-genai InteractionResponse structure:
+                // genai-rs InteractionResponse structure:
                 // { "outputs": [{"type": "thought"}, {"type": "text", "text": "..."}] }
                 v.get("outputs")
                     .and_then(|outputs| outputs.as_array())
@@ -317,7 +317,7 @@ mod tests {
         TrajectoryStep {
             phase: "test_phase".to_string(),
             request: sample_request(),
-            // Use rust-genai InteractionResponse structure
+            // Use genai-rs InteractionResponse structure
             response: LlmResponseData::Buffered(json!({
                 "outputs": [
                     {"type": "text", "text": "Paris is the capital of France."}
@@ -572,7 +572,7 @@ mod tests {
 
     #[test]
     fn test_llm_response_data_accessors() {
-        // Use rust-genai InteractionResponse structure
+        // Use genai-rs InteractionResponse structure
         let buffered = LlmResponseData::Buffered(json!({
             "outputs": [{"type": "text", "text": "Hello"}]
         }));

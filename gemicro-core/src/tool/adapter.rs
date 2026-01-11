@@ -1,14 +1,14 @@
-//! Adapter for integrating Tool trait with rust-genai.
+//! Adapter for integrating Tool trait with genai-rs.
 //!
 //! This module provides [`ToolCallableAdapter`] which bridges the gap between
-//! our async [`Tool`] trait and rust-genai's async `CallableFunction` trait.
+//! our async [`Tool`] trait and genai-rs's async `CallableFunction` trait.
 //!
 //! # Architecture: Why Interceptors Live Here
 //!
 //! The adapter is the **critical interception point** for tool execution:
 //!
 //! ```text
-//! LLM (via rust-genai)
+//! LLM (via genai-rs)
 //!     ↓ calls create_with_auto_functions()
 //! CallableFunction::call()  ← ONLY INTERCEPTION POINT
 //!     ↓ implemented by
@@ -19,12 +19,12 @@
 //!     └─ Post-interceptors (logging, metrics)
 //! ```
 //!
-//! When using rust-genai's automatic function calling, the LLM invokes
+//! When using genai-rs's automatic function calling, the LLM invokes
 //! `CallableFunction::call()` directly. There is no opportunity to intercept
 //! at the `Tool` or `ToolRegistry` level - those abstractions are bypassed.
 //!
 //! **Alternative designs considered:**
-//! - Interceptors in `ToolRegistry::execute()` ❌ Bypassed by rust-genai
+//! - Interceptors in `ToolRegistry::execute()` ❌ Bypassed by genai-rs
 //! - Interceptors in `Tool::execute()` ❌ Couples all tools to interceptor logic
 //! - Interceptors in `ToolCallableAdapter::call()` ✅ Single enforcement point
 //!
@@ -41,9 +41,9 @@ use genai_rs::{CallableFunction, FunctionDeclaration, FunctionError};
 use serde_json::Value;
 use std::sync::Arc;
 
-/// Adapter that wraps a [`Tool`] to implement rust-genai's `CallableFunction`.
+/// Adapter that wraps a [`Tool`] to implement genai-rs's `CallableFunction`.
 ///
-/// This enables using our Tool implementations with rust-genai's automatic
+/// This enables using our Tool implementations with genai-rs's automatic
 /// function calling via `create_with_auto_functions()`.
 ///
 /// Both `Tool::execute` and `CallableFunction::call` are async, so this adapter
@@ -66,14 +66,14 @@ use std::sync::Arc;
 /// let registry = ToolRegistry::new();
 /// let tool = registry.get("calculator").unwrap();
 ///
-/// // Create adapter for rust-genai integration
+/// // Create adapter for genai-rs integration
 /// let adapter = ToolCallableAdapter::new(tool);
 ///
 /// // With confirmation handler for dangerous tools
 /// let handler = Arc::new(AutoApprove);
 /// let adapter = adapter.with_confirmation_handler(handler);
 ///
-/// // Use with rust-genai's function calling
+/// // Use with genai-rs's function calling
 /// let declaration = adapter.declaration();
 /// ```
 #[derive(Debug, Clone)]
@@ -265,7 +265,7 @@ impl CallableFunction for ToolCallableAdapter {
 
         // Return content directly - it's already a Value.
         // Note: ToolResult::metadata is intentionally not returned here because
-        // rust-genai's CallableFunction expects a simple Value result that gets
+        // genai-rs's CallableFunction expects a simple Value result that gets
         // passed back to the LLM. Metadata is for observability/logging within
         // gemicro, not for LLM consumption.
         Ok(result.content)
@@ -275,7 +275,7 @@ impl CallableFunction for ToolCallableAdapter {
 /// Create adapters for all tools in a filtered set.
 ///
 /// Convenience function for converting a set of tools to CallableFunction
-/// implementations for use with rust-genai.
+/// implementations for use with genai-rs.
 ///
 /// # Arguments
 ///

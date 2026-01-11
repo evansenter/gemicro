@@ -29,11 +29,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-nextest
       - name: Install mold linker
         run: sudo apt-get update && sudo apt-get install -y mold
       - uses: Swatinem/rust-cache@v2
       - name: Run unit tests
-        run: cargo test --workspace --verbose
+        run: cargo nextest run --workspace
+      - name: Run doctests
+        run: cargo test --workspace --doc
 
   test-integration:
     name: Integration Tests (${{ matrix.group }})
@@ -57,6 +60,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-nextest
       - name: Install mold linker
         run: sudo apt-get update && sudo apt-get install -y mold
       - uses: Swatinem/rust-cache@v2
@@ -67,7 +71,7 @@ jobs:
           set -e
           for pkg in ${{ matrix.packages }}; do
             echo "::group::Running $pkg"
-            cargo test -p $pkg --verbose -- --include-ignored
+            cargo nextest run -p $pkg --run-ignored all
             echo "::endgroup::"
           done
         env:
