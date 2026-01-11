@@ -9,7 +9,7 @@
 //! # Example
 //!
 //! ```no_run
-//! use gemicro_core::{LlmClient, LlmConfig};
+//! use gemicro_core::{LlmClient, LlmConfig, MODEL};
 //!
 //! # async fn example() -> Result<(), gemicro_core::LlmError> {
 //! let genai_client = genai_rs::Client::builder("api-key".to_string()).build()?;
@@ -17,8 +17,9 @@
 //!
 //! // Build the request using genai-rs InteractionBuilder
 //! let request = client.client().interaction()
-//!     .user_text("What is the capital of France?")
-//!     .build();
+//!     .with_model(MODEL)
+//!     .with_text("What is the capital of France?")
+//!     .build()?;
 //!
 //! let response = client.generate(request).await?;
 //!

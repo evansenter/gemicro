@@ -216,18 +216,24 @@ impl LlmClient {
     /// Use this to build `InteractionRequest`s via the genai-rs `InteractionBuilder`:
     ///
     /// ```no_run
-    /// # use gemicro_core::{LlmClient, LlmConfig};
+    /// # use gemicro_core::{LlmClient, LlmConfig, MODEL};
     /// # let genai_client = genai_rs::Client::builder("key".to_string()).build().unwrap();
     /// # let client = LlmClient::new(genai_client, LlmConfig::default());
     /// // Simple request
     /// let request = client.client().interaction()
+    ///     .with_model(MODEL)
     ///     .with_text("Hello")
     ///     .with_system_instruction("Be helpful")
     ///     .build()
     ///     .unwrap();
+    /// ```
     ///
+    /// For function calling and continuations:
+    ///
+    /// ```text
     /// // With function calling
     /// let request = client.client().interaction()
+    ///     .with_model(MODEL)
     ///     .with_text("What time is it?")
     ///     .with_functions(function_declarations)
     ///     .with_store_enabled()  // Required for chaining
@@ -236,6 +242,7 @@ impl LlmClient {
     ///
     /// // Continuation after function call
     /// let request = client.client().interaction()
+    ///     .with_model(MODEL)
     ///     .with_previous_interaction(&interaction_id)
     ///     .with_content(function_results)
     ///     .with_functions(function_declarations)
