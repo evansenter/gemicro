@@ -697,7 +697,7 @@ async fn test_prompt_agent_full_flow() {
 
 Run integration tests with:
 ```bash
-cargo test --package gemicro-prompt-agent -- --include-ignored
+cargo nextest run -p gemicro-prompt-agent --run-ignored all
 ```
 
 ## Registry Integration

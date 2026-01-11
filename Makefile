@@ -11,13 +11,23 @@ fmt:
 clippy:
 	cargo clippy --workspace --all-targets --all-features -- -D warnings
 
-# Run unit and doc tests (matches CI)
+# Run unit and doc tests with nextest (parallel execution)
+# Falls back to cargo test if nextest not installed
 test:
-	cargo test --workspace
+	@if command -v cargo-nextest >/dev/null 2>&1; then \
+		cargo nextest run --workspace; \
+	else \
+		echo "cargo-nextest not found, using cargo test (install: cargo install cargo-nextest)"; \
+		cargo test --workspace; \
+	fi
 
 # Run all tests including LLM integration tests (requires GEMINI_API_KEY)
 test-all:
-	cargo test --workspace -- --include-ignored
+	@if command -v cargo-nextest >/dev/null 2>&1; then \
+		cargo nextest run --workspace --run-ignored all; \
+	else \
+		cargo test --workspace -- --include-ignored; \
+	fi
 
 # Build documentation
 docs:
