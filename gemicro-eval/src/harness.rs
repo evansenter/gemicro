@@ -372,13 +372,14 @@ async fn evaluate_question(
                     last_error = "Agent completed but produced no answer".to_string();
                 }
             }
-            Err(e) => {
+            Err((e, partial_metrics)) => {
                 last_error = format_agent_error(&e);
                 log::warn!(
-                    "Question {} attempt {}/{} failed: {}",
+                    "Question {} attempt {}/{} failed after {:?}: {}",
                     question.id,
                     retries + 1,
                     max_retries + 1,
+                    partial_metrics.total_duration,
                     last_error
                 );
             }

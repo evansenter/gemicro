@@ -1,0 +1,20 @@
+[package]
+name = "gemicro-loader"
+version = "0.1.0"
+edition = "2021"
+description = "Agent definition loaders for gemicro (markdown, TOML, etc.)"
+license = "MIT"
+
+[dependencies]
+# Core types (PromptAgentDef, ToolSet)
+gemicro-core = { path = "../gemicro-core" }
+
+# Serialization
+serde = { workspace = true }
+serde_yaml = "0.9"
+
+# Logging
+log = { workspace = true }
+
+[dev-dependencies]
+rstest = { workspace = true }

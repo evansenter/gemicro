@@ -70,7 +70,9 @@ const EVENT_TOOL_RESULT: &str = "tool_result";
 ///
 /// This limits how many times the agent can send function results back to the model.
 /// The initial LLM call is not counted, so total LLM calls = 1 + MAX_ITERATIONS.
-const MAX_ITERATIONS: usize = 10;
+///
+/// Note: A time-based limit would be more appropriate. See #249.
+const MAX_ITERATIONS: usize = 100;
 
 // ============================================================================
 // Configuration
@@ -106,6 +108,12 @@ pub struct PromptAgentConfig {
     /// Only used when `AgentContext::tools` is provided.
     /// Defaults to `ToolSet::All` (use all available tools).
     pub tool_filter: ToolSet,
+
+    /// Custom description for the agent.
+    ///
+    /// If set, this description is returned by `Agent::description()` instead
+    /// of the default. Used by markdown-defined agents.
+    pub description: Option<String>,
 }
 
 impl Default for PromptAgentConfig {
@@ -116,6 +124,7 @@ impl Default for PromptAgentConfig {
                 "You are a helpful assistant. Answer questions concisely and accurately."
                     .to_string(),
             tool_filter: ToolSet::All,
+            description: None,
         }
     }
 }
@@ -157,6 +166,26 @@ impl PromptAgentConfig {
     #[must_use]
     pub fn with_tool_filter(mut self, tool_filter: ToolSet) -> Self {
         self.tool_filter = tool_filter;
+        self
+    }
+
+    /// Set a custom description for the agent.
+    ///
+    /// When set, this description is returned by `Agent::description()` instead
+    /// of the default. This is used by markdown-defined agents to show the
+    /// description from the markdown frontmatter.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use gemicro_prompt_agent::PromptAgentConfig;
+    ///
+    /// let config = PromptAgentConfig::default()
+    ///     .with_description("Answers questions about codebase structure");
+    /// ```
+    #[must_use]
+    pub fn with_description(mut self, description: impl Into<String>) -> Self {
+        self.description = Some(description.into());
         self
     }
 
@@ -359,6 +388,49 @@ impl PromptAgent {
             .with_tool_filter(tool_filter);
         Self::new(config)
     }
+
+    /// Create a Prompt agent from a [`PromptAgentDef`].
+    ///
+    /// This constructor is used by the markdown agent loader to create agents
+    /// from parsed markdown definitions.
+    ///
+    /// # Note
+    ///
+    /// The `model` field in [`PromptAgentDef`] is not used directly by this constructor.
+    /// Model selection is handled at the runner/context level. The caller should use
+    /// the model information when configuring the `AgentContext`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AgentError::InvalidConfig` if the definition fails validation.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use gemicro_prompt_agent::PromptAgent;
+    /// use gemicro_core::agent::PromptAgentDef;
+    /// use gemicro_core::ToolSet;
+    ///
+    /// let def = PromptAgentDef::new("Code reviewer")
+    ///     .with_system_prompt("You review code for quality issues.")
+    ///     .with_tools(ToolSet::Specific(vec!["file_read".into()]));
+    ///
+    /// let agent = PromptAgent::with_definition(&def).unwrap();
+    /// ```
+    ///
+    /// [`PromptAgentDef`]: gemicro_core::agent::PromptAgentDef
+    pub fn with_definition(def: &gemicro_core::agent::PromptAgentDef) -> Result<Self, AgentError> {
+        // Validate the definition first
+        def.validate()
+            .map_err(|e| AgentError::InvalidConfig(e.to_string()))?;
+
+        let config = PromptAgentConfig::default()
+            .with_system_prompt(&def.system_prompt)
+            .with_tool_filter(def.tools.clone())
+            .with_description(&def.description);
+
+        Self::new(config)
+    }
 }
 
 impl Agent for PromptAgent {
@@ -367,7 +439,10 @@ impl Agent for PromptAgent {
     }
 
     fn description(&self) -> &str {
-        "An agent that executes prompts with optional tool support"
+        self.config
+            .description
+            .as_deref()
+            .unwrap_or("An agent that executes prompts with optional tool support")
     }
 
     fn execute(&self, query: &str, context: AgentContext) -> AgentStream<'_> {
@@ -706,5 +781,27 @@ mod tests {
     fn test_default_tool_filter_is_all() {
         let config = PromptAgentConfig::default();
         assert!(matches!(config.tool_filter, ToolSet::All));
+    }
+
+    #[test]
+    fn test_with_definition_constructor() {
+        use gemicro_core::agent::PromptAgentDef;
+
+        let def = PromptAgentDef::new("Test agent")
+            .with_system_prompt("You are a helpful assistant.")
+            .with_tools(ToolSet::Specific(vec!["file_read".into()]));
+
+        let agent = PromptAgent::with_definition(&def).unwrap();
+        assert_eq!(agent.name(), "prompt_agent");
+    }
+
+    #[test]
+    fn test_with_definition_rejects_invalid() {
+        use gemicro_core::agent::PromptAgentDef;
+
+        // Missing system prompt
+        let def = PromptAgentDef::new("Test agent");
+        let result = PromptAgent::with_definition(&def);
+        assert!(result.is_err());
     }
 }

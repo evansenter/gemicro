@@ -148,13 +148,24 @@ impl Tool for Glob {
         let mut matches: Vec<String> = Vec::new();
         let mut errors: Vec<String> = Vec::new();
 
+        // Get CWD for converting relative paths to absolute
+        let cwd = std::env::current_dir().ok();
+
         for entry in entries {
             match entry {
                 Ok(path) => {
                     if matches.len() >= MAX_RESULTS {
                         break;
                     }
-                    matches.push(path.display().to_string());
+                    // Always return absolute paths for consistency with file_read/grep requirements
+                    let absolute_path = if path.is_absolute() {
+                        path
+                    } else if let Some(ref cwd) = cwd {
+                        cwd.join(&path)
+                    } else {
+                        path
+                    };
+                    matches.push(absolute_path.display().to_string());
                 }
                 Err(e) => {
                     errors.push(format!("Error reading path: {}", e));

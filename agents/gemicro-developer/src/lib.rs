@@ -67,6 +67,7 @@ fn build_final_result(
     response: &genai_rs::InteractionResponse,
     start: Instant,
     total_tool_calls: usize,
+    total_tool_time_ms: u64,
     iteration: usize,
 ) -> AgentUpdate {
     let answer = response.text().map(|s| s.to_string()).unwrap_or_else(|| {
@@ -87,6 +88,7 @@ fn build_final_result(
             duration_ms,
             json!({
                 "tool_call_count": total_tool_calls,
+                "tool_time_ms": total_tool_time_ms,
                 "iterations": iteration,
             }),
         ),
@@ -100,6 +102,7 @@ fn build_incomplete_result(
     reason: &str,
     start: Instant,
     total_tool_calls: usize,
+    total_tool_time_ms: u64,
     iteration: usize,
 ) -> AgentUpdate {
     let duration_ms = start.elapsed().as_millis() as u64;
@@ -112,6 +115,7 @@ fn build_incomplete_result(
             duration_ms,
             json!({
                 "tool_call_count": total_tool_calls,
+                "tool_time_ms": total_tool_time_ms,
                 "iterations": iteration,
                 "incomplete": true,
                 "reason": reason,
@@ -435,6 +439,7 @@ impl Agent for DeveloperAgent {
                 .collect();
 
             let mut total_tool_calls = 0usize;
+            let mut total_tool_time_ms = 0u64;
             let mut iteration = 0usize;
             let mut previous_interaction_id: Option<String> = None;
             let mut pending_function_calls: Vec<OwnedFunctionCallInfo> = Vec::new();
@@ -448,7 +453,7 @@ impl Agent for DeveloperAgent {
                 // Check for cancellation at start of each iteration
                 if context.cancellation_token.is_cancelled() {
                     log::info!("DeveloperAgent cancelled");
-                    yield build_incomplete_result("cancelled", start, total_tool_calls, iteration);
+                    yield build_incomplete_result("cancelled", start, total_tool_calls, total_tool_time_ms, iteration);
                     break;
                 }
 
@@ -459,6 +464,7 @@ impl Agent for DeveloperAgent {
                         &format!("max iterations ({}) reached", max_iterations),
                         start,
                         total_tool_calls,
+                        total_tool_time_ms,
                         iteration,
                     );
                     break;
@@ -497,7 +503,7 @@ impl Agent for DeveloperAgent {
 
                     if calls.is_empty() {
                         // No function calls - extract final answer and exit
-                        yield build_final_result(&response, start, total_tool_calls, iteration);
+                        yield build_final_result(&response, start, total_tool_calls, total_tool_time_ms, iteration);
                         break;
                     }
 
@@ -567,7 +573,8 @@ impl Agent for DeveloperAgent {
                         )
                     })?;
 
-                    // Send denial back to LLM using continuation request
+                    // Send denial back to LLM using continuation request.
+                    // Functions are re-sent on each request (they could change per-turn).
                     let denial_request = LlmRequest::continuation(
                         prev_id,
                         function_declarations.clone(),
@@ -590,7 +597,7 @@ impl Agent for DeveloperAgent {
 
                     let more_calls = denial_response.function_calls();
                     if more_calls.is_empty() {
-                        yield build_final_result(&denial_response, start, total_tool_calls, iteration);
+                        yield build_final_result(&denial_response, start, total_tool_calls, total_tool_time_ms, iteration);
                         break;
                     } else {
                         previous_interaction_id = denial_response.id.clone();
@@ -688,6 +695,7 @@ impl Agent for DeveloperAgent {
 
                     let tool_duration = tool_start.elapsed();
                     total_tool_calls += 1;
+                    total_tool_time_ms += tool_duration.as_millis() as u64;
 
                     // Build result for function response
                     let result_json = match &tool_result {
@@ -745,7 +753,7 @@ impl Agent for DeveloperAgent {
                 }
 
                 if cancelled {
-                    yield build_incomplete_result("cancelled during tool execution", start, total_tool_calls, iteration);
+                    yield build_incomplete_result("cancelled during tool execution", start, total_tool_calls, total_tool_time_ms, iteration);
                     break;
                 }
 
@@ -761,7 +769,8 @@ impl Agent for DeveloperAgent {
                     )
                 })?;
 
-                // Send function results back to LLM using continuation request
+                // Send function results back to LLM using continuation request.
+                // Functions are re-sent on each request (they could change per-turn).
                 let continuation_request = LlmRequest::continuation(
                     prev_id,
                     function_declarations.clone(),
@@ -787,7 +796,7 @@ impl Agent for DeveloperAgent {
 
                 if more_calls.is_empty() {
                     // Done - extract final answer
-                    yield build_final_result(&follow_up_response, start, total_tool_calls, iteration);
+                    yield build_final_result(&follow_up_response, start, total_tool_calls, total_tool_time_ms, iteration);
                     break;
                 } else {
                     // More function calls - store them for next iteration

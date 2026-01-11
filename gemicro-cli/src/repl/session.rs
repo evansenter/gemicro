@@ -16,17 +16,18 @@ use gemicro_core::{
     enforce_final_result_contract,
     interceptor::{InterceptorChain, ToolCall},
     tool::{ToolRegistry, ToolResult},
-    AgentContext, AgentError, AgentUpdate, BatchConfirmationHandler, ConversationHistory,
-    HistoryEntry, LlmClient,
+    AgentContext, AgentError, AgentUpdate, AutoApprove, BatchConfirmationHandler,
+    ConversationHistory, HistoryEntry, LlmClient,
 };
 use gemicro_critique::CritiqueAgent;
 use gemicro_deep_research::DeepResearchAgent;
 use gemicro_developer::{DeveloperAgent, DeveloperConfig};
 use gemicro_echo::EchoAgent;
+use gemicro_loader::load_markdown_agents_from_dir;
 use gemicro_path_sandbox::PathSandbox;
 use gemicro_prompt_agent::{tools as prompt_tools, PromptAgent, PromptAgentConfig};
 use gemicro_runner::AgentRegistry;
-use gemicro_task::Task;
+use gemicro_task::{Task, TaskContext};
 // Explicit tool imports (per "Explicit Over Implicit" principle)
 use gemicro_bash::Bash;
 use gemicro_file_edit::FileEdit;
@@ -50,6 +51,12 @@ use tokio_util::sync::CancellationToken;
 /// previous answer is shown. Full answers are always available in the
 /// conversation context sent to the LLM for follow-up queries.
 const HISTORY_PREVIEW_CHARS: usize = 256;
+
+/// Default directory for runtime-loaded markdown agents.
+///
+/// This path is relative to the workspace root. Agents in this directory
+/// are loaded at startup and registered in the agent registry.
+const RUNTIME_AGENTS_DIR: &str = "agents/runtime-agents";
 
 /// REPL session state
 pub struct Session {
@@ -104,6 +111,13 @@ pub struct Session {
     /// When set, tool calls are passed through this chain for validation,
     /// logging, and security controls. Built from CLI --sandbox-path args.
     interceptors: Option<Arc<InterceptorChain<ToolCall, ToolResult>>>,
+
+    /// Shared context for the Task tool.
+    ///
+    /// This allows us to update the Task tool's context (tools, confirmation
+    /// handler, interceptors) after configuration changes, without needing
+    /// to recreate the tool registry.
+    task_context: Arc<TaskContext>,
 }
 
 /// CLI argument overrides that take precedence over file config.
@@ -152,10 +166,9 @@ impl Session {
         let registry = Arc::new(RwLock::new(AgentRegistry::new()));
 
         // Create tool registry with Task tool for subagent spawning
-        let tool_registry = Arc::new(Self::create_tool_registry(
-            Arc::clone(&llm),
-            Arc::clone(&registry),
-        ));
+        let (tool_registry, task_context) =
+            Self::create_tool_registry(Arc::clone(&llm), Arc::clone(&registry));
+        let tool_registry = Arc::new(tool_registry);
 
         // Initialize interceptor chain with AuditLog for LOUD_WIRE support
         let interceptors = {
@@ -163,6 +176,13 @@ impl Session {
                 InterceptorChain::new().with(AuditLog);
             Some(Arc::new(chain))
         };
+
+        // Initialize TaskContext with the tools, default confirmation handler, and interceptors
+        let confirmation_handler: Arc<dyn BatchConfirmationHandler> =
+            Arc::new(InteractiveConfirmation::default());
+        task_context.set_tools(Some(Arc::clone(&tool_registry)));
+        task_context.set_confirmation_handler(Some(Arc::clone(&confirmation_handler)));
+        task_context.set_interceptors(interceptors.clone());
 
         Self {
             registry,
@@ -175,9 +195,10 @@ impl Session {
             binary_mtime,
             plain,
             session_tokens: 0,
-            confirmation_handler: Arc::new(InteractiveConfirmation::default()),
+            confirmation_handler,
             tool_registry,
             interceptors,
+            task_context,
         }
     }
 
@@ -190,12 +211,14 @@ impl Session {
     /// - Task tool for spawning subagents (shares the Session's agent registry,
     ///   enabling recursive delegation to any registered agent)
     ///
+    /// Returns both the registry and the TaskContext for updating Task's shared state.
+    ///
     /// Per "Explicit Over Implicit" principle, all tools are registered explicitly
     /// rather than using default registries.
     fn create_tool_registry(
         llm: Arc<LlmClient>,
         agent_registry: Arc<RwLock<AgentRegistry>>,
-    ) -> ToolRegistry {
+    ) -> (ToolRegistry, Arc<TaskContext>) {
         let mut registry = ToolRegistry::new();
 
         // Built-in tools from prompt-agent crate
@@ -217,14 +240,36 @@ impl Session {
         registry.register(Bash);
 
         // Task tool for subagent spawning
-        registry.register(Task::new(agent_registry, llm));
+        let (task, task_context) = Task::new(agent_registry, llm);
+        registry.register(task);
 
-        registry
+        (registry, task_context)
     }
 
     /// Set CLI overrides that take precedence over file config.
     pub fn set_cli_overrides(&mut self, overrides: CliOverrides) {
         self.cli_overrides = overrides;
+    }
+
+    /// Enable auto-approve mode for tool confirmations.
+    ///
+    /// When enabled, tools that normally require confirmation (like bash commands)
+    /// are automatically approved without user prompting. This is useful for:
+    /// - Scripted/piped input where stdin is not a terminal
+    /// - Trusted automation contexts
+    /// - Testing and development
+    ///
+    /// SECURITY WARNING: Use with caution - this bypasses human review.
+    pub fn set_auto_approve(&mut self, enabled: bool) {
+        if enabled {
+            log::info!("Auto-approve mode enabled - tool confirmations will be automatic");
+            self.confirmation_handler = Arc::new(AutoApprove);
+        } else {
+            self.confirmation_handler = Arc::new(InteractiveConfirmation::default());
+        }
+        // Update Task's shared context so subagents see the change
+        self.task_context
+            .set_confirmation_handler(Some(Arc::clone(&self.confirmation_handler)));
     }
 
     /// Set sandbox paths for file access restriction.
@@ -247,6 +292,9 @@ impl Session {
         }
 
         self.interceptors = Some(Arc::new(chain));
+        // Update Task's shared context so subagents see the change
+        self.task_context
+            .set_interceptors(self.interceptors.clone());
     }
 
     /// Load config and register agents.
@@ -340,6 +388,52 @@ impl Session {
 
         // Register critique agent (for self-validation via Task tool)
         registry.register("critique", || Box::new(CritiqueAgent::default_agent()));
+
+        // Register bundled markdown agents
+        self.register_markdown_agents(&mut registry);
+    }
+
+    /// Register agents defined in markdown format.
+    ///
+    /// Loads markdown agents from `agents/runtime-agents/` directory. Each `.md` file
+    /// with YAML frontmatter becomes a registered agent. Future versions will support
+    /// user-defined agents from `~/.config/gemicro/agents/`.
+    fn register_markdown_agents(&self, registry: &mut AgentRegistry) {
+        use std::path::Path;
+
+        let agents_dir = Path::new(RUNTIME_AGENTS_DIR);
+        let (agents, errors) = load_markdown_agents_from_dir(agents_dir);
+
+        // Log any parsing errors (don't crash - graceful degradation)
+        for (path, err) in errors {
+            log::warn!("Failed to parse markdown agent {:?}: {}", path, err);
+        }
+
+        // Register each successfully parsed agent
+        for agent in agents {
+            let def = agent.definition.clone();
+            let name = agent.name.clone();
+
+            // Log tool availability warnings at load time
+            if let gemicro_core::ToolSet::Specific(ref tools) = def.tools {
+                for tool in tools {
+                    log::debug!("Markdown agent '{}' requests tool: {}", name, tool);
+                }
+            }
+
+            registry.register(&name, move || {
+                Box::new(
+                    PromptAgent::with_definition(&def)
+                        .expect("pre-validated markdown agent definition"),
+                )
+            });
+
+            log::info!(
+                "Registered markdown agent: {} - {}",
+                agent.name,
+                agent.definition.description
+            );
+        }
     }
 
     /// Reload configuration from files.
@@ -431,20 +525,18 @@ impl Session {
 
     /// Get the current agent context with cancellation support.
     ///
-    /// For agents that need tools (like developer), the tool registry is provided.
+    /// Tools are always provided to agents. Each agent controls which tools it
+    /// uses via its `tool_filter` configuration:
+    /// - `ToolSet::None` → agent won't use any tools
+    /// - `ToolSet::Inherit` → use all available tools
+    /// - `ToolSet::Specific([...])` → use only listed tools
+    ///
     /// If sandbox paths are configured, interceptors are attached for security.
     fn agent_context(&self, cancellation_token: CancellationToken) -> AgentContext {
-        // Developer agent needs tools; others don't
-        let tools = if self.current_agent_name == "developer" {
-            Some(Arc::clone(&self.tool_registry))
-        } else {
-            None
-        };
-
         AgentContext {
             llm: self.llm.clone(),
             cancellation_token,
-            tools,
+            tools: Some(Arc::clone(&self.tool_registry)),
             confirmation_handler: Some(Arc::clone(&self.confirmation_handler)),
             execution: gemicro_core::ExecutionContext::root(),
             orchestration: None,

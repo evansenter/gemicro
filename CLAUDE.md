@@ -14,8 +14,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | **Graceful Unknowns** | Unknown event types logged, not errors |
 | **Agent Isolation** | Agents depend only on core, never on each other |
 | **Config at Construction** | Agent-specific config in constructors, not shared context |
+| **Hermetic Implementations** | Agent/tool/hook implementations live in files, not embedded in library code |
 
 **Corollary**: Breaking changes are preferred over backwards-compatibility shims. Clean breaks, no deprecation warnings.
+
+**Hermetic Rule**: Never embed agent definitions, tool configs, or hook logic as string constants in library code. Implementations must live in their own files:
+- Rust agents → `agents/gemicro-{name}/`
+- Markdown agents → `agents/runtime-agents/{name}.md`
+- Tools → `tools/gemicro-{name}/`
+- Hooks → `hooks/gemicro-{name}/`
 
 ## Repository Overview
 
@@ -28,7 +35,7 @@ Gemicro is a CLI agent exploration platform for AI agent patterns, powered by Ge
 ## Build Commands
 
 ```bash
-make check      # Format + clippy + tests (run before pushing)
+make check      # Format + clippy + tests (run before making a PR)
 make fmt        # Check formatting
 make clippy     # Clippy with -D warnings
 make test       # Unit + doc tests
@@ -158,6 +165,10 @@ Use `ignore` for examples that compile but require runtime dependencies (API key
 
 After changes merge to rust-genai main, run `cargo update -p genai-rs` to pull them into gemicro. Check for breaking changes in the rust-genai changelog before updating.
 
+## Model Selection
+
+Always use `gemini-3.0-flash-preview` as the default model. Do not use older models like `gemini-2.0-flash`.
+
 ## rust-genai Integration
 
 | Layer | Responsibility |
@@ -179,6 +190,16 @@ Use rust-genai types directly when passing through. Wrap when adding functionali
 | "Unknown event type" warnings | Expected - consumers ignore unknowns |
 | Tool confirmation hangs in tests | Use `AutoApprove` handler |
 
-## README Maintenance
+## Documentation Maintenance
 
-When adding cross-cutting features (observability, error handling, security), update the "Cross-Cutting Concerns" table in `README.md`.
+Keep docs updated when making user-facing changes:
+
+| Change Type | Update |
+|-------------|--------|
+| New/modified agent patterns | `docs/AGENT_AUTHORING.md` |
+| New/modified markdown agent format | `docs/MARKDOWN_AGENTS.md` |
+| New/modified tools | `docs/TOOL_AUTHORING.md` |
+| New/modified hooks | `docs/INTERCEPTOR_AUTHORING.md` |
+| Cross-cutting features | `README.md` "Cross-Cutting Concerns" table |
+
+Rule: If you change how something works, update the doc that explains it.

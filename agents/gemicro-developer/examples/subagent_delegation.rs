@@ -131,7 +131,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tools.register(Glob);
     tools.register(Grep);
     tools.register(Bash);
-    tools.register(Task::new(Arc::clone(&registry), llm_for_task));
+    let (task, _task_context) = Task::new(Arc::clone(&registry), llm_for_task);
+    tools.register(task);
 
     println!("Available tools:");
     for tool_name in tools.list() {

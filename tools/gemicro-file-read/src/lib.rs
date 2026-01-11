@@ -60,18 +60,20 @@ impl Tool for FileRead {
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidInput("Missing 'path' field".into()))?;
 
+        // Resolve relative paths against CWD
         let path = Path::new(path_str);
-
-        // Check if path is absolute
-        if !path.is_absolute() {
-            return Err(ToolError::InvalidInput(format!(
-                "Path must be absolute, got: {}",
-                path_str
-            )));
-        }
+        let path = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .map_err(|e| {
+                    ToolError::ExecutionFailed(format!("Cannot get current directory: {}", e))
+                })?
+                .join(path)
+        };
 
         // Use async metadata to atomically check existence, type, and size (avoids TOCTOU)
-        let metadata = tokio::fs::metadata(path).await.map_err(|e| {
+        let metadata = tokio::fs::metadata(&path).await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 ToolError::NotFound(format!("File not found: {}", path_str))
             } else {
@@ -96,7 +98,7 @@ impl Tool for FileRead {
         }
 
         // Read the file
-        let content = tokio::fs::read_to_string(path).await.map_err(|e| {
+        let content = tokio::fs::read_to_string(&path).await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::InvalidData {
                 ToolError::InvalidInput(format!(
                     "File appears to be binary or contains invalid UTF-8: {}",
@@ -138,10 +140,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_file_read_relative_path() {
+        // Relative paths are now resolved against CWD, so this should fail with NotFound
         let tool = FileRead;
         let result = tool.execute(json!({"path": "relative/path.txt"})).await;
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), ToolError::InvalidInput(_)));
+        assert!(matches!(result.unwrap_err(), ToolError::NotFound(_)));
     }
 
     #[tokio::test]

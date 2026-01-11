@@ -81,13 +81,15 @@ async fn main() -> Result<()> {
         let query = args.query.as_ref().unwrap();
 
         // Print header for single query mode
+        // Note: Only hardcoded agents (deep_research, prompt_agent) are supported in single-query mode.
+        // Runtime-loaded markdown agents (like codebase-explorer) require interactive mode.
         let agent_title = match args.agent.as_str() {
             "deep_research" => "gemicro Deep Research",
             "prompt_agent" => "gemicro Prompt Agent",
             other => {
                 anyhow::bail!(
                     "Single-query mode supports: deep_research, prompt_agent. \
-                     Use --interactive for other agents like '{}'.",
+                     Use --interactive for runtime-loaded agents like '{}'.",
                     other
                 );
             }
@@ -129,6 +131,12 @@ async fn run_interactive(args: &cli::Args) -> Result<()> {
                 .join(", ")
         );
         session.set_sandbox_paths(args.sandbox_paths.clone());
+    }
+
+    // Enable auto-approve mode for tool confirmations (if configured)
+    // This is useful for piped/scripted input where stdin is not a terminal
+    if args.auto_approve {
+        session.set_auto_approve(true);
     }
 
     // Load config files and register agents (always succeeds, logs warnings on errors)

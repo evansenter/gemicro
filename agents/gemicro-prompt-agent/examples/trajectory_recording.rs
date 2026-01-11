@@ -57,7 +57,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             genai_client,
             llm_config,
         )
-        .await?;
+        .await
+        .map_err(|(e, _partial_metrics, _partial_trajectory)| e)?;
 
     println!("  Query: {}", query);
     println!("  Answer: {:?}", metrics.final_answer);
