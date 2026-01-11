@@ -64,3 +64,18 @@ edition = "2021"
 rust-version = "1.75"
 license = "MIT"
 repository = "https://github.com/evansenter/gemicro"
+
+# Build profiles for faster development
+# See: https://github.com/evansenter/gemicro/issues/251
+[profile.dev]
+# Optimize dependencies (they don't change often)
+opt-level = 1
+# Minimal debug info for faster linking
+debug = 1
+
+[profile.dev.package."*"]
+# Full optimization for all dependencies
+opt-level = 2
+
+[profile.test]
+inherits = "dev"
