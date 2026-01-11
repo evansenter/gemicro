@@ -7,11 +7,11 @@ check: fmt clippy test
 fmt:
 	cargo fmt --all -- --check
 
-# Run clippy with warnings as errors
+# Run clippy with warnings as errors (matches CI: --all-targets --all-features)
 clippy:
-	cargo clippy --workspace -- -D warnings
+	cargo clippy --workspace --all-targets --all-features -- -D warnings
 
-# Run unit and doc tests
+# Run unit and doc tests (matches CI)
 test:
 	cargo test --workspace
 
