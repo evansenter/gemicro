@@ -521,6 +521,9 @@ impl LlmClient {
     }
 
     /// Execute a single generate request (no retries)
+    ///
+    /// Uses the build() + execute() pattern from genai-rs 0.6.0 for cleaner
+    /// separation of request construction and execution.
     async fn generate_once(
         &self,
         request: &LlmRequest,
@@ -529,21 +532,23 @@ impl LlmClient {
         let started_at = SystemTime::now();
         let start_instant = Instant::now();
 
-        // Execute with timeout - use different builders for initial vs continuation requests
-        // (genai_rs uses typestate so they return different types)
-        let response = if self.is_continuation(request) {
-            self.build_continuation_interaction(request)?
-                .with_timeout(self.config.timeout)
-                .create()
-                .await
-                .map_err(LlmError::from)?
+        // Build InteractionRequest from LlmRequest
+        // Uses different builders for initial vs continuation requests (genai_rs typestate)
+        let interaction_request = if self.is_continuation(request) {
+            self.build_continuation_interaction(request)?.build()
         } else {
-            self.build_interaction(request)
-                .with_timeout(self.config.timeout)
-                .create()
-                .await
-                .map_err(LlmError::from)?
-        };
+            self.build_interaction(request).build()
+        }
+        .map_err(LlmError::from)?;
+
+        // Execute with explicit timeout wrapping
+        let response = tokio::time::timeout(
+            self.config.timeout,
+            self.client.execute(interaction_request),
+        )
+        .await
+        .map_err(|_| LlmError::Timeout(self.config.timeout.as_millis() as u64))?
+        .map_err(LlmError::from)?;
 
         // Response logging is handled by genai-rs upstream
 
