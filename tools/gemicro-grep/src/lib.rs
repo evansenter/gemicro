@@ -14,6 +14,9 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 /// Maximum number of matches to return per file.
 const MAX_MATCHES_PER_FILE: usize = 50;
 
+/// Maximum total matches across all files when searching directories.
+const MAX_TOTAL_MATCHES: usize = 200;
+
 /// Maximum file size to search (10MB).
 const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024;
 
@@ -66,8 +69,8 @@ impl Grep {
         path: &Path,
         regex: &Regex,
         case_insensitive: bool,
+        max_matches: usize,
     ) -> Result<Vec<Match>, ToolError> {
-        // Check file exists and is a file
         let metadata = fs::metadata(path).await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 ToolError::NotFound(format!("File not found: {}", path.display()))
@@ -77,18 +80,11 @@ impl Grep {
         })?;
 
         if !metadata.is_file() {
-            return Err(ToolError::InvalidInput(format!(
-                "Path is not a file: {}",
-                path.display()
-            )));
+            return Ok(Vec::new()); // Skip non-files silently when called from directory search
         }
 
         if metadata.len() > MAX_FILE_SIZE {
-            return Err(ToolError::InvalidInput(format!(
-                "File too large ({} bytes, max {} bytes)",
-                metadata.len(),
-                MAX_FILE_SIZE
-            )));
+            return Ok(Vec::new()); // Skip large files silently
         }
 
         let file = fs::File::open(path)
@@ -100,11 +96,7 @@ impl Grep {
         let mut matches = Vec::new();
         let mut line_number = 0;
 
-        while let Some(line) = lines
-            .next_line()
-            .await
-            .map_err(|e| ToolError::ExecutionFailed(format!("Error reading file: {}", e)))?
-        {
+        while let Some(line) = lines.next_line().await.unwrap_or(None) {
             line_number += 1;
 
             let line_to_match = if case_insensitive {
@@ -120,13 +112,76 @@ impl Grep {
                     content: line,
                 });
 
-                if matches.len() >= MAX_MATCHES_PER_FILE {
+                if matches.len() >= max_matches {
                     break;
                 }
             }
         }
 
         Ok(matches)
+    }
+
+    /// Recursively search a directory for matches.
+    async fn search_directory(
+        &self,
+        dir: &Path,
+        regex: &Regex,
+        case_insensitive: bool,
+    ) -> Result<Vec<Match>, ToolError> {
+        let mut all_matches = Vec::new();
+        let mut dirs_to_visit = vec![dir.to_path_buf()];
+
+        while let Some(current_dir) = dirs_to_visit.pop() {
+            let mut entries = fs::read_dir(&current_dir).await.map_err(|e| {
+                ToolError::ExecutionFailed(format!(
+                    "Cannot read directory {}: {}",
+                    current_dir.display(),
+                    e
+                ))
+            })?;
+
+            while let Ok(Some(entry)) = entries.next_entry().await {
+                let path = entry.path();
+
+                // Skip hidden files/directories
+                if path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|n| n.starts_with('.'))
+                    .unwrap_or(false)
+                {
+                    continue;
+                }
+
+                if path.is_dir() {
+                    dirs_to_visit.push(path);
+                } else if path.is_file() {
+                    // Calculate remaining matches allowed
+                    let remaining = MAX_TOTAL_MATCHES.saturating_sub(all_matches.len());
+                    if remaining == 0 {
+                        return Ok(all_matches);
+                    }
+
+                    let file_matches = self
+                        .search_file(
+                            &path,
+                            regex,
+                            case_insensitive,
+                            remaining.min(MAX_MATCHES_PER_FILE),
+                        )
+                        .await
+                        .unwrap_or_default();
+
+                    all_matches.extend(file_matches);
+
+                    if all_matches.len() >= MAX_TOTAL_MATCHES {
+                        return Ok(all_matches);
+                    }
+                }
+            }
+        }
+
+        Ok(all_matches)
     }
 }
 
@@ -137,8 +192,9 @@ impl Tool for Grep {
     }
 
     fn description(&self) -> &str {
-        "Search for a pattern in file contents. Returns matching lines with line numbers. \
-         Supports regex patterns. Use for finding code, configuration values, or text."
+        "Search for a pattern in file or directory contents. If path is a directory, searches \
+         recursively (skipping hidden files). Returns matching lines with file paths and line numbers. \
+         Supports regex patterns."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -151,7 +207,7 @@ impl Tool for Grep {
                 },
                 "path": {
                     "type": "string",
-                    "description": "Absolute path to the file to search"
+                    "description": "Path to file or directory to search. Relative paths are resolved against CWD."
                 },
                 "case_insensitive": {
                     "type": "boolean",
@@ -182,10 +238,17 @@ impl Tool for Grep {
             return Err(ToolError::InvalidInput("Pattern cannot be empty".into()));
         }
 
+        // Resolve relative paths against CWD
         let path = Path::new(path_str);
-        if !path.is_absolute() {
-            return Err(ToolError::InvalidInput("Path must be absolute".into()));
-        }
+        let path = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .map_err(|e| {
+                    ToolError::ExecutionFailed(format!("Cannot get current directory: {}", e))
+                })?
+                .join(path)
+        };
 
         // Compile regex - for case-insensitive, use lowercase pattern and match against
         // lowercased lines in search_file. Only compile once to avoid redundant work.
@@ -199,10 +262,35 @@ impl Tool for Grep {
             ToolError::InvalidInput(format!("Invalid regex pattern '{}': {}", pattern, e))
         })?;
 
-        let matches = self.search_file(path, &regex, case_insensitive).await?;
+        // Check if path is a directory or file
+        let metadata = fs::metadata(&path).await.map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                ToolError::NotFound(format!("Path not found: {}", path.display()))
+            } else {
+                ToolError::ExecutionFailed(format!("Cannot access path: {}", e))
+            }
+        })?;
+
+        let (matches, is_directory) = if metadata.is_dir() {
+            (
+                self.search_directory(&path, &regex, case_insensitive)
+                    .await?,
+                true,
+            )
+        } else {
+            (
+                self.search_file(&path, &regex, case_insensitive, MAX_MATCHES_PER_FILE)
+                    .await?,
+                false,
+            )
+        };
 
         let match_count = matches.len();
-        let truncated = match_count >= MAX_MATCHES_PER_FILE;
+        let truncated = if is_directory {
+            match_count >= MAX_TOTAL_MATCHES
+        } else {
+            match_count >= MAX_MATCHES_PER_FILE
+        };
 
         let result = if matches.is_empty() {
             format!("No matches found for pattern '{}' in {}", pattern, path_str)
@@ -213,19 +301,27 @@ impl Tool for Grep {
                 .collect();
             let mut output = formatted.join("\n");
             if truncated {
-                output.push_str(&format!(
-                    "\n\n(Results truncated to {} matches)",
+                let max = if is_directory {
+                    MAX_TOTAL_MATCHES
+                } else {
                     MAX_MATCHES_PER_FILE
-                ));
+                };
+                output.push_str(&format!("\n\n(Results truncated to {} matches)", max));
             }
             output
         };
+
+        // Count unique files in matches
+        let files_searched: std::collections::HashSet<_> =
+            matches.iter().map(|m| &m.file).collect();
 
         let mut tool_result = ToolResult::text(result);
         tool_result = tool_result.with_metadata(json!({
             "pattern": pattern,
             "path": path_str,
             "match_count": match_count,
+            "files_with_matches": files_searched.len(),
+            "is_directory": is_directory,
             "truncated": truncated,
             "case_insensitive": case_insensitive,
         }));
@@ -293,13 +389,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_grep_relative_path() {
+        // Relative paths are now resolved against CWD, so this should fail with NotFound
         let grep = Grep;
         let result = grep
             .execute(json!({"pattern": "test", "path": "relative/path.txt"}))
             .await;
 
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), ToolError::InvalidInput(_)));
+        assert!(matches!(result.unwrap_err(), ToolError::NotFound(_)));
     }
 
     #[tokio::test]
@@ -425,5 +522,74 @@ mod tests {
 
         let metadata = tool_result.metadata;
         assert_eq!(metadata["match_count"], 2);
+    }
+
+    #[tokio::test]
+    async fn test_grep_directory_search() {
+        use tempfile::tempdir;
+
+        let grep = Grep;
+        let dir = tempdir().unwrap();
+
+        // Create a few files with content
+        let file1 = dir.path().join("file1.txt");
+        std::fs::write(&file1, "hello world\nfoo bar\nhello again").unwrap();
+
+        let file2 = dir.path().join("file2.txt");
+        std::fs::write(&file2, "goodbye world\nhello there").unwrap();
+
+        // Create a subdirectory with a file
+        let subdir = dir.path().join("subdir");
+        std::fs::create_dir(&subdir).unwrap();
+        let file3 = subdir.join("file3.txt");
+        std::fs::write(&file3, "hello from subdir").unwrap();
+
+        let result = grep
+            .execute(json!({
+                "pattern": "hello",
+                "path": dir.path().to_str().unwrap()
+            }))
+            .await;
+
+        assert!(result.is_ok());
+        let tool_result = result.unwrap();
+        let metadata = &tool_result.metadata;
+
+        // Should find 4 matches across 3 files
+        assert_eq!(metadata["match_count"], 4);
+        assert_eq!(metadata["files_with_matches"], 3);
+        assert_eq!(metadata["is_directory"], true);
+    }
+
+    #[tokio::test]
+    async fn test_grep_directory_skips_hidden() {
+        use tempfile::tempdir;
+
+        let grep = Grep;
+        let dir = tempdir().unwrap();
+
+        // Create a regular file
+        let file1 = dir.path().join("visible.txt");
+        std::fs::write(&file1, "hello visible").unwrap();
+
+        // Create a hidden file (should be skipped)
+        let hidden = dir.path().join(".hidden.txt");
+        std::fs::write(&hidden, "hello hidden").unwrap();
+
+        let result = grep
+            .execute(json!({
+                "pattern": "hello",
+                "path": dir.path().to_str().unwrap()
+            }))
+            .await;
+
+        assert!(result.is_ok());
+        let tool_result = result.unwrap();
+        let content = tool_result.content.as_str().unwrap();
+
+        // Should only find the visible file
+        assert!(content.contains("visible.txt"));
+        assert!(!content.contains(".hidden.txt"));
+        assert_eq!(tool_result.metadata["match_count"], 1);
     }
 }

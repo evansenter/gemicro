@@ -105,12 +105,17 @@ impl Tool for FileWrite {
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidInput("Missing 'content' field".into()))?;
 
+        // Resolve relative paths against CWD
         let path = Path::new(path_str);
-
-        // Validate path is absolute
-        if !path.is_absolute() {
-            return Err(ToolError::InvalidInput("Path must be absolute".into()));
-        }
+        let path = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .map_err(|e| {
+                    ToolError::ExecutionFailed(format!("Cannot get current directory: {}", e))
+                })?
+                .join(path)
+        };
 
         // Check content size
         if content.len() > MAX_WRITE_SIZE {
@@ -135,7 +140,7 @@ impl Tool for FileWrite {
         let existed = path.exists();
 
         // Write the file
-        fs::write(path, content)
+        fs::write(&path, content)
             .await
             .map_err(|e| ToolError::ExecutionFailed(format!("Failed to write file: {}", e)))?;
 
@@ -214,6 +219,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_file_write_relative_path() {
+        // Relative paths are now resolved against CWD, so this should fail with NotFound (parent doesn't exist)
         let tool = FileWrite;
         let result = tool
             .execute(json!({
@@ -223,7 +229,7 @@ mod tests {
             .await;
 
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), ToolError::InvalidInput(_)));
+        assert!(matches!(result.unwrap_err(), ToolError::NotFound(_)));
     }
 
     #[tokio::test]

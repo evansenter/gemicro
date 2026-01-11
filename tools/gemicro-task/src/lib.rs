@@ -16,7 +16,8 @@ use gemicro_core::agent::{
     AgentSpec, ExecutionContext, OrchestrationGuard, OrchestrationState, PromptAgentDef,
     SubagentConfig,
 };
-use gemicro_core::tool::{Tool, ToolError, ToolResult};
+use gemicro_core::interceptor::{InterceptorChain, ToolCall};
+use gemicro_core::tool::{BatchConfirmationHandler, Tool, ToolError, ToolRegistry, ToolResult};
 use gemicro_core::{Agent, AgentContext, LlmClient, ToolSet, EVENT_FINAL_RESULT};
 use gemicro_runner::AgentRegistry;
 use serde_json::{json, Value};
@@ -25,6 +26,99 @@ use std::time::Duration;
 
 /// Default maximum subagent depth to prevent infinite recursion.
 pub const DEFAULT_MAX_DEPTH: usize = 3;
+
+/// Shared context for Task tool that can be updated by Session.
+///
+/// This allows Session to update confirmation handlers, interceptors, and tools
+/// after the Task tool is registered, and have those changes visible to Task
+/// at execution time.
+///
+/// # Example
+///
+/// ```no_run
+/// use gemicro_task::TaskContext;
+/// use gemicro_core::tool::AutoApprove;
+/// use std::sync::Arc;
+///
+/// // Create shared context
+/// let context = TaskContext::new();
+///
+/// // Update when configuration changes
+/// context.set_confirmation_handler(Some(Arc::new(AutoApprove)));
+/// ```
+#[derive(Default)]
+pub struct TaskContext {
+    inner: RwLock<TaskContextInner>,
+}
+
+impl std::fmt::Debug for TaskContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TaskContext")
+            .field("has_tools", &self.tools().is_some())
+            .field(
+                "has_confirmation_handler",
+                &self.confirmation_handler().is_some(),
+            )
+            .field("has_interceptors", &self.interceptors().is_some())
+            .finish()
+    }
+}
+
+#[derive(Default)]
+struct TaskContextInner {
+    tools: Option<Arc<ToolRegistry>>,
+    confirmation_handler: Option<Arc<dyn BatchConfirmationHandler>>,
+    interceptors: Option<Arc<InterceptorChain<ToolCall, ToolResult>>>,
+}
+
+impl TaskContext {
+    /// Create a new empty TaskContext.
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self::default())
+    }
+
+    /// Set the tool registry for subagents.
+    pub fn set_tools(&self, tools: Option<Arc<ToolRegistry>>) {
+        if let Ok(mut inner) = self.inner.write() {
+            inner.tools = tools;
+        }
+    }
+
+    /// Set the confirmation handler for subagent tools.
+    pub fn set_confirmation_handler(&self, handler: Option<Arc<dyn BatchConfirmationHandler>>) {
+        if let Ok(mut inner) = self.inner.write() {
+            inner.confirmation_handler = handler;
+        }
+    }
+
+    /// Set the interceptor chain for subagent tools.
+    pub fn set_interceptors(
+        &self,
+        interceptors: Option<Arc<InterceptorChain<ToolCall, ToolResult>>>,
+    ) {
+        if let Ok(mut inner) = self.inner.write() {
+            inner.interceptors = interceptors;
+        }
+    }
+
+    /// Get the current tools.
+    fn tools(&self) -> Option<Arc<ToolRegistry>> {
+        self.inner.read().ok().and_then(|i| i.tools.clone())
+    }
+
+    /// Get the current confirmation handler.
+    fn confirmation_handler(&self) -> Option<Arc<dyn BatchConfirmationHandler>> {
+        self.inner
+            .read()
+            .ok()
+            .and_then(|i| i.confirmation_handler.clone())
+    }
+
+    /// Get the current interceptors.
+    fn interceptors(&self) -> Option<Arc<InterceptorChain<ToolCall, ToolResult>>> {
+        self.inner.read().ok().and_then(|i| i.interceptors.clone())
+    }
+}
 
 /// Task tool for spawning subagents.
 ///
@@ -44,7 +138,7 @@ pub const DEFAULT_MAX_DEPTH: usize = 3;
 /// let genai_client = genai_rs::Client::builder("api-key".to_string()).build()?;
 /// let llm = LlmClient::new(genai_client, LlmConfig::default());
 /// let registry = Arc::new(RwLock::new(AgentRegistry::new()));
-/// let task = Task::new(registry, Arc::new(llm));
+/// let (task, _task_context) = Task::new(registry, Arc::new(llm));
 ///
 /// // Named agent
 /// let result = task.execute(json!({
@@ -64,6 +158,11 @@ pub const DEFAULT_MAX_DEPTH: usize = 3;
 /// # Ok(())
 /// # }
 /// ```
+/// Task tool for spawning subagents.
+///
+/// This tool uses a shared [`TaskContext`] for tools, confirmation handlers,
+/// and interceptors. The context can be updated by Session after registration,
+/// and Task will see the latest values at execution time.
 #[derive(Clone)]
 pub struct Task {
     /// Agent registry wrapped in RwLock for shared access.
@@ -78,6 +177,9 @@ pub struct Task {
     max_depth: usize,
     /// Orchestration state for concurrency control (if available)
     orchestration: Option<Arc<OrchestrationState>>,
+    /// Shared context for tools, confirmation handlers, and interceptors.
+    /// Updated by Session when configuration changes.
+    shared_context: Arc<TaskContext>,
 }
 
 impl std::fmt::Debug for Task {
@@ -99,14 +201,23 @@ impl Task {
     ///
     /// The registry is wrapped in `RwLock` to allow shared access: the owner
     /// (e.g., CLI Session) can modify it on reload, while Task holds a read view.
-    pub fn new(registry: Arc<RwLock<AgentRegistry>>, llm: Arc<LlmClient>) -> Self {
-        Self {
+    ///
+    /// Returns `(Task, Arc<TaskContext>)` - the caller should store the TaskContext
+    /// and call its setter methods when configuration changes.
+    pub fn new(
+        registry: Arc<RwLock<AgentRegistry>>,
+        llm: Arc<LlmClient>,
+    ) -> (Self, Arc<TaskContext>) {
+        let shared_context = TaskContext::new();
+        let task = Self {
             registry,
             llm,
             parent_context: None,
             max_depth: DEFAULT_MAX_DEPTH,
             orchestration: None,
-        }
+            shared_context: Arc::clone(&shared_context),
+        };
+        (task, shared_context)
     }
 
     /// Set the parent execution context for subagent tracking.
@@ -144,6 +255,69 @@ impl Task {
             .read()
             .map(|r| r.list().iter().map(|s| s.to_string()).collect())
             .unwrap_or_default()
+    }
+
+    /// Build a child context for a subagent with appropriate tool access.
+    ///
+    /// Reads current values from the shared context, so changes made by Session
+    /// after Task registration are visible.
+    fn build_child_context(&self, execution: ExecutionContext, tool_set: &ToolSet) -> AgentContext {
+        let mut context = AgentContext::from_arc(Arc::clone(&self.llm)).with_execution(execution);
+
+        // Apply orchestration if available
+        if let Some(ref orch) = self.orchestration {
+            context = context.with_orchestration(Arc::clone(orch));
+        }
+
+        // Apply confirmation handler from shared context (critical for auto-approve)
+        if let Some(handler) = self.shared_context.confirmation_handler() {
+            context = context.with_confirmation_handler(handler);
+        }
+
+        // Apply interceptors from shared context
+        if let Some(interceptors) = self.shared_context.interceptors() {
+            context = context.with_interceptors(interceptors);
+        }
+
+        // Apply tools based on ToolSet, reading from shared context
+        if let Some(parent_tools) = self.shared_context.tools() {
+            match tool_set {
+                ToolSet::Inherit | ToolSet::All => {
+                    context = context.with_tools_arc(parent_tools);
+                }
+                ToolSet::None => {
+                    // No tools - leave context.tools as None
+                }
+                ToolSet::Specific(names) => {
+                    // Filter parent tools to only include specified ones
+                    let mut filtered = ToolRegistry::new();
+                    for name in names {
+                        if let Some(tool) = parent_tools.get(name) {
+                            filtered.register_arc(tool);
+                        }
+                    }
+                    if !filtered.is_empty() {
+                        context = context.with_tools(filtered);
+                    }
+                }
+                ToolSet::Except(excluded) | ToolSet::InheritExcept(excluded) => {
+                    // Use all parent tools except the specified ones
+                    let mut filtered = ToolRegistry::new();
+                    for tool_name in parent_tools.list() {
+                        if !excluded.iter().any(|e| e == tool_name) {
+                            if let Some(tool) = parent_tools.get(tool_name) {
+                                filtered.register_arc(tool);
+                            }
+                        }
+                    }
+                    if !filtered.is_empty() {
+                        context = context.with_tools(filtered);
+                    }
+                }
+            }
+        }
+
+        context
     }
 }
 
@@ -472,7 +646,7 @@ impl Task {
         name: &str,
         query: &str,
         execution: ExecutionContext,
-        _config: &SubagentConfig,
+        config: &SubagentConfig,
         timeout: Duration,
     ) -> Result<String, ToolError> {
         // Get the agent from registry (acquire read lock in a block to drop before await)
@@ -491,11 +665,8 @@ impl Task {
         };
         // Guard is dropped here at end of block, before any .await
 
-        // Create context for the subagent with execution tracking and orchestration
-        let mut context = AgentContext::from_arc(Arc::clone(&self.llm)).with_execution(execution);
-        if let Some(ref orch) = self.orchestration {
-            context = context.with_orchestration(Arc::clone(orch));
-        }
+        // Create context for the subagent with inherited tools, handlers, and interceptors
+        let context = self.build_child_context(execution, &config.tools);
 
         // Execute the agent with timeout enforcement
         tokio::time::timeout(
@@ -528,11 +699,10 @@ impl Task {
         let agent = gemicro_prompt_agent::PromptAgent::with_system_prompt(&def.system_prompt)
             .map_err(|e| ToolError::ExecutionFailed(format!("Failed to create agent: {}", e)))?;
 
-        // Create context for the subagent with execution tracking and orchestration
-        let mut context = AgentContext::from_arc(Arc::clone(&self.llm)).with_execution(execution);
-        if let Some(ref orch) = self.orchestration {
-            context = context.with_orchestration(Arc::clone(orch));
-        }
+        // Create context for the subagent with inherited tools, handlers, and interceptors
+        // Use the ToolSet from the agent definition (not config, since ephemeral agents
+        // specify their own tool requirements)
+        let context = self.build_child_context(execution, &def.tools);
 
         // Execute the agent with timeout enforcement
         tokio::time::timeout(
@@ -658,7 +828,7 @@ mod tests {
     #[test]
     fn test_task_name_and_description() {
         let registry = create_test_registry();
-        let task = Task::new(registry, create_test_llm());
+        let (task, _) = Task::new(registry, create_test_llm());
 
         assert_eq!(task.name(), "task");
         assert!(!task.description().is_empty());
@@ -667,7 +837,7 @@ mod tests {
     #[test]
     fn test_task_parameters_schema() {
         let registry = create_test_registry();
-        let task = Task::new(registry, create_test_llm());
+        let (task, _) = Task::new(registry, create_test_llm());
 
         let schema = task.parameters_schema();
         assert_eq!(schema["type"], "object");
@@ -682,7 +852,7 @@ mod tests {
     #[tokio::test]
     async fn test_task_missing_agent() {
         let registry = create_test_registry();
-        let task = Task::new(registry, create_test_llm());
+        let (task, _) = Task::new(registry, create_test_llm());
 
         let result = task.execute(json!({"query": "test"})).await;
         assert!(result.is_err());
@@ -692,7 +862,7 @@ mod tests {
     #[tokio::test]
     async fn test_task_missing_query() {
         let registry = create_test_registry();
-        let task = Task::new(registry, create_test_llm());
+        let (task, _) = Task::new(registry, create_test_llm());
 
         let result = task.execute(json!({"agent": "mock_agent"})).await;
         assert!(result.is_err());
@@ -702,7 +872,7 @@ mod tests {
     #[tokio::test]
     async fn test_task_agent_not_found() {
         let registry = create_test_registry();
-        let task = Task::new(registry, create_test_llm());
+        let (task, _) = Task::new(registry, create_test_llm());
 
         let result = task
             .execute(json!({
@@ -723,7 +893,7 @@ mod tests {
     #[test]
     fn test_task_available_agents() {
         let registry = create_test_registry();
-        let task = Task::new(registry, create_test_llm());
+        let (task, _) = Task::new(registry, create_test_llm());
 
         let agents = task.available_agents();
         assert!(agents.contains(&"mock_agent".to_string()));
@@ -732,7 +902,7 @@ mod tests {
     #[test]
     fn test_task_debug() {
         let registry = create_test_registry();
-        let task = Task::new(registry, create_test_llm());
+        let (task, _) = Task::new(registry, create_test_llm());
 
         let debug = format!("{:?}", task);
         assert!(debug.contains("Task"));
@@ -837,7 +1007,8 @@ mod tests {
     fn test_task_with_parent_context() {
         let registry = create_test_registry();
         let parent = ExecutionContext::root();
-        let task = Task::new(registry, create_test_llm()).with_parent_context(parent.clone());
+        let (task, _) = Task::new(registry, create_test_llm());
+        let task = task.with_parent_context(parent.clone());
 
         assert!(task.parent_context.is_some());
         assert_eq!(task.parent_context.unwrap().depth, 0);
@@ -846,7 +1017,8 @@ mod tests {
     #[test]
     fn test_task_with_max_depth() {
         let registry = create_test_registry();
-        let task = Task::new(registry, create_test_llm()).with_max_depth(5);
+        let (task, _) = Task::new(registry, create_test_llm());
+        let task = task.with_max_depth(5);
 
         assert_eq!(task.max_depth, 5);
     }

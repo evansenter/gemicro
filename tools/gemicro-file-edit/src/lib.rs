@@ -148,12 +148,17 @@ impl Tool for FileEdit {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
+        // Resolve relative paths against CWD
         let path = Path::new(path_str);
-
-        // Validate path is absolute
-        if !path.is_absolute() {
-            return Err(ToolError::InvalidInput("Path must be absolute".into()));
-        }
+        let path = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .map_err(|e| {
+                    ToolError::ExecutionFailed(format!("Cannot get current directory: {}", e))
+                })?
+                .join(path)
+        };
 
         // Check old_string is not empty
         if old_string.is_empty() {
@@ -168,7 +173,7 @@ impl Tool for FileEdit {
         }
 
         // Check file exists and get metadata
-        let metadata = fs::metadata(path).await.map_err(|e| {
+        let metadata = fs::metadata(&path).await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 ToolError::NotFound(format!("File not found: {}", path_str))
             } else {
@@ -192,7 +197,7 @@ impl Tool for FileEdit {
         }
 
         // Read file content
-        let content = fs::read_to_string(path)
+        let content = fs::read_to_string(&path)
             .await
             .map_err(|e| ToolError::ExecutionFailed(format!("Failed to read file: {}", e)))?;
 
@@ -222,7 +227,7 @@ impl Tool for FileEdit {
         };
 
         // Write back
-        fs::write(path, &new_content)
+        fs::write(&path, &new_content)
             .await
             .map_err(|e| ToolError::ExecutionFailed(format!("Failed to write file: {}", e)))?;
 
@@ -357,6 +362,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_file_edit_relative_path() {
+        // Relative paths are now resolved against CWD, so this should fail with NotFound
         let tool = FileEdit;
         let result = tool
             .execute(json!({
@@ -367,7 +373,7 @@ mod tests {
             .await;
 
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), ToolError::InvalidInput(_)));
+        assert!(matches!(result.unwrap_err(), ToolError::NotFound(_)));
     }
 
     #[tokio::test]

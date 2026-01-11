@@ -116,15 +116,36 @@ pub fn print_final_result(result: &FinalResult, elapsed: Duration, plain: bool) 
         println!("   Steps: {}/{} succeeded", steps_succeeded, total);
     }
 
-    // Show tool call count if available (agents using explicit function calling)
+    // Show tool call count and timing breakdown if available
     let tool_call_count = result
         .metadata
         .extra
         .get("tool_call_count")
         .and_then(|v| v.as_u64())
         .unwrap_or(0);
+    let tool_time_ms = result
+        .metadata
+        .extra
+        .get("tool_time_ms")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+
     if tool_call_count > 0 {
         println!("   Tool calls: {}", tool_call_count);
+
+        // Show timing breakdown: tool execution vs LLM inference
+        if tool_time_ms > 0 {
+            let total_ms = elapsed.as_millis() as u64;
+            let llm_time_ms = total_ms.saturating_sub(tool_time_ms);
+            let tool_time = Duration::from_millis(tool_time_ms);
+            let llm_time = Duration::from_millis(llm_time_ms);
+
+            println!(
+                "   Time breakdown: {} tools, {} LLM",
+                format_duration(tool_time),
+                format_duration(llm_time)
+            );
+        }
     }
 
     // Show tokens if available and non-zero

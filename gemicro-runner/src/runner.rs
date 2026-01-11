@@ -23,29 +23,31 @@ use std::time::Instant;
 /// # Example
 ///
 /// ```text
-/// // Requires an agent crate like gemicro-deep-research
 /// use gemicro_runner::AgentRunner;
 /// use gemicro_core::{AgentContext, LlmClient, LlmConfig};
-/// use gemicro_deep_research::{DeepResearchAgent, ResearchConfig};
+/// // Assuming you have an agent that implements the Agent trait
 ///
-/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let runner = AgentRunner::new();
-/// let agent = DeepResearchAgent::new(ResearchConfig::default())?;
+/// async fn run_agent(agent: &dyn Agent, context: AgentContext) {
+///     let runner = AgentRunner::new();
 ///
-/// let genai_client = genai_rs::Client::builder("api-key".to_string()).build();
-/// let llm = LlmClient::new(genai_client, LlmConfig::default());
-/// let context = AgentContext::new(llm);
+///     let result = runner.execute_with_tracking(
+///         agent,
+///         "What is Rust?",
+///         context,
+///         |_tracker, status| println!("Status: {}", status),
+///     ).await;
 ///
-/// let metrics = runner.execute_with_tracking(
-///     &agent,
-///     "What is Rust?",
-///     context,
-///     |_tracker, status| println!("Status: {}", status),
-/// ).await?;
-/// println!("Completed in {:?}", metrics.total_duration);
-/// println!("Tokens used: {}", metrics.total_tokens);
-/// # Ok(())
-/// # }
+///     match result {
+///         Ok(metrics) => {
+///             println!("Completed in {:?}", metrics.total_duration);
+///             println!("Tokens used: {}", metrics.total_tokens);
+///         }
+///         Err((error, partial_metrics)) => {
+///             println!("Failed: {}", error);
+///             println!("Partial tokens used: {}", partial_metrics.total_tokens);
+///         }
+///     }
+/// }
 /// ```
 #[derive(Debug, Clone, Copy)]
 pub struct AgentRunner;
@@ -61,6 +63,13 @@ impl AgentRunner {
     /// This is the preferred method for new code. It uses the agent's
     /// `create_tracker()` method instead of requiring external state handlers.
     ///
+    /// # Returns
+    ///
+    /// - `Ok(metrics)` - Execution completed successfully with final metrics
+    /// - `Err((error, partial_metrics))` - Execution failed, but partial metrics
+    ///   are still returned. This allows callers to log duration, token usage,
+    ///   and other stats even when the agent fails mid-execution.
+    ///
     /// # Arguments
     ///
     /// * `agent` - The agent to execute
@@ -74,18 +83,20 @@ impl AgentRunner {
     /// use gemicro_runner::AgentRunner;
     /// use gemicro_core::{Agent, AgentContext};
     ///
-    /// async fn example(agent: &dyn Agent, context: AgentContext) -> Result<(), Box<dyn std::error::Error>> {
+    /// async fn example(agent: &dyn Agent, context: AgentContext) {
     ///     let runner = AgentRunner::new();
     ///
-    ///     let metrics = runner.execute_with_tracking(
+    ///     match runner.execute_with_tracking(
     ///         agent,
     ///         "query",
     ///         context,
-    ///         |tracker, status| {
-    ///             println!("Status: {}", status);
-    ///         },
-    ///     ).await?;
-    ///     Ok(())
+    ///         |_tracker, status| println!("Status: {}", status),
+    ///     ).await {
+    ///         Ok(metrics) => println!("Success: {:?}", metrics.total_duration),
+    ///         Err((error, partial)) => {
+    ///             println!("Failed after {:?}: {}", partial.total_duration, error);
+    ///         }
+    ///     }
     /// }
     /// ```
     pub async fn execute_with_tracking<F>(
@@ -94,7 +105,7 @@ impl AgentRunner {
         query: &str,
         context: AgentContext,
         mut on_status: F,
-    ) -> Result<ExecutionMetrics, AgentError>
+    ) -> Result<ExecutionMetrics, (AgentError, ExecutionMetrics)>
     where
         F: FnMut(&dyn ExecutionTracking, &str),
     {
@@ -106,10 +117,19 @@ impl AgentRunner {
         let start = Instant::now();
 
         while let Some(result) = stream.next().await {
-            let update = result?;
-            tracker.handle_event(&update);
-            if let Some(msg) = tracker.status_message() {
-                on_status(tracker.as_ref(), msg);
+            match result {
+                Ok(update) => {
+                    tracker.handle_event(&update);
+                    if let Some(msg) = tracker.status_message() {
+                        on_status(tracker.as_ref(), msg);
+                    }
+                }
+                Err(e) => {
+                    // Return partial metrics along with the error
+                    let partial_metrics =
+                        ExecutionMetrics::from_tracker(tracker.as_ref(), start.elapsed());
+                    return Err((e, partial_metrics));
+                }
             }
         }
 
@@ -124,6 +144,12 @@ impl AgentRunner {
     /// When `coordination` is provided, this method uses `tokio::select!` to
     /// interleave external events from the event bus with agent updates. External
     /// events are converted to `AgentUpdate` instances with `event_type = "external_event"`.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(metrics)` - Execution completed successfully with final metrics
+    /// - `Err((error, partial_metrics))` - Execution failed, but partial metrics
+    ///   are still returned for logging and debugging purposes.
     ///
     /// # Arguments
     ///
@@ -145,14 +171,14 @@ impl AgentRunner {
     /// use gemicro_runner::AgentRunner;
     /// use gemicro_core::{Agent, AgentContext, HubCoordination};
     ///
-    /// async fn example(agent: &dyn Agent, context: AgentContext) -> Result<(), Box<dyn std::error::Error>> {
+    /// async fn example(agent: &dyn Agent, context: AgentContext) {
     ///     let runner = AgentRunner::new();
     ///
     ///     // Connect to event bus (optional)
     ///     let coord = HubCoordination::connect("http://localhost:8765", "my-session").await.ok();
     ///     let coord_boxed = coord.map(|c| Box::new(c) as Box<dyn Coordination>);
     ///
-    ///     let metrics = runner.execute_with_events(
+    ///     match runner.execute_with_events(
     ///         agent,
     ///         "query",
     ///         context,
@@ -163,8 +189,12 @@ impl AgentRunner {
     ///                 _ => println!("Agent: {}", update.message),
     ///             }
     ///         },
-    ///     ).await?;
-    ///     Ok(())
+    ///     ).await {
+    ///         Ok(metrics) => println!("Completed in {:?}", metrics.total_duration),
+    ///         Err((error, partial)) => {
+    ///             println!("Failed after {:?}: {}", partial.total_duration, error);
+    ///         }
+    ///     }
     /// }
     /// ```
     pub async fn execute_with_events<F>(
@@ -174,7 +204,7 @@ impl AgentRunner {
         context: AgentContext,
         coordination: Option<Box<dyn Coordination>>,
         mut on_update: F,
-    ) -> Result<ExecutionMetrics, AgentError>
+    ) -> Result<ExecutionMetrics, (AgentError, ExecutionMetrics)>
     where
         F: FnMut(&AgentUpdate),
     {
@@ -187,9 +217,17 @@ impl AgentRunner {
         // If no coordination, fall back to simple stream consumption
         let Some(mut coord) = coordination else {
             while let Some(result) = stream.next().await {
-                let update = result?;
-                tracker.handle_event(&update);
-                on_update(&update);
+                match result {
+                    Ok(update) => {
+                        tracker.handle_event(&update);
+                        on_update(&update);
+                    }
+                    Err(e) => {
+                        let partial_metrics =
+                            ExecutionMetrics::from_tracker(tracker.as_ref(), start.elapsed());
+                        return Err((e, partial_metrics));
+                    }
+                }
             }
             return Ok(ExecutionMetrics::from_tracker(
                 tracker.as_ref(),
@@ -213,7 +251,11 @@ impl AgentRunner {
                                 break;
                             }
                         }
-                        Some(Err(e)) => return Err(e),
+                        Some(Err(e)) => {
+                            let partial_metrics =
+                                ExecutionMetrics::from_tracker(tracker.as_ref(), start.elapsed());
+                            return Err((e, partial_metrics));
+                        }
                         None => break, // Stream exhausted
                     }
                 }
@@ -255,7 +297,9 @@ impl AgentRunner {
     ///
     /// # Returns
     ///
-    /// A tuple of `(ExecutionMetrics, Trajectory)` on success.
+    /// - `Ok((metrics, trajectory))` - Execution completed successfully
+    /// - `Err((error, partial_metrics, partial_trajectory))` - Execution failed, but partial
+    ///   data is still returned for debugging and analysis.
     ///
     /// # Example
     ///
@@ -288,7 +332,7 @@ impl AgentRunner {
         agent_config: serde_json::Value,
         genai_client: genai_rs::Client,
         llm_config: LlmConfig,
-    ) -> Result<(ExecutionMetrics, Trajectory), AgentError> {
+    ) -> Result<(ExecutionMetrics, Trajectory), (AgentError, ExecutionMetrics, Trajectory)> {
         // Create recording LLM client
         let llm = LlmClient::with_recording(genai_client, llm_config.clone());
         let context = AgentContext::new(llm);
@@ -305,30 +349,65 @@ impl AgentRunner {
         let start = Instant::now();
         let mut events: Vec<AgentUpdate> = Vec::new();
 
+        // Helper to build trajectory from current state
+        let build_trajectory = |events: Vec<AgentUpdate>,
+                                llm_ref: &std::sync::Arc<LlmClient>,
+                                query: &str,
+                                agent: &dyn Agent,
+                                agent_config: &serde_json::Value,
+                                duration_ms: u64,
+                                final_answer: Option<String>| {
+            let steps = llm_ref.take_steps();
+            TrajectoryBuilder::default()
+                .query(query)
+                .agent_name(agent.name())
+                .agent_config(agent_config.clone())
+                .model(gemicro_core::MODEL)
+                .build(
+                    steps,
+                    events,
+                    duration_ms,
+                    final_answer.map(serde_json::Value::String),
+                )
+        };
+
         while let Some(result) = stream.next().await {
-            let update = result?;
-            events.push(update.clone());
-            tracker.handle_event(&update);
+            match result {
+                Ok(update) => {
+                    events.push(update.clone());
+                    tracker.handle_event(&update);
+                }
+                Err(e) => {
+                    // Return partial metrics and trajectory along with the error
+                    let total_duration = start.elapsed();
+                    let partial_metrics =
+                        ExecutionMetrics::from_tracker(tracker.as_ref(), total_duration);
+                    let partial_trajectory = build_trajectory(
+                        events,
+                        &llm_ref,
+                        query,
+                        agent,
+                        &agent_config,
+                        total_duration.as_millis() as u64,
+                        partial_metrics.final_answer.clone(),
+                    );
+                    return Err((e, partial_metrics, partial_trajectory));
+                }
+            }
         }
 
         let total_duration = start.elapsed();
         let metrics = ExecutionMetrics::from_tracker(tracker.as_ref(), total_duration);
 
-        // Extract recorded steps from the LLM client
-        let steps = llm_ref.take_steps();
-
-        // Build trajectory
-        let trajectory = TrajectoryBuilder::default()
-            .query(query)
-            .agent_name(agent.name())
-            .agent_config(agent_config)
-            .model(gemicro_core::MODEL)
-            .build(
-                steps,
-                events,
-                total_duration.as_millis() as u64,
-                metrics.final_answer.clone().map(serde_json::Value::String),
-            );
+        let trajectory = build_trajectory(
+            events,
+            &llm_ref,
+            query,
+            agent,
+            &agent_config,
+            total_duration.as_millis() as u64,
+            metrics.final_answer.clone(),
+        );
 
         Ok((metrics, trajectory))
     }
