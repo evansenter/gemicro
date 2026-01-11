@@ -93,6 +93,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+      - name: Install mold linker
+        run: sudo apt-get update && sudo apt-get install -y mold
       - uses: Swatinem/rust-cache@v2
       - name: Run clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
@@ -103,6 +105,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Install mold linker
+        run: sudo apt-get update && sudo apt-get install -y mold
       - uses: Swatinem/rust-cache@v2
       - name: Check documentation
         run: cargo doc --workspace --no-deps --document-private-items
