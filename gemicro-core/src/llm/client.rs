@@ -1044,6 +1044,42 @@ mod tests {
         assert!(!LlmError::GenAi(genai_err).is_retryable());
     }
 
+    // Tests for retry_after() delegation
+    #[test]
+    fn test_retry_after_genai_with_duration() {
+        let genai_err = genai_rs::GenaiError::Api {
+            status_code: 429,
+            message: "Rate limited".to_string(),
+            request_id: None,
+            retry_after: Some(std::time::Duration::from_secs(60)),
+        };
+        assert_eq!(
+            LlmError::GenAi(genai_err).retry_after(),
+            Some(std::time::Duration::from_secs(60))
+        );
+    }
+
+    #[test]
+    fn test_retry_after_genai_without_duration() {
+        let genai_err = genai_rs::GenaiError::Api {
+            status_code: 500,
+            message: "Server error".to_string(),
+            request_id: None,
+            retry_after: None,
+        };
+        assert_eq!(LlmError::GenAi(genai_err).retry_after(), None);
+    }
+
+    #[test]
+    fn test_retry_after_non_genai_returns_none() {
+        assert_eq!(LlmError::Timeout(5000).retry_after(), None);
+        assert_eq!(
+            LlmError::RateLimit("Too many requests".to_string()).retry_after(),
+            None
+        );
+        assert_eq!(LlmError::NoContent.retry_after(), None);
+    }
+
     #[test]
     fn test_validate_request_empty_prompt() {
         let genai_client = genai_rs::Client::builder("test-key".to_string())

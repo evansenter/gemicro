@@ -177,13 +177,13 @@ Use `ignore` for examples that compile but require runtime dependencies (API key
 
 ## Dependencies
 
-- **genai-rs**: Git dependency (`evansenter/genai-rs`, main branch)
+- **genai-rs**: Published on [crates.io](https://crates.io/crates/genai-rs)
 - **tokio**: Async runtime
 - **async-stream**: Streaming agent implementations
 
 ### Updating genai-rs
 
-After changes merge to genai-rs main, run `cargo update -p genai-rs` to pull them into gemicro. Check for breaking changes in the genai-rs changelog before updating.
+Bump the version in `Cargo.toml` when new releases are published. Check the [changelog](https://github.com/evansenter/genai-rs/releases) for breaking changes before updating.
 
 ## Model Selection
 
