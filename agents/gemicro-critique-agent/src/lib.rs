@@ -478,6 +478,11 @@ impl std::fmt::Display for Severity {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct CritiqueAgentConfig {
+    /// Model to use for LLM calls.
+    ///
+    /// Default: "gemini-3-flash-preview"
+    pub model: String,
+
     /// Base system instruction (criteria-specific instructions are added).
     pub system_instruction: String,
 
@@ -495,6 +500,7 @@ pub struct CritiqueAgentConfig {
 impl Default for CritiqueAgentConfig {
     fn default() -> Self {
         Self {
+            model: "gemini-3-flash-preview".to_string(),
             system_instruction: DEFAULT_SYSTEM.to_string(),
             timeout: Duration::from_secs(60),
             retry_threshold: CritiqueVerdict::NeedsRevision,
@@ -503,6 +509,13 @@ impl Default for CritiqueAgentConfig {
 }
 
 impl CritiqueAgentConfig {
+    /// Set the model to use for LLM calls.
+    #[must_use]
+    pub fn with_model(mut self, model: impl Into<String>) -> Self {
+        self.model = model.into();
+        self
+    }
+
     /// Set the base system instruction.
     #[must_use]
     pub fn with_system_instruction(mut self, instruction: impl Into<String>) -> Self {
@@ -853,6 +866,7 @@ impl Agent for CritiqueAgent {
             let timeout = remaining_time(start, config.timeout, "critique")?;
 
             let request = context.llm.client().interaction()
+                .with_model(&config.model)
                 .with_system_instruction(&system)
                 .with_text(&prompt)
                 .with_response_format(CritiqueOutput::schema())

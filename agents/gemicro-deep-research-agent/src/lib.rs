@@ -8,7 +8,13 @@
 //! The agent follows a three-phase pattern:
 //! 1. **Decomposition**: Break the query into focused sub-questions
 //! 2. **Parallel Execution**: Answer each sub-question concurrently
-//! 3. **Synthesis**: Combine findings into a comprehensive answer
+//! 3. **Synthesis**: Combine findings into a comprehensive answer (streaming)
+//!
+//! # Limitations
+//!
+//! - **Token counts unavailable for synthesis**: The synthesis phase uses streaming
+//!   to provide real-time output, but streaming responses don't include token usage
+//!   metadata. Token counts are only available for decomposition and sub-query phases.
 //!
 //! # Example
 //!
@@ -18,7 +24,7 @@
 //! use futures_util::StreamExt;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! let genai_client = genai_rs::Client::builder("api-key".to_string()).build().map_err(|e| AgentError::Other(e.to_string()))?;
+//! let genai_client = genai_rs::Client::builder("api-key".to_string()).build()?;
 //! let context = AgentContext::new(LlmClient::new(genai_client, LlmConfig::default()));
 //! let agent = DeepResearchAgent::new(DeepResearchAgentConfig::default())?;
 //!

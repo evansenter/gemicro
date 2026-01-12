@@ -78,6 +78,11 @@ Based on the above, what should you do next? Think step by step, then choose a t
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct ReactAgentConfig {
+    /// Model to use for LLM calls
+    ///
+    /// Default: "gemini-3-flash-preview"
+    pub model: String,
+
     /// Maximum number of thought-action-observation iterations
     ///
     /// Default: 10
@@ -103,6 +108,13 @@ pub struct ReactAgentConfig {
 }
 
 impl ReactAgentConfig {
+    /// Set the model to use for LLM calls.
+    #[must_use]
+    pub fn with_model(mut self, model: impl Into<String>) -> Self {
+        self.model = model.into();
+        self
+    }
+
     /// Set the maximum number of iterations.
     #[must_use]
     pub fn with_max_iterations(mut self, max_iterations: usize) -> Self {
@@ -170,6 +182,7 @@ impl ReactAgentConfig {
 impl Default for ReactAgentConfig {
     fn default() -> Self {
         Self {
+            model: "gemini-3-flash-preview".to_string(),
             max_iterations: 10,
             available_tools: vec!["web_search".to_string(), "calculator".to_string()],
             use_google_search: true,

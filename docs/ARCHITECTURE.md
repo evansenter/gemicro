@@ -53,16 +53,16 @@ The `LlmClient` wraps genai_rs to provide:
 ```rust
 // Standard usage - build with InteractionBuilder, execute with generate()
 let request = context.llm.client().interaction()
-    .user_text("What is 2+2?")
+    .with_text("What is 2+2?")
     .build();
 let response = context.llm.generate(request).await?;
 
 // With function calling (callback API - handles loop internally)
 let request = context.llm.client().interaction()
-    .system_instruction(system_prompt)
-    .user_text(query)
-    .functions(&function_declarations)
-    .store(true)  // Enable continuation
+    .with_system_instruction(system_prompt)
+    .with_text(query)
+    .with_functions(&function_declarations)
+    .with_store_enabled()  // Enable continuation
     .build();
 let result = context.llm.generate_with_tools(
     request,
@@ -73,19 +73,19 @@ let result = context.llm.generate_with_tools(
 
 // Or use primitives for fine-grained control (event emission, custom flow)
 let request = context.llm.client().interaction()
-    .system_instruction(system_prompt)
-    .user_text(query)
-    .functions(&function_declarations)
-    .store(true)
+    .with_system_instruction(system_prompt)
+    .with_text(query)
+    .with_functions(&function_declarations)
+    .with_store_enabled()
     .build();
 let response = context.llm.generate(request).await?;
 
 // Continuation (sending function results back)
 let continuation = context.llm.client().interaction()
-    .previous_interaction_id(interaction_id)
-    .functions(&function_declarations)
-    .function_results(results)
-    .store(true)
+    .with_previous_interaction(interaction_id)
+    .with_functions(&function_declarations)
+    .with_content(results)
+    .with_store_enabled()
     .build();
 let response = context.llm.generate(continuation).await?;
 ```
@@ -181,10 +181,10 @@ Single or multi-turn LLM calls with optional tools:
 
 ```rust
 let request = context.llm.client().interaction()
-    .system_instruction(&system_prompt)
-    .user_text(&query)
-    .functions(&declarations)
-    .store(true)
+    .with_system_instruction(&system_prompt)
+    .with_text(&query)
+    .with_functions(&declarations)
+    .with_store_enabled()
     .build();
 let response = context.llm.generate(request).await?;
 
@@ -192,10 +192,10 @@ let response = context.llm.generate(request).await?;
 if !response.function_calls().is_empty() {
     // Execute tools, collect results
     let continuation = context.llm.client().interaction()
-        .previous_interaction_id(id)
-        .functions(&declarations)
-        .function_results(results)
-        .store(true)
+        .with_previous_interaction(id)
+        .with_functions(&declarations)
+        .with_content(results)
+        .with_store_enabled()
         .build();
     let response = context.llm.generate(continuation).await?;
 }

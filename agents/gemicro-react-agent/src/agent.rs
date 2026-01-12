@@ -130,6 +130,7 @@ impl ReactAgent {
                 let schema = Self::react_step_schema(&config.available_tools);
 
                 let request = context.llm.client().interaction()
+                    .with_model(&config.model)
                     .with_system_instruction(&config.prompts.system)
                     .with_text(&prompt)
                     .with_response_format(schema)
@@ -209,6 +210,7 @@ impl ReactAgent {
                 let (observation, is_error) = if step.action.tool == "web_search" && config.use_google_search {
                     // Stream web search for real-time output
                     let builder = context.llm.client().interaction()
+                        .with_model(&config.model)
                         .with_system_instruction("You are a research assistant. Provide a concise, factual answer based on web search results. Include key facts and numbers.")
                         .with_text(&step.action.input)
                         .with_google_search();
@@ -396,6 +398,7 @@ impl ReactAgent {
         }
 
         let request = match context.llm.client().interaction()
+            .with_model(&config.model)
             .with_system_instruction("You are a research assistant. Provide a concise, factual answer based on web search results. Include key facts and numbers.")
             .with_text(query)
             .with_google_search()

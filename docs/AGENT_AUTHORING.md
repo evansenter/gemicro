@@ -262,8 +262,8 @@ impl Agent for PromptAgent {
             let timeout = remaining_time(start, config.timeout, "query")?;
 
             let request = context.llm.client().interaction()
-                .system_instruction(&config.system_prompt)
-                .user_text(&query)
+                .with_system_instruction(&config.system_prompt)
+                .with_text(&query)
                 .build();
 
             // Wrap LLM call to convert LlmError -> AgentError
