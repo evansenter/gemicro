@@ -16,7 +16,7 @@
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! let agent = PromptAgent::new(PromptAgentConfig::default())?;
 //!
-//! let genai = genai_rs::Client::builder("api-key".to_string()).build().map_err(|e| AgentError::Other(e.to_string()))?;
+//! let genai = genai_rs::Client::builder("api-key".to_string()).build()?;
 //! let context = AgentContext::new(LlmClient::new(genai, LlmConfig::default()));
 //!
 //! let stream = agent.execute("What is Rust?", context);
@@ -262,7 +262,7 @@ impl PromptAgentConfig {
 /// let agent = PromptAgent::new(config)?;
 ///
 /// // Create context WITH explicit tools
-/// let genai = genai_rs::Client::builder("api-key".to_string()).build().map_err(|e| AgentError::Other(e.to_string()))?;
+/// let genai = genai_rs::Client::builder("api-key".to_string()).build()?;
 /// let registry = ToolRegistry::new();
 /// // registry.register(Calculator); // Register your tools
 ///
@@ -285,7 +285,7 @@ impl PromptAgentConfig {
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// let agent = PromptAgent::new(PromptAgentConfig::default())?;
 ///
-/// let genai = genai_rs::Client::builder("api-key".to_string()).build().map_err(|e| AgentError::Other(e.to_string()))?;
+/// let genai = genai_rs::Client::builder("api-key".to_string()).build()?;
 /// let context = AgentContext::new(LlmClient::new(genai, LlmConfig::default()));
 ///
 /// let stream = agent.execute("What is Rust?", context);
