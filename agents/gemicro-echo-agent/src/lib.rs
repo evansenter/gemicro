@@ -15,7 +15,7 @@
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! let agent = EchoAgent;
 //!
-//! let genai = genai_rs::Client::builder("unused".to_string()).build().map_err(|e| AgentError::Other(e.to_string()))?;
+//! let genai = genai_rs::Client::builder("unused".to_string()).build()?;
 //! let context = AgentContext::new(LlmClient::new(genai, LlmConfig::default()));
 //!
 //! let stream = agent.execute("Hello, world!", context);
