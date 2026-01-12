@@ -50,13 +50,13 @@ jobs:
           - group: cli
             packages: "gemicro-cli"
           - group: research-qa
-            packages: "gemicro-deep-research gemicro-prompt-agent"
+            packages: "gemicro-deep-research-agent gemicro-prompt-agent"
           - group: react-tools
-            packages: "gemicro-react"
+            packages: "gemicro-react-agent"
           - group: core-eval
             packages: "gemicro-core gemicro-eval"
           - group: developer
-            packages: "gemicro-developer"
+            packages: "gemicro-developer-agent"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

@@ -3,7 +3,7 @@
 //! These tests require a valid GEMINI_API_KEY environment variable.
 
 use gemicro_core::{AgentContext, LlmClient, LlmConfig};
-use gemicro_critique::{CritiqueAgent, CritiqueConfig, CritiqueCriteria, CritiqueInput};
+use gemicro_critique_agent::{CritiqueAgent, CritiqueAgentConfig, CritiqueCriteria, CritiqueInput};
 use std::time::Duration;
 
 fn get_api_key() -> Option<String> {
@@ -33,7 +33,7 @@ async fn test_critique_ground_truth_correct_answer() {
 
     let client = create_test_client(&api_key);
     let context = AgentContext::new(client);
-    let agent = CritiqueAgent::new(CritiqueConfig::default()).unwrap();
+    let agent = CritiqueAgent::new(CritiqueAgentConfig::default()).unwrap();
 
     // Test: Correct answer
     let input = CritiqueInput::new("Paris").with_criteria(CritiqueCriteria::GroundTruth {
@@ -69,7 +69,7 @@ async fn test_critique_ground_truth_incorrect_answer() {
 
     let client = create_test_client(&api_key);
     let context = AgentContext::new(client);
-    let agent = CritiqueAgent::new(CritiqueConfig::default()).unwrap();
+    let agent = CritiqueAgent::new(CritiqueAgentConfig::default()).unwrap();
 
     // Test: Incorrect answer
     let input = CritiqueInput::new("London").with_criteria(CritiqueCriteria::GroundTruth {
@@ -104,7 +104,7 @@ async fn test_critique_ground_truth_semantic_equivalence() {
 
     let client = create_test_client(&api_key);
     let context = AgentContext::new(client);
-    let agent = CritiqueAgent::new(CritiqueConfig::default()).unwrap();
+    let agent = CritiqueAgent::new(CritiqueAgentConfig::default()).unwrap();
 
     // Test: Semantically equivalent but differently worded
     let input = CritiqueInput::new("William Shakespeare wrote Romeo and Juliet").with_criteria(

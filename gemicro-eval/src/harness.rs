@@ -106,11 +106,11 @@ impl EvalConfig {
 /// ```no_run
 /// use gemicro_eval::{EvalHarness, EvalConfig, HotpotQA, Scorers};
 /// use gemicro_core::{LlmClient, LlmConfig};
-/// use gemicro_deep_research::{DeepResearchAgent, ResearchConfig};
+/// use gemicro_deep_research_agent::{DeepResearchAgent, DeepResearchAgentConfig};
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// // Create agent and LLM client
-/// let agent = DeepResearchAgent::new(ResearchConfig::default())?;
+/// let agent = DeepResearchAgent::new(DeepResearchAgentConfig::default())?;
 /// let genai_client = genai_rs::Client::builder("api-key".to_string()).build()?;
 /// let llm = LlmClient::new(genai_client, LlmConfig::default());
 ///
@@ -226,10 +226,10 @@ impl EvalHarness {
     /// ```no_run
     /// use gemicro_eval::{EvalHarness, EvalConfig, EvalProgress, HotpotQA, Scorers};
     /// use gemicro_core::{LlmClient, LlmConfig};
-    /// use gemicro_deep_research::{DeepResearchAgent, ResearchConfig};
+    /// use gemicro_deep_research_agent::{DeepResearchAgent, DeepResearchAgentConfig};
     ///
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let agent = DeepResearchAgent::new(ResearchConfig::default())?;
+    /// let agent = DeepResearchAgent::new(DeepResearchAgentConfig::default())?;
     /// let genai_client = genai_rs::Client::builder("api-key".to_string()).build()?;
     /// let llm = LlmClient::new(genai_client, LlmConfig::default());
     /// let harness = EvalHarness::new(EvalConfig::default());

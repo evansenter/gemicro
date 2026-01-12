@@ -97,6 +97,11 @@ const MAX_ITERATIONS: usize = 100;
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct PromptAgentConfig {
+    /// Model to use for LLM requests.
+    ///
+    /// Default: "gemini-3-flash-preview"
+    pub model: String,
+
     /// Total timeout for the query execution.
     pub timeout: Duration,
 
@@ -119,6 +124,7 @@ pub struct PromptAgentConfig {
 impl Default for PromptAgentConfig {
     fn default() -> Self {
         Self {
+            model: "gemini-3-flash-preview".to_string(),
             timeout: Duration::from_secs(30),
             system_prompt:
                 "You are a helpful assistant. Answer questions concisely and accurately."
@@ -130,6 +136,13 @@ impl Default for PromptAgentConfig {
 }
 
 impl PromptAgentConfig {
+    /// Set the model to use for LLM requests.
+    #[must_use]
+    pub fn with_model(mut self, model: impl Into<String>) -> Self {
+        self.model = model.into();
+        self
+    }
+
     /// Set the timeout for query execution.
     #[must_use]
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
@@ -479,6 +492,7 @@ impl Agent for PromptAgent {
                     .llm
                     .client()
                     .interaction()
+                    .with_model(&config.model)
                     .with_system_instruction(&config.system_prompt)
                     .with_text(&query)
                     .with_functions(function_declarations.clone())
@@ -598,6 +612,7 @@ impl Agent for PromptAgent {
                         .llm
                         .client()
                         .interaction()
+                        .with_model(&config.model)
                         .with_previous_interaction(&interaction_id)
                         .with_functions(function_declarations.clone())
                         .with_content(function_results)
@@ -625,6 +640,7 @@ impl Agent for PromptAgent {
                     .llm
                     .client()
                     .interaction()
+                    .with_model(&config.model)
                     .with_system_instruction(&config.system_prompt)
                     .with_text(&query)
                     .build().map_err(|e| AgentError::Other(e.to_string()))?;

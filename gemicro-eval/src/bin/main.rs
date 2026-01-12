@@ -4,13 +4,13 @@
 
 use clap::Parser;
 use gemicro_core::{LlmClient, LlmConfig};
-use gemicro_deep_research::{DeepResearchAgent, ResearchConfig};
+use gemicro_deep_research_agent::{DeepResearchAgent, DeepResearchAgentConfig};
 use gemicro_eval::{
     Contains, CritiqueScorer, Dataset, EvalConfig, EvalHarness, EvalProgress, EvalSummary,
     HotpotQA, JsonFileDataset, Scorers, GSM8K,
 };
 use gemicro_prompt_agent::{PromptAgent, PromptAgentConfig};
-use gemicro_react::{ReactAgent, ReactConfig};
+use gemicro_react_agent::{ReactAgent, ReactAgentConfig};
 use gemicro_runner::AgentRegistry;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::path::PathBuf;
@@ -160,11 +160,11 @@ fn create_registry() -> AgentRegistry {
     let mut registry = AgentRegistry::new();
 
     registry.register("deep_research", || {
-        Box::new(DeepResearchAgent::new(ResearchConfig::default()).unwrap())
+        Box::new(DeepResearchAgent::new(DeepResearchAgentConfig::default()).unwrap())
     });
 
     registry.register("react", || {
-        Box::new(ReactAgent::new(ReactConfig::default()).unwrap())
+        Box::new(ReactAgent::new(ReactAgentConfig::default()).unwrap())
     });
 
     registry.register("prompt_agent", || {

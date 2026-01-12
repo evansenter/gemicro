@@ -14,11 +14,11 @@ gemicro-loader = { path = "../gemicro-loader" }
 gemicro-runner = { path = "../gemicro-runner" }
 
 # Agent crates - CLI needs all agents it uses
-gemicro-critique = { path = "../agents/gemicro-critique" }
-gemicro-deep-research = { path = "../agents/gemicro-deep-research" }
-gemicro-developer = { path = "../agents/gemicro-developer" }
-gemicro-echo = { path = "../agents/gemicro-echo" }
-gemicro-react = { path = "../agents/gemicro-react" }
+gemicro-critique-agent = { path = "../agents/gemicro-critique-agent" }
+gemicro-deep-research-agent = { path = "../agents/gemicro-deep-research-agent" }
+gemicro-developer-agent = { path = "../agents/gemicro-developer-agent" }
+gemicro-echo-agent = { path = "../agents/gemicro-echo-agent" }
+gemicro-react-agent = { path = "../agents/gemicro-react-agent" }
 gemicro-prompt-agent = { path = "../agents/gemicro-prompt-agent" }
 
 # Tool crates - CLI needs these for explicit tool registration

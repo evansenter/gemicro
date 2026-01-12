@@ -2,7 +2,7 @@
 
 use clap::Parser;
 use gemicro_core::LlmConfig;
-use gemicro_deep_research::ResearchConfig;
+use gemicro_deep_research_agent::DeepResearchAgentConfig;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -183,9 +183,9 @@ impl Args {
             .with_retry_base_delay_ms(1000)
     }
 
-    /// Build ResearchConfig from CLI arguments.
-    pub fn research_config(&self) -> ResearchConfig {
-        ResearchConfig::default()
+    /// Build DeepResearchAgentConfig from CLI arguments.
+    pub fn research_config(&self) -> DeepResearchAgentConfig {
+        DeepResearchAgentConfig::default()
             .with_min_sub_queries(self.min_sub_queries)
             .with_max_sub_queries(self.max_sub_queries)
             .with_max_concurrent_sub_queries(self.max_concurrent)

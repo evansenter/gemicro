@@ -8,8 +8,9 @@ fmt:
 	cargo fmt --all -- --check
 
 # Run clippy with warnings as errors (matches CI: --all-targets --all-features)
+# Uses --profile test to share compilation artifacts with nextest
 clippy:
-	cargo clippy --workspace --all-targets --all-features -- -D warnings
+	cargo clippy --workspace --all-targets --all-features --profile test -- -D warnings
 
 # Unit tests only (doctests run in CI - excluded locally for speed)
 test:

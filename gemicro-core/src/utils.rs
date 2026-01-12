@@ -13,7 +13,7 @@ use genai_rs::InteractionResponse;
 /// # Example
 ///
 /// ```no_run
-/// use gemicro_core::{LlmClient, LlmConfig, MODEL, extract_total_tokens};
+/// use gemicro_core::{LlmClient, LlmConfig, extract_total_tokens};
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// let client = LlmClient::new(
@@ -21,7 +21,7 @@ use genai_rs::InteractionResponse;
 ///     LlmConfig::default(),
 /// );
 /// let request = client.client().interaction()
-///     .with_model(MODEL)
+///     .with_model("gemini-3-flash-preview")
 ///     .with_text("Hello")
 ///     .build()?;
 /// let response = client.generate(request).await?;

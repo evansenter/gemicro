@@ -14,8 +14,8 @@
 //! 5. Compares performance metrics
 
 use gemicro_core::{AgentContext, LlmClient, LlmConfig};
-use gemicro_critique::{CritiqueAgent, CritiqueConfig, CritiqueCriteria, CritiqueInput};
-use gemicro_deep_research::{DeepResearchAgent, ResearchConfig};
+use gemicro_critique_agent::{CritiqueAgent, CritiqueAgentConfig, CritiqueCriteria, CritiqueInput};
+use gemicro_deep_research_agent::{DeepResearchAgent, DeepResearchAgentConfig};
 use gemicro_eval::{EvalConfig, EvalHarness, EvalProgress, JsonFileDataset, Scorers};
 use gemicro_runner::AgentRegistry;
 use std::env;
@@ -50,7 +50,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     registry.register("conservative", || {
         Box::new(
             DeepResearchAgent::new(
-                ResearchConfig::default()
+                DeepResearchAgentConfig::default()
                     .with_min_sub_queries(2)
                     .with_max_sub_queries(2)
                     .with_total_timeout(Duration::from_secs(120)),
@@ -63,7 +63,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     registry.register("aggressive", || {
         Box::new(
             DeepResearchAgent::new(
-                ResearchConfig::default()
+                DeepResearchAgentConfig::default()
                     .with_min_sub_queries(4)
                     .with_max_sub_queries(5)
                     .with_total_timeout(Duration::from_secs(180)),
@@ -74,7 +74,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Register the Critique agent for evaluation (demonstrates agents are composable)
     registry.register("critique", || {
-        Box::new(CritiqueAgent::new(CritiqueConfig::default()).expect("Invalid config"))
+        Box::new(CritiqueAgent::new(CritiqueAgentConfig::default()).expect("Invalid config"))
     });
 
     println!("Agents registered:");
@@ -148,7 +148,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // The registry registration above demonstrates agents are composable/registrable.
         println!("   Running critique agent...");
         let critique_agent =
-            CritiqueAgent::new(CritiqueConfig::default()).expect("default config is valid");
+            CritiqueAgent::new(CritiqueAgentConfig::default()).expect("default config is valid");
 
         for result in &mut summary.results {
             if let Some(predicted) = &result.predicted {

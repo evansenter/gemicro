@@ -105,7 +105,7 @@ For advanced use cases needing direct genai_rs access:
 ```rust
 let genai_client = context.llm.client();
 genai_client.interaction()
-    .with_model(MODEL)
+    .with_model("gemini-3-flash-preview")
     // ... custom configuration
     .create()
     .await

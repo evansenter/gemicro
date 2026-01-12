@@ -205,7 +205,9 @@ impl Scorer for CritiqueScorer {
 
     fn score(&self, predicted: &str, ground_truth: &str) -> f64 {
         use gemicro_core::AgentContext;
-        use gemicro_critique::{CritiqueAgent, CritiqueConfig, CritiqueCriteria, CritiqueInput};
+        use gemicro_critique_agent::{
+            CritiqueAgent, CritiqueAgentConfig, CritiqueCriteria, CritiqueInput,
+        };
 
         // Handle empty predicted strings: an empty answer is always incorrect (score 0.0).
         // CritiqueAgent validates that content is non-empty and would return an error,
@@ -215,7 +217,8 @@ impl Scorer for CritiqueScorer {
         }
 
         // Create critique agent with ground truth criteria
-        let agent = CritiqueAgent::new(CritiqueConfig::default()).expect("default config is valid");
+        let agent =
+            CritiqueAgent::new(CritiqueAgentConfig::default()).expect("default config is valid");
         let input = CritiqueInput::new(predicted).with_criteria(CritiqueCriteria::GroundTruth {
             expected: ground_truth.into(),
         });

@@ -28,11 +28,11 @@
 //! // Requires an agent crate like gemicro-deep-research
 //! use gemicro_runner::AgentRunner;
 //! use gemicro_core::{AgentContext, LlmClient, LlmConfig};
-//! use gemicro_deep_research::{DeepResearchAgent, ResearchConfig};
+//! use gemicro_deep_research_agent::{DeepResearchAgent, DeepResearchAgentConfig};
 //!
 //! async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //!     // Create agent
-//!     let agent = DeepResearchAgent::new(ResearchConfig::default())?;
+//!     let agent = DeepResearchAgent::new(DeepResearchAgentConfig::default())?;
 //!
 //!     // Create context
 //!     let genai_client = genai_rs::Client::builder("api-key".to_string()).build();

@@ -52,11 +52,11 @@ gemicro --interactive
 ## Library Usage
 
 ```rust
-use gemicro_developer::{DeveloperAgent, DeveloperConfig};
+use gemicro_developer_agent::{DeveloperAgent, DeveloperAgentConfig};
 use gemicro_core::{Agent, AgentContext, LlmClient, LlmConfig};
 
 let llm = LlmClient::new(rust_genai::Client::builder(api_key).build(), LlmConfig::default());
-let agent = DeveloperAgent::new(DeveloperConfig::default())?;
+let agent = DeveloperAgent::new(DeveloperAgentConfig::default())?;
 let stream = agent.execute("Read CLAUDE.md and summarize it", AgentContext::new(llm));
 
 while let Some(update) = stream.next().await {
@@ -69,7 +69,7 @@ while let Some(update) = stream.next().await {
 }
 ```
 
-See [`agents/gemicro-developer/examples/developer.rs`](agents/gemicro-developer/examples/developer.rs) for the full example with tools and confirmation handling.
+See [`agents/gemicro-developer-agent/examples/developer.rs`](agents/gemicro-developer-agent/examples/developer.rs) for the full example with tools and confirmation handling.
 
 ## Available Agents
 
@@ -118,9 +118,9 @@ Each type lives in exactly one crate. Import from the canonical source:
 
 ```rust
 use gemicro_core::{Agent, AgentContext, AgentUpdate};           // Core types
-use gemicro_deep_research::{DeepResearchAgent, ResearchConfig}; // Agent + config
-use gemicro_developer::{DeveloperAgent, DeveloperConfig};       // Developer agent
-use gemicro_critique::CritiqueAgent;                             // Critique agent
+use gemicro_deep_research_agent::{DeepResearchAgent, DeepResearchAgentConfig}; // Agent + config
+use gemicro_developer_agent::{DeveloperAgent, DeveloperAgentConfig};       // Developer agent
+use gemicro_critique_agent::CritiqueAgent;                             // Critique agent
 ```
 
 ## Usage
@@ -243,7 +243,7 @@ Install nextest: `cargo install cargo-nextest`
 
 ```bash
 # Deep research example (non-interactive)
-cargo run -p gemicro-deep-research --example deep_research
+cargo run -p gemicro-deep-research-agent --example deep_research
 
 # A/B comparison example (requires GEMINI_API_KEY)
 cargo run -p gemicro-eval --example ab_comparison

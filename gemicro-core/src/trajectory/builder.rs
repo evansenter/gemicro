@@ -103,6 +103,16 @@ impl TrajectoryBuilder {
                 }
             });
 
+        // Extract model from first step's request if not explicitly set
+        let model = self.model.or_else(|| {
+            steps.first().and_then(|step| {
+                step.request
+                    .get("model")
+                    .and_then(|m| m.as_str())
+                    .map(String::from)
+            })
+        });
+
         Trajectory {
             id: uuid::Uuid::new_v4().to_string(),
             query: self.query.unwrap_or_default(),
@@ -116,9 +126,7 @@ impl TrajectoryBuilder {
                 total_tokens,
                 tokens_unavailable_count,
                 final_result,
-                model: self
-                    .model
-                    .unwrap_or_else(|| crate::config::MODEL.to_string()),
+                model: model.unwrap_or_else(|| "unknown".to_string()),
                 schema_version: SCHEMA_VERSION.to_string(),
             },
         }

@@ -19,10 +19,10 @@ use gemicro_core::{
     AgentContext, AgentError, AgentUpdate, AutoApprove, BatchConfirmationHandler,
     ConversationHistory, HistoryEntry, LlmClient,
 };
-use gemicro_critique::CritiqueAgent;
-use gemicro_deep_research::DeepResearchAgent;
-use gemicro_developer::{DeveloperAgent, DeveloperConfig};
-use gemicro_echo::EchoAgent;
+use gemicro_critique_agent::CritiqueAgent;
+use gemicro_deep_research_agent::DeepResearchAgent;
+use gemicro_developer_agent::{DeveloperAgent, DeveloperAgentConfig};
+use gemicro_echo_agent::EchoAgent;
 use gemicro_loader::load_markdown_agents_from_dir;
 use gemicro_path_sandbox::PathSandbox;
 use gemicro_prompt_agent::{tools as prompt_tools, PromptAgent, PromptAgentConfig};
@@ -124,7 +124,7 @@ pub struct Session {
 #[derive(Debug, Clone, Default)]
 pub struct CliOverrides {
     /// Deep research config from CLI args
-    pub research_config: Option<gemicro_deep_research::ResearchConfig>,
+    pub research_config: Option<gemicro_deep_research_agent::DeepResearchAgentConfig>,
 }
 
 /// Result of a config reload operation.
@@ -325,7 +325,7 @@ impl Session {
         } else if let Some(file_config) = &config.deep_research {
             file_config.to_research_config()
         } else {
-            gemicro_deep_research::ResearchConfig::default()
+            gemicro_deep_research_agent::DeepResearchAgentConfig::default()
         };
 
         // Validate config before registering - fallback to defaults on error
@@ -333,7 +333,7 @@ impl Session {
             Ok(_) => research_config,
             Err(e) => {
                 log::warn!("Invalid deep_research config: {}. Using defaults.", e);
-                gemicro_deep_research::ResearchConfig::default()
+                gemicro_deep_research_agent::DeepResearchAgentConfig::default()
             }
         };
 
@@ -354,7 +354,7 @@ impl Session {
         };
 
         // Register developer agent with defaults (config from file/CLI not yet implemented)
-        let developer_config = DeveloperConfig::default();
+        let developer_config = DeveloperAgentConfig::default();
 
         // Acquire write lock and register all agents
         let mut registry = self.registry.write().expect("agent registry lock poisoned");
