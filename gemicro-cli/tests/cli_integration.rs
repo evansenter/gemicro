@@ -61,51 +61,15 @@ fn test_cli_invalid_temperature() {
 }
 
 #[test]
-fn test_cli_invalid_min_max_queries() {
+fn test_cli_zero_llm_timeout() {
     let output = run_cli(&[
         "test query",
         "--agent",
         "echo",
         "--api-key",
         "fake-key",
-        "--min-sub-queries",
-        "10",
-        "--max-sub-queries",
-        "5",
-    ]);
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("min-sub-queries"));
-}
-
-#[test]
-fn test_cli_zero_timeout() {
-    let output = run_cli(&[
-        "test query",
-        "--agent",
-        "echo",
-        "--api-key",
-        "fake-key",
-        "--timeout",
-        "0",
-    ]);
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("timeout"));
-}
-
-#[test]
-fn test_cli_llm_timeout_exceeds_total() {
-    let output = run_cli(&[
-        "test query",
-        "--agent",
-        "echo",
-        "--api-key",
-        "fake-key",
-        "--timeout",
-        "60",
         "--llm-timeout",
-        "120",
+        "0",
     ]);
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -120,17 +84,7 @@ fn test_cli_simple_query() {
         return;
     }
 
-    let output = run_cli(&[
-        "What is 2 + 2?",
-        "--agent",
-        "deep_research",
-        "--min-sub-queries",
-        "2",
-        "--max-sub-queries",
-        "3",
-        "--timeout",
-        "120",
-    ]);
+    let output = run_cli(&["What is 2 + 2?", "--agent", "deep_research"]);
 
     assert!(output.status.success(), "CLI failed: {:?}", output);
 
@@ -150,18 +104,7 @@ fn test_cli_verbose_mode() {
         return;
     }
 
-    let output = run_cli(&[
-        "What is Rust?",
-        "--agent",
-        "deep_research",
-        "--verbose",
-        "--min-sub-queries",
-        "2",
-        "--max-sub-queries",
-        "2",
-        "--timeout",
-        "120",
-    ]);
+    let output = run_cli(&["What is Rust?", "--agent", "deep_research", "--verbose"]);
 
     assert!(output.status.success(), "CLI failed: {:?}", output);
 
@@ -181,17 +124,7 @@ fn test_cli_token_counts_displayed() {
         return;
     }
 
-    let output = run_cli(&[
-        "Explain recursion briefly",
-        "--agent",
-        "deep_research",
-        "--min-sub-queries",
-        "2",
-        "--max-sub-queries",
-        "2",
-        "--timeout",
-        "120",
-    ]);
+    let output = run_cli(&["Explain recursion briefly", "--agent", "deep_research"]);
 
     assert!(output.status.success(), "CLI failed: {:?}", output);
 
@@ -460,17 +393,7 @@ fn test_cli_interactive_simple_query() {
     // Run a simple query then quit
     // Note: Rustyline may not work perfectly with piped stdin in all environments
     let output = run_cli_with_stdin(
-        &[
-            "--interactive",
-            "--agent",
-            "deep_research",
-            "--timeout",
-            "120",
-            "--min-sub-queries",
-            "2",
-            "--max-sub-queries",
-            "2",
-        ],
+        &["--interactive", "--agent", "deep_research"],
         "What is 1+1?\n/quit\n",
     );
 
