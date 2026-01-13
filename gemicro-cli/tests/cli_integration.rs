@@ -116,26 +116,10 @@ fn test_cli_verbose_mode() {
     );
 }
 
-#[test]
-#[ignore] // Requires GEMINI_API_KEY
-fn test_cli_token_counts_displayed() {
-    if !has_api_key() {
-        eprintln!("Skipping test: GEMINI_API_KEY not set");
-        return;
-    }
-
-    let output = run_cli(&["Explain recursion briefly", "--agent", "deep_research"]);
-
-    assert!(output.status.success(), "CLI failed: {:?}", output);
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-
-    // Token counts should be displayed (now that genai-rs is fixed)
-    assert!(
-        stdout.contains("tokens)") || stdout.contains("Tokens used:"),
-        "Token counts should be displayed in output"
-    );
-}
+// NOTE: test_cli_token_counts_displayed was removed in PR #259.
+// The test was flaky because it depended on the Gemini API consistently
+// returning token counts, which isn't guaranteed. The token display logic
+// is now tested via unit tests in format.rs instead.
 
 // NOTE: test_cli_parallel_speedup_displayed was removed in #124.
 // The simplified CLI no longer tracks step-level timing for parallel speedup
