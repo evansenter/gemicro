@@ -85,12 +85,11 @@ impl AgentError {
     /// assert!(!cancelled.is_retriable());
     /// ```
     pub fn is_retriable(&self) -> bool {
-        matches!(
-            self,
-            AgentError::Timeout { .. }
-                | AgentError::Llm(LlmError::RateLimit(_))
-                | AgentError::Llm(LlmError::Timeout(_))
-        )
+        match self {
+            AgentError::Timeout { .. } => true,
+            AgentError::Llm(e) => e.is_retryable(),
+            _ => false,
+        }
     }
 
     /// Check if this is a timeout error.
@@ -150,10 +149,6 @@ pub enum LlmError {
     #[error("No content in response")]
     NoContent,
 
-    /// Rate limit exceeded
-    #[error("Rate limit exceeded: {0}")]
-    RateLimit(String),
-
     /// Request was cancelled
     #[error("Request cancelled")]
     Cancelled,
@@ -181,12 +176,10 @@ impl LlmError {
     ///
     /// Returns `true` for transient errors that might succeed on retry:
     /// - Timeouts
-    /// - Rate limits
-    /// - GenAI errors that are marked as retryable (5xx, network issues, etc.)
+    /// - GenAI errors that are marked as retryable (rate limits, 5xx, network issues, etc.)
     pub fn is_retryable(&self) -> bool {
         match self {
             LlmError::Timeout(_) => true,
-            LlmError::RateLimit(_) => true,
             LlmError::GenAi(e) => e.is_retryable(),
             _ => false,
         }
@@ -293,7 +286,6 @@ mod tests {
     // Tests for AgentError query methods
     #[rstest]
     #[case::timeout(AgentError::Timeout { elapsed_ms: 5000, timeout_ms: 3000, phase: "test".into() }, true)]
-    #[case::llm_rate_limit(AgentError::Llm(LlmError::RateLimit("quota exceeded".into())), true)]
     #[case::llm_timeout(AgentError::Llm(LlmError::Timeout(5000)), true)]
     #[case::cancelled(AgentError::Cancelled, false)]
     #[case::parse_failed(AgentError::ParseFailed("bad format".into()), false)]

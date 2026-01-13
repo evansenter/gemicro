@@ -39,7 +39,7 @@ pub mod tools;
 use gemicro_core::{
     remaining_time, timeout_error, tool::ToolCallableAdapter, truncate,
     with_timeout_and_cancellation, Agent, AgentContext, AgentError, AgentStream, AgentUpdate,
-    LlmRequest, ResultMetadata, ToolSet,
+    ResultMetadata, ToolSet,
 };
 
 use async_stream::try_stream;
@@ -97,6 +97,11 @@ const MAX_ITERATIONS: usize = 100;
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct PromptAgentConfig {
+    /// Model to use for LLM requests.
+    ///
+    /// Default: "gemini-3-flash-preview"
+    pub model: String,
+
     /// Total timeout for the query execution.
     pub timeout: Duration,
 
@@ -119,6 +124,7 @@ pub struct PromptAgentConfig {
 impl Default for PromptAgentConfig {
     fn default() -> Self {
         Self {
+            model: "gemini-3-flash-preview".to_string(),
             timeout: Duration::from_secs(30),
             system_prompt:
                 "You are a helpful assistant. Answer questions concisely and accurately."
@@ -130,6 +136,13 @@ impl Default for PromptAgentConfig {
 }
 
 impl PromptAgentConfig {
+    /// Set the model to use for LLM requests.
+    #[must_use]
+    pub fn with_model(mut self, model: impl Into<String>) -> Self {
+        self.model = model.into();
+        self
+    }
+
     /// Set the timeout for query execution.
     #[must_use]
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
@@ -475,8 +488,16 @@ impl Agent for PromptAgent {
                 let mut total_tokens: u64 = 0;
 
                 // Initial request with query and function declarations
-                let initial_request = LlmRequest::with_system(&query, &config.system_prompt)
-                    .with_functions(function_declarations.clone());
+                let initial_request = context
+                    .llm
+                    .client()
+                    .interaction()
+                    .with_model(&config.model)
+                    .with_system_instruction(&config.system_prompt)
+                    .with_text(&query)
+                    .with_functions(function_declarations.clone())
+                    .with_store_enabled() // Enable storage for function calling chains
+                    .build().map_err(|e| AgentError::Other(e.to_string()))?;
 
                 let mut response = context
                     .llm
@@ -587,11 +608,16 @@ impl Agent for PromptAgent {
                     }
 
                     // Send function results back to LLM using continuation request
-                    let continuation = LlmRequest::continuation(
-                        &interaction_id,
-                        function_declarations.clone(),
-                        function_results,
-                    );
+                    let continuation = context
+                        .llm
+                        .client()
+                        .interaction()
+                        .with_model(&config.model)
+                        .with_previous_interaction(&interaction_id)
+                        .with_functions(function_declarations.clone())
+                        .with_content(function_results)
+                        .with_store_enabled()
+                        .build().map_err(|e| AgentError::Other(e.to_string()))?;
 
                     response = context
                         .llm
@@ -610,7 +636,14 @@ impl Agent for PromptAgent {
                 (final_text, Some(total_tokens))
             } else {
                 // Simple path: no tools, just a prompt
-                let request = LlmRequest::with_system(&query, &config.system_prompt);
+                let request = context
+                    .llm
+                    .client()
+                    .interaction()
+                    .with_model(&config.model)
+                    .with_system_instruction(&config.system_prompt)
+                    .with_text(&query)
+                    .build().map_err(|e| AgentError::Other(e.to_string()))?;
 
                 let generate_future = async {
                     context

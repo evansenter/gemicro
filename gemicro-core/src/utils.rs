@@ -13,14 +13,18 @@ use genai_rs::InteractionResponse;
 /// # Example
 ///
 /// ```no_run
-/// use gemicro_core::{LlmClient, LlmConfig, LlmRequest, extract_total_tokens};
+/// use gemicro_core::{LlmClient, LlmConfig, extract_total_tokens};
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// let client = LlmClient::new(
 ///     genai_rs::Client::builder("api-key".to_string()).build()?,
 ///     LlmConfig::default(),
 /// );
-/// let response = client.generate(LlmRequest::new("Hello")).await?;
+/// let request = client.client().interaction()
+///     .with_model("gemini-3-flash-preview")
+///     .with_text("Hello")
+///     .build()?;
+/// let response = client.generate(request).await?;
 /// let tokens = extract_total_tokens(&response);
 /// println!("Tokens used: {:?}", tokens);
 /// # Ok(())

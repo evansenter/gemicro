@@ -11,7 +11,7 @@
 //! 3. Loads and inspects the trajectory
 //! 4. Demonstrates replay with MockLlmClient
 
-use gemicro_core::{LlmConfig, LlmRequest, MockLlmClient, Trajectory};
+use gemicro_core::{AgentError, LlmConfig, MockLlmClient, Trajectory};
 use gemicro_prompt_agent::{PromptAgent, PromptAgentConfig};
 use gemicro_runner::AgentRunner;
 use serde_json::json;
@@ -35,7 +35,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let agent = PromptAgent::new(config)?;
 
     // Create LLM client with recording enabled
-    let genai_client = genai_rs::Client::builder(api_key).build()?;
+    let genai_client = genai_rs::Client::builder(api_key)
+        .build()
+        .map_err(|e| AgentError::Other(e.to_string()))?;
     let llm_config = LlmConfig::default()
         .with_timeout(Duration::from_secs(60))
         .with_max_tokens(1024)
@@ -91,15 +93,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for (i, step) in loaded.steps.iter().enumerate() {
         println!("    [{}] Phase: {}", i + 1, step.phase);
         println!("        Duration: {}ms", step.duration_ms);
-        println!(
-            "        Prompt: {}...",
-            step.request
-                .prompt
-                .chars()
-                .take(50)
-                .collect::<String>()
-                .replace('\n', " ")
-        );
+        // Request is now a serde_json::Value (InteractionRequest serialized)
+        if let Some(prompt) = step.request.get("contents").and_then(|c| c.get(0)) {
+            let text = prompt
+                .get("parts")
+                .and_then(|p| p.get(0))
+                .and_then(|p| p.get("text"))
+                .and_then(|t| t.as_str())
+                .unwrap_or("");
+            println!(
+                "        Prompt: {}...",
+                text.chars().take(50).collect::<String>().replace('\n', " ")
+            );
+        }
     }
     println!();
 
@@ -108,8 +114,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mock = MockLlmClient::from_trajectory(&loaded);
 
     // Replay returns the same responses in order
-    let request = LlmRequest::new("Any prompt - the recorded response is returned");
-    let response = mock.generate(request).await?;
+    // MockLlmClient takes a simple prompt string since it just replays recorded responses
+    let response = mock
+        .generate("Any prompt - the recorded response is returned")
+        .await?;
 
     // Extract text from genai-rs's InteractionResponse structure
     // The response has outputs: [{type: "thought"}, {type: "text", text: "..."}]

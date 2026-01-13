@@ -16,7 +16,7 @@ use gemicro_core::{
     enforce_final_result_contract, Agent, AgentContext, AgentError, Coordination, HubCoordination,
     LlmClient,
 };
-use gemicro_deep_research::DeepResearchAgent;
+use gemicro_deep_research_agent::DeepResearchAgent;
 use gemicro_prompt_agent::{tools, PromptAgent, PromptAgentConfig};
 use repl::Session;
 use std::sync::atomic::{AtomicU8, Ordering};

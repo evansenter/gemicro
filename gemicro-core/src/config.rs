@@ -1,10 +1,5 @@
 use std::time::Duration;
 
-/// The Gemini model to use for all LLM operations
-///
-/// Hardcoded to gemini-3-flash-preview as per project requirements.
-pub const MODEL: &str = "gemini-3-flash-preview";
-
 /// Top-level configuration for gemicro
 ///
 /// Contains only cross-agent configuration. Agent-specific configuration
@@ -15,10 +10,10 @@ pub const MODEL: &str = "gemini-3-flash-preview";
 /// ## Agent Crates
 ///
 /// Each agent type has its own crate with its own configuration:
-/// - `gemicro-deep-research`: ResearchConfig, ResearchPrompts
-/// - `gemicro-react`: ReactConfig, ReactPrompts
+/// - `gemicro-deep-research-agent`: DeepResearchAgentConfig, ResearchPrompts
+/// - `gemicro-react-agent`: ReactAgentConfig, ReactPrompts
 /// - `gemicro-prompt-agent`: PromptAgentConfig
-/// - `gemicro-critique`: CritiqueConfig
+/// - `gemicro-critique-agent`: CritiqueAgentConfig
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct GemicroConfig {
@@ -126,11 +121,6 @@ impl LlmConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_model_constant() {
-        assert_eq!(MODEL, "gemini-3-flash-preview");
-    }
 
     #[test]
     fn test_default_gemicro_config() {

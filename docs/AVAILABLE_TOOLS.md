@@ -58,7 +58,7 @@ These lightweight tools are bundled with PromptAgent for convenience:
 | `CurrentDatetime` | Get current date/time in any timezone |
 
 ```rust
-use gemicro_prompt_agent::tools::{Calculator, CurrentDatetime};
+use gemicro_prompt::tools::{Calculator, CurrentDatetime};
 
 registry.register(Calculator);
 registry.register(CurrentDatetime);

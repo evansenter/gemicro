@@ -11,7 +11,7 @@
 //! without truncation.
 //!
 //! ```bash
-//! LOUD_WIRE=1 cargo run -p gemicro-developer --example developer
+//! LOUD_WIRE=1 cargo run -p gemicro-developer-agent --example developer
 //! ```
 //!
 //! # Example

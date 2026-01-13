@@ -37,7 +37,7 @@ Gemicro is a CLI agent exploration platform for AI agent patterns, powered by Ge
 ```bash
 make check      # Format + clippy + tests (pre-push gate)
 make fmt        # Check formatting
-make clippy     # Clippy with -D warnings
+make clippy     # Clippy with -D warnings (uses test profile for cache sharing)
 make test       # Unit tests only (excludes doctests for speed)
 make test-all   # Full suite including integration tests (requires GEMINI_API_KEY)
 ```
@@ -65,7 +65,7 @@ Run `make check` once before `git push`. CI catches cross-crate issues.
 ### Running Examples
 
 ```bash
-cargo run -p gemicro-deep-research --example deep_research
+cargo run -p gemicro-deep-research-agent --example deep_research
 ```
 
 ## Environment
@@ -74,7 +74,7 @@ cargo run -p gemicro-deep-research --example deep_research
 export GEMINI_API_KEY="your-api-key"  # Required for integration tests
 
 # Debug genai-rs HTTP traffic
-LOUD_WIRE=1 cargo run -p gemicro-developer --example developer
+LOUD_WIRE=1 cargo run -p gemicro-developer-agent --example developer
 ```
 
 For tool execution debugging, use `gemicro-audit-log` (structured logging without HTTP noise).

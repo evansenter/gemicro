@@ -12,7 +12,7 @@
 //! 4. Streaming events in real-time
 
 use futures_util::StreamExt;
-use gemicro_core::{Agent, AgentContext, LlmClient, LlmConfig, ToolRegistry};
+use gemicro_core::{Agent, AgentContext, AgentError, LlmClient, LlmConfig, ToolRegistry};
 use gemicro_prompt_agent::tools::{Calculator, CurrentDatetime};
 use gemicro_prompt_agent::{PromptAgent, PromptAgentConfig};
 use std::env;
@@ -43,7 +43,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let agent = PromptAgent::new(config)?;
 
     // Create LLM client
-    let genai_client = genai_rs::Client::builder(api_key).build()?;
+    let genai_client = genai_rs::Client::builder(api_key)
+        .build()
+        .map_err(|e| AgentError::Other(e.to_string()))?;
     let llm = LlmClient::new(
         genai_client,
         LlmConfig::default()

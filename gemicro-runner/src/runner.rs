@@ -362,7 +362,7 @@ impl AgentRunner {
                 .query(query)
                 .agent_name(agent.name())
                 .agent_config(agent_config.clone())
-                .model(gemicro_core::MODEL)
+                // Model is extracted from first step's request automatically
                 .build(
                     steps,
                     events,

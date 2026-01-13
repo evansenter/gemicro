@@ -261,7 +261,10 @@ impl Agent for PromptAgent {
             // Calculate remaining time and execute LLM call
             let timeout = remaining_time(start, config.timeout, "query")?;
 
-            let request = LlmRequest::with_system(&query, &config.system_prompt);
+            let request = context.llm.client().interaction()
+                .with_system_instruction(&config.system_prompt)
+                .with_text(&query)
+                .build();
 
             // Wrap LLM call to convert LlmError -> AgentError
             let generate_future = async {
@@ -873,7 +876,7 @@ async fn record_trajectory(agent: &impl Agent, query: &str) -> Result<Trajectory
 Use `MockLlmClient` to replay recorded trajectories without API calls:
 
 ```rust
-use gemicro_core::{MockLlmClient, Trajectory, LlmRequest};
+use gemicro_core::{MockLlmClient, Trajectory};
 
 async fn replay_trajectory() -> Result<(), Box<dyn std::error::Error>> {
     // Load previously recorded trajectory
@@ -883,7 +886,7 @@ async fn replay_trajectory() -> Result<(), Box<dyn std::error::Error>> {
     let mock = MockLlmClient::from_trajectory(&trajectory);
 
     // Use like a regular LlmClient - returns recorded responses in order
-    let response = mock.generate(LlmRequest::new("Any prompt")).await?;
+    let response = mock.generate("Any prompt").await?;
     println!("Replayed: {}", response["text"]);
 
     Ok(())
@@ -982,7 +985,7 @@ impl Agent for PromptAgent {
             // Use with automatic function calling
             let response = context.llm.genai_client()
                 .interaction()
-                .with_model("gemini-2.0-flash")
+                .with_model(&self.config.model)
                 .with_system(&self.config.system_prompt)
                 .with_user(query)
                 .with_tool_service(service)
@@ -1232,11 +1235,11 @@ let stream = agent.execute(&query, child_context);
 ## See Also
 
 - `agents/gemicro-prompt-agent/src/lib.rs` - Full reference implementation with tool support
-- `agents/gemicro-deep-research/src/` - Complex multi-phase example
+- `agents/gemicro-deep-research-agent/src/` - Complex multi-phase example
 - `tools/gemicro-task/src/lib.rs` - Task tool for spawning subagents
 - `agents/gemicro-prompt-agent/tests/integration.rs` - Integration test examples
 - `agents/gemicro-prompt-agent/examples/trajectory_recording.rs` - Trajectory recording example
-- `agents/gemicro-developer/examples/subagent_delegation.rs` - Subagent delegation with CritiqueAgent
+- `agents/gemicro-developer-agent/examples/subagent_delegation.rs` - Subagent delegation with CritiqueAgent
 - `docs/TOOL_AUTHORING.md` - Creating new tools
 - `docs/INTERCEPTOR_AUTHORING.md` - Creating interceptors to intercept tools
 - `CLAUDE.md` - Project design philosophy and crate responsibilities

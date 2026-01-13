@@ -1,6 +1,5 @@
 //! Trajectory data types and serialization.
 
-use crate::llm::LlmRequest;
 use crate::trajectory::TrajectoryBuilder;
 use crate::update::AgentUpdate;
 use serde::{Deserialize, Serialize};
@@ -87,7 +86,7 @@ impl LlmResponseData {
 ///
 /// Each step captures:
 /// - The phase/context of this LLM call
-/// - The complete request sent to the LLM
+/// - The complete request sent to the LLM (serialized as JSON)
 /// - The response data (buffered or streaming mode)
 /// - Timing information
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -99,8 +98,11 @@ pub struct TrajectoryStep {
     /// define their own phase names without modifying core types.
     pub phase: String,
 
-    /// The request sent to the LLM
-    pub request: SerializableLlmRequest,
+    /// The request sent to the LLM (genai-rs `InteractionRequest` serialized as JSON)
+    ///
+    /// For streaming requests where the builder cannot be serialized, this will be
+    /// `serde_json::Value::Null`.
+    pub request: serde_json::Value,
 
     /// The response data from the LLM
     ///
@@ -113,51 +115,6 @@ pub struct TrajectoryStep {
     /// Timestamp when this step started
     #[serde(with = "system_time_serde")]
     pub started_at: SystemTime,
-}
-
-/// Serializable wrapper for `LlmRequest`
-///
-/// This captures all fields from `LlmRequest` in a serializable form.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SerializableLlmRequest {
-    /// User prompt
-    pub prompt: String,
-
-    /// Conversation history as serialized Turn array
-    ///
-    /// Stored as JSON for flexibility and forward compatibility.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub turns: Option<serde_json::Value>,
-
-    /// Optional system instruction
-    pub system_instruction: Option<String>,
-
-    /// Whether Google Search grounding was enabled
-    pub use_google_search: bool,
-
-    /// Optional JSON schema for structured output
-    pub response_format: Option<serde_json::Value>,
-}
-
-impl From<&LlmRequest> for SerializableLlmRequest {
-    fn from(request: &LlmRequest) -> Self {
-        Self {
-            prompt: request.prompt.clone(),
-            turns: request
-                .turns
-                .as_ref()
-                .and_then(|t| serde_json::to_value(t).ok()),
-            system_instruction: request.system_instruction.clone(),
-            use_google_search: request.use_google_search,
-            response_format: request.response_format.clone(),
-        }
-    }
-}
-
-impl From<LlmRequest> for SerializableLlmRequest {
-    fn from(request: LlmRequest) -> Self {
-        Self::from(&request)
-    }
 }
 
 /// A serializable stream chunk
@@ -303,14 +260,11 @@ mod tests {
     use crate::update::ResultMetadata;
     use serde_json::json;
 
-    fn sample_request() -> SerializableLlmRequest {
-        SerializableLlmRequest {
-            prompt: "What is the capital of France?".to_string(),
-            turns: None,
-            system_instruction: Some("You are a helpful assistant.".to_string()),
-            use_google_search: false,
-            response_format: None,
-        }
+    fn sample_request() -> serde_json::Value {
+        json!({
+            "prompt": "What is the capital of France?",
+            "system_instruction": "You are a helpful assistant."
+        })
     }
 
     fn sample_step() -> TrajectoryStep {
@@ -337,48 +291,13 @@ mod tests {
     }
 
     #[test]
-    fn test_serializable_request_from_llm_request() {
-        let request = LlmRequest::with_system("Hello", "System")
-            .with_google_search()
-            .with_response_format(json!({"type": "object"}));
-
-        let serializable = SerializableLlmRequest::from(&request);
-
-        assert_eq!(serializable.prompt, "Hello");
-        assert_eq!(serializable.system_instruction, Some("System".to_string()));
-        assert!(serializable.use_google_search);
-        assert_eq!(
-            serializable.response_format,
-            Some(json!({"type": "object"}))
-        );
-    }
-
-    #[test]
-    fn test_serializable_request_with_turns() {
-        use genai_rs::Turn;
-
-        let request = LlmRequest::new("Follow up question")
-            .with_turns(vec![Turn::user("What is 2+2?"), Turn::model("4")]);
-
-        let serializable = SerializableLlmRequest::from(&request);
-
-        assert_eq!(serializable.prompt, "Follow up question");
-        assert!(serializable.turns.is_some());
-
-        let turns_json = serializable.turns.unwrap();
-        assert!(turns_json.is_array());
-        let arr = turns_json.as_array().unwrap();
-        assert_eq!(arr.len(), 2);
-    }
-
-    #[test]
     fn test_trajectory_step_serialization_roundtrip() {
         let step = sample_step();
         let json = serde_json::to_string(&step).unwrap();
         let restored: TrajectoryStep = serde_json::from_str(&json).unwrap();
 
         assert_eq!(restored.phase, step.phase);
-        assert_eq!(restored.request.prompt, step.request.prompt);
+        assert_eq!(restored.request, step.request);
         assert_eq!(restored.duration_ms, step.duration_ms);
     }
 
@@ -455,14 +374,18 @@ mod tests {
 
     #[test]
     fn test_trajectory_roundtrip_with_turns() {
-        use genai_rs::Turn;
-
-        let request_with_turns =
-            LlmRequest::new("Follow up").with_turns(vec![Turn::user("Q1"), Turn::model("A1")]);
+        // Request is now serde_json::Value (serialized InteractionRequest)
+        let request_with_turns = json!({
+            "prompt": "Follow up",
+            "turns": [
+                {"role": "user", "parts": [{"type": "text", "text": "Q1"}]},
+                {"role": "model", "parts": [{"type": "text", "text": "A1"}]}
+            ]
+        });
 
         let step_with_turns = TrajectoryStep {
             phase: "multi_turn".to_string(),
-            request: SerializableLlmRequest::from(&request_with_turns),
+            request: request_with_turns,
             response: LlmResponseData::Buffered(json!({
                 "outputs": [{"type": "text", "text": "Response"}]
             })),
@@ -482,9 +405,8 @@ mod tests {
         trajectory.save(&path).unwrap();
         let loaded = Trajectory::load(&path).unwrap();
 
-        // Verify turns survived the round-trip
-        assert!(loaded.steps[0].request.turns.is_some());
-        let turns = loaded.steps[0].request.turns.as_ref().unwrap();
+        // Verify turns survived the round-trip (now in request as JSON)
+        let turns = loaded.steps[0].request.get("turns").unwrap();
         assert!(turns.is_array());
         assert_eq!(turns.as_array().unwrap().len(), 2);
 
@@ -687,13 +609,10 @@ mod tests {
             loaded_step.duration_ms, orig_step.duration_ms,
             "step duration_ms mismatch"
         );
+        // Request is now serde_json::Value
         assert_eq!(
-            loaded_step.request.prompt, orig_step.request.prompt,
-            "step request.prompt mismatch"
-        );
-        assert_eq!(
-            loaded_step.request.system_instruction, orig_step.request.system_instruction,
-            "step request.system_instruction mismatch"
+            loaded_step.request, orig_step.request,
+            "step request mismatch"
         );
 
         // Verify events

@@ -1,17 +1,24 @@
 //! LLM client implementation with trajectory recording support.
 
-use super::request::{LlmRequest, LlmStreamChunk};
-use crate::config::{LlmConfig, MODEL};
+use crate::config::LlmConfig;
 use crate::error::LlmError;
-use crate::trajectory::{
-    LlmResponseData, SerializableLlmRequest, SerializableStreamChunk, TrajectoryStep,
-};
+use crate::trajectory::{LlmResponseData, SerializableStreamChunk, TrajectoryStep};
 use futures_util::stream::{Stream, StreamExt};
-use genai_rs::{function_result_content, FunctionCallInfo, GenerationConfig};
+use genai_rs::{function_result_content, FunctionCallInfo, InteractionRequest};
 use std::future::Future;
 use std::sync::{Arc, RwLock};
 use std::time::{Instant, SystemTime};
 use tokio_util::sync::CancellationToken;
+
+/// Chunk from streaming LLM response
+///
+/// The stream ends naturally when no more chunks are available (yields `None`).
+/// There is no artificial "final" marker - simply iterate until the stream ends.
+#[derive(Debug, Clone)]
+pub struct LlmStreamChunk {
+    /// Text content of this chunk (may be empty for some chunks)
+    pub text: String,
+}
 
 /// Result from [`LlmClient::generate_with_tools`]
 #[derive(Debug)]
@@ -59,7 +66,6 @@ pub struct LlmClient {
 impl std::fmt::Debug for LlmClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LlmClient")
-            .field("model", &MODEL)
             .field("client", &"[REDACTED]")
             .field("config", &self.config)
             .field("is_recording", &self.is_recording())
@@ -90,17 +96,23 @@ impl LlmClient {
     /// # Example
     ///
     /// ```no_run
-    /// use gemicro_core::{LlmClient, LlmRequest, LlmConfig};
+    /// use gemicro_core::{LlmClient, LlmConfig};
     ///
     /// # async fn example() -> Result<(), gemicro_core::LlmError> {
     /// # let genai_client = genai_rs::Client::builder("key".to_string()).build().unwrap();
     /// let client = LlmClient::with_recording(genai_client, LlmConfig::default());
     ///
     /// client.set_phase("decomposition");
-    /// let _response = client.generate(LlmRequest::new("Break this down")).await?;
+    /// let request = client.client().interaction()
+    ///     .with_text("Break this down")
+    ///     .build()?;
+    /// let _response = client.generate(request).await?;
     ///
     /// client.set_phase("synthesis");
-    /// let _response = client.generate(LlmRequest::new("Combine these")).await?;
+    /// let request = client.client().interaction()
+    ///     .with_text("Combine these")
+    ///     .build()?;
+    /// let _response = client.generate(request).await?;
     ///
     /// let steps = client.take_steps();
     /// assert_eq!(steps.len(), 2);
@@ -201,19 +213,45 @@ impl LlmClient {
 
     /// Get a reference to the underlying genai_rs client.
     ///
-    /// # Warning: Escape Hatch
+    /// Use this to build `InteractionRequest`s via the genai-rs `InteractionBuilder`:
     ///
-    /// This method bypasses `LlmClient`'s automatic timeout enforcement, retry
-    /// logic, recording, and response logging. When using this directly, you are
-    /// responsible for implementing these features yourself.
+    /// ```no_run
+    /// # use gemicro_core::{LlmClient, LlmConfig};
+    /// # let genai_client = genai_rs::Client::builder("key".to_string()).build().unwrap();
+    /// # let client = LlmClient::new(genai_client, LlmConfig::default());
+    /// // Simple request
+    /// let request = client.client().interaction()
+    ///     .with_model("gemini-3-flash-preview")
+    ///     .with_text("Hello")
+    ///     .with_system_instruction("Be helpful")
+    ///     .build()
+    ///     .unwrap();
+    /// ```
     ///
-    /// **Prefer using `generate()` or `generate_stream()` with `LlmRequest` builders:**
-    /// - Function calling: `LlmRequest::new(...).with_functions(declarations)`
-    /// - Multi-turn continuations: `LlmRequest::continuation(prev_id, functions, results)`
-    /// - Conversation history: `LlmRequest::new(...).with_turns(turns)`
+    /// For function calling and continuations:
     ///
-    /// Use this only for operations that genuinely require custom interaction builders
-    /// (e.g., advanced streaming patterns or features not yet in `LlmRequest`).
+    /// ```text
+    /// // With function calling
+    /// let request = client.client().interaction()
+    ///     .with_model("gemini-3-flash-preview")
+    ///     .with_text("What time is it?")
+    ///     .with_functions(function_declarations)
+    ///     .with_store_enabled()  // Required for chaining
+    ///     .build()
+    ///     .unwrap();
+    ///
+    /// // Continuation after function call
+    /// let request = client.client().interaction()
+    ///     .with_model("gemini-3-flash-preview")
+    ///     .with_previous_interaction(&interaction_id)
+    ///     .with_content(function_results)
+    ///     .with_functions(function_declarations)
+    ///     .with_store_enabled()
+    ///     .build()
+    ///     .unwrap();
+    /// ```
+    ///
+    /// Then pass the built request to `generate()`, `generate_stream()`, etc.
     pub fn client(&self) -> &genai_rs::Client {
         &self.client
     }
@@ -227,6 +265,22 @@ impl LlmClient {
     ///
     /// This method waits for the full response before returning.
     /// Use `generate_stream()` for real-time token-by-token output.
+    ///
+    /// Build requests using the genai-rs `InteractionBuilder` via `client()`:
+    ///
+    /// ```no_run
+    /// # use gemicro_core::{LlmClient, LlmConfig};
+    /// # async fn example() -> Result<(), gemicro_core::LlmError> {
+    /// # let genai_client = genai_rs::Client::builder("key".to_string()).build().unwrap();
+    /// let client = LlmClient::new(genai_client, LlmConfig::default());
+    /// let request = client.client().interaction()
+    ///     .with_text("Explain quantum computing")
+    ///     .build()?;
+    /// let response = client.generate(request).await?;
+    /// println!("{}", response.text().unwrap_or(""));
+    /// # Ok(())
+    /// # }
+    /// ```
     ///
     /// Returns the full [`genai_rs::InteractionResponse`] with access to:
     /// - `response.text()` - the generated text
@@ -246,26 +300,10 @@ impl LlmClient {
     /// - `LlmError::Timeout` if the request exceeds `config.timeout`
     /// - `LlmError::GenAi` for underlying API errors
     /// - `LlmError::NoContent` if the response is empty
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// # use gemicro_core::{LlmClient, LlmRequest, LlmConfig};
-    /// # async fn example() -> Result<(), gemicro_core::LlmError> {
-    /// # let genai_client = genai_rs::Client::builder("key".to_string()).build().unwrap();
-    /// let client = LlmClient::new(genai_client, LlmConfig::default());
-    /// let request = LlmRequest::new("Explain quantum computing");
-    /// let response = client.generate(request).await?;
-    /// println!("{}", response.text().unwrap_or(""));
-    /// # Ok(())
-    /// # }
-    /// ```
     pub async fn generate(
         &self,
-        request: LlmRequest,
+        request: InteractionRequest,
     ) -> Result<genai_rs::InteractionResponse, LlmError> {
-        self.validate_request(&request)?;
-
         let mut last_error = None;
 
         for attempt in 0..=self.config.max_retries {
@@ -303,13 +341,15 @@ impl LlmClient {
     /// # Example
     ///
     /// ```no_run
-    /// # use gemicro_core::{LlmClient, LlmRequest, LlmConfig};
+    /// # use gemicro_core::{LlmClient, LlmConfig};
     /// # use tokio_util::sync::CancellationToken;
     /// # async fn example() -> Result<(), gemicro_core::LlmError> {
     /// # let genai_client = genai_rs::Client::builder("key".to_string()).build().unwrap();
     /// let client = LlmClient::new(genai_client, LlmConfig::default());
     /// let token = CancellationToken::new();
-    /// let request = LlmRequest::new("Explain quantum computing");
+    /// let request = client.client().interaction()
+    ///     .with_text("Explain quantum computing")
+    ///     .build()?;
     ///
     /// // In another task: token.cancel() to abort
     /// let response = client.generate_with_cancellation(request, &token).await?;
@@ -318,11 +358,9 @@ impl LlmClient {
     /// ```
     pub async fn generate_with_cancellation(
         &self,
-        request: LlmRequest,
+        request: InteractionRequest,
         cancellation_token: &CancellationToken,
     ) -> Result<genai_rs::InteractionResponse, LlmError> {
-        self.validate_request(&request)?;
-
         // Check cancellation before starting
         if cancellation_token.is_cancelled() {
             return Err(LlmError::Cancelled);
@@ -386,6 +424,7 @@ impl LlmClient {
     /// # Arguments
     ///
     /// * `request` - Initial request (should include functions via `with_functions()`)
+    /// * `function_declarations` - Function declarations for continuations
     /// * `tool_executor` - Async callback that executes function calls. Receives a reference
     ///   to each [`FunctionCallInfo`] and returns a [`serde_json::Value`] result. Errors should
     ///   be wrapped in the Value (e.g., `json!({"error": "message"})`).
@@ -406,9 +445,16 @@ impl LlmClient {
     /// # Example
     ///
     /// ```text
+    /// let request = client.client().interaction()
+    ///     .with_text("What time is it?")
+    ///     .with_system_instruction("You have tools.")
+    ///     .with_functions(function_declarations.clone())
+    ///     .with_store_enabled()
+    ///     .build()?;
+    ///
     /// let result = client.generate_with_tools(
-    ///     LlmRequest::with_system("What time is it?", "You have tools.")
-    ///         .with_functions(function_declarations),
+    ///     request,
+    ///     function_declarations,
     ///     |fc| async move { json!({"time": "12:00 PM"}) },
     ///     10,  // max_turns
     ///     &cancellation_token,
@@ -421,7 +467,8 @@ impl LlmClient {
     /// For complete working examples, see `agents/gemicro-prompt-agent/src/lib.rs`.
     pub async fn generate_with_tools<F, Fut>(
         &self,
-        request: LlmRequest,
+        request: InteractionRequest,
+        function_declarations: Vec<genai_rs::FunctionDeclaration>,
         tool_executor: F,
         max_turns: usize,
         cancellation_token: &CancellationToken,
@@ -430,15 +477,10 @@ impl LlmClient {
         F: Fn(&FunctionCallInfo) -> Fut,
         Fut: Future<Output = serde_json::Value>,
     {
-        self.validate_request(&request)?;
-
         // Check cancellation before starting
         if cancellation_token.is_cancelled() {
             return Err(LlmError::Cancelled);
         }
-
-        // Get function declarations from request (needed for continuations)
-        let function_declarations = request.functions.clone().unwrap_or_default();
 
         // Make initial request
         let mut response = self
@@ -479,7 +521,7 @@ impl LlmClient {
             })?;
 
             // Execute each function call via the callback
-            let mut function_results = Vec::with_capacity(function_calls.len());
+            let mut results = Vec::with_capacity(function_calls.len());
             for fc in &function_calls {
                 // Check cancellation before each tool call
                 if cancellation_token.is_cancelled() {
@@ -489,19 +531,23 @@ impl LlmClient {
                 let result = tool_executor(fc).await;
                 let call_id = fc.id.unwrap_or("unknown");
 
-                function_results.push(function_result_content(
+                results.push(function_result_content(
                     fc.name.to_string(),
                     call_id.to_string(),
                     result,
                 ));
             }
 
-            // Send results back to LLM
-            let continuation = LlmRequest::continuation(
-                &interaction_id,
-                function_declarations.clone(),
-                function_results,
-            );
+            // Build continuation request
+            let continuation = self
+                .client
+                .interaction()
+                .with_previous_interaction(&interaction_id)
+                .with_content(results)
+                .with_functions(function_declarations.clone())
+                .with_store_enabled()
+                .build()
+                .map_err(LlmError::from)?;
 
             response = self
                 .generate_with_cancellation(continuation, cancellation_token)
@@ -521,36 +567,27 @@ impl LlmClient {
     }
 
     /// Execute a single generate request (no retries)
-    ///
-    /// Uses the build() + execute() pattern from genai-rs 0.6.0 for cleaner
-    /// separation of request construction and execution.
     async fn generate_once(
         &self,
-        request: &LlmRequest,
+        request: &InteractionRequest,
     ) -> Result<genai_rs::InteractionResponse, LlmError> {
         // Capture timing for recording
         let started_at = SystemTime::now();
         let start_instant = Instant::now();
 
-        // Build InteractionRequest from LlmRequest
-        // Uses different builders for initial vs continuation requests (genai_rs typestate)
-        let interaction_request = if self.is_continuation(request) {
-            self.build_continuation_interaction(request)?.build()
+        // Serialize request for recording before execution (in case of failure)
+        let serialized_request = if self.is_recording() {
+            serde_json::to_value(request).ok()
         } else {
-            self.build_interaction(request).build()
-        }
-        .map_err(LlmError::from)?;
+            None
+        };
 
         // Execute with explicit timeout wrapping
-        let response = tokio::time::timeout(
-            self.config.timeout,
-            self.client.execute(interaction_request),
-        )
-        .await
-        .map_err(|_| LlmError::Timeout(self.config.timeout.as_millis() as u64))?
-        .map_err(LlmError::from)?;
-
-        // Response logging is handled by genai-rs upstream
+        let response =
+            tokio::time::timeout(self.config.timeout, self.client.execute(request.clone()))
+                .await
+                .map_err(|_| LlmError::Timeout(self.config.timeout.as_millis() as u64))?
+                .map_err(LlmError::from)?;
 
         // Validate response has content (text or function calls)
         // Function calling responses may have function_calls but no text
@@ -559,7 +596,7 @@ impl LlmClient {
         }
 
         // Record the step if recording is enabled
-        if self.is_recording() {
+        if let Some(request_json) = serialized_request {
             let duration_ms = start_instant.elapsed().as_millis() as u64;
 
             // Serialize the response to JSON for storage
@@ -572,7 +609,7 @@ impl LlmClient {
 
             self.record_step(TrajectoryStep {
                 phase: self.current_phase(),
-                request: SerializableLlmRequest::from(request),
+                request: request_json,
                 response: response_data,
                 duration_ms,
                 started_at,
@@ -586,6 +623,9 @@ impl LlmClient {
     ///
     /// Returns a stream of text chunks as they arrive from the LLM.
     /// The stream ends naturally when the response is complete (yields `None`).
+    ///
+    /// Unlike `generate()`, streaming requires an `InteractionBuilder` (not a built
+    /// `InteractionRequest`) because genai-rs creates streams from builders directly.
     ///
     /// # Timeout Behavior
     ///
@@ -602,14 +642,16 @@ impl LlmClient {
     /// # Example
     ///
     /// ```no_run
-    /// # use gemicro_core::{LlmClient, LlmRequest, LlmConfig};
+    /// # use gemicro_core::{LlmClient, LlmConfig};
     /// # use futures_util::stream::StreamExt;
     /// # async fn example() -> Result<(), gemicro_core::LlmError> {
     /// # let genai_client = genai_rs::Client::builder("key".to_string()).build().unwrap();
     /// let client = LlmClient::new(genai_client, LlmConfig::default());
-    /// let request = LlmRequest::new("Count to 10");
+    /// // Note: Don't call .build() - pass the builder directly for streaming
+    /// let builder = client.client().interaction()
+    ///     .with_text("Count to 10");
     ///
-    /// let stream = client.generate_stream(request);
+    /// let stream = client.generate_stream(builder);
     /// futures_util::pin_mut!(stream);
     /// while let Some(chunk) = stream.next().await {
     ///     let chunk = chunk?;
@@ -618,30 +660,28 @@ impl LlmClient {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn generate_stream(
-        &self,
-        request: LlmRequest,
-    ) -> impl Stream<Item = Result<LlmStreamChunk, LlmError>> + Send + '_ {
+    pub fn generate_stream<'a, S>(
+        &'a self,
+        builder: genai_rs::InteractionBuilder<'a, S>,
+    ) -> impl Stream<Item = Result<LlmStreamChunk, LlmError>> + Send + 'a
+    where
+        S: Send + 'a,
+    {
         let timeout_duration = self.config.timeout;
 
         async_stream::try_stream! {
-            self.validate_request(&request)?;
-
-            let interaction = self.build_interaction(&request);
-
             // Capture timing and chunks for recording
             let started_at = SystemTime::now();
             let start_instant = Instant::now();
             let mut recorded_chunks: Vec<SerializableStreamChunk> = Vec::new();
             let is_recording = self.is_recording();
-            let serializable_request = SerializableLlmRequest::from(&request);
             let phase = self.current_phase();
 
             // Accumulate response text for debug logging
             let mut accumulated_response = String::new();
 
             // Get the stream (not async - returns immediately)
-            let stream = interaction.create_stream();
+            let stream = builder.create_stream();
             futures_util::pin_mut!(stream);
 
             // Process chunks with per-chunk timeout
@@ -693,18 +733,18 @@ impl LlmClient {
             }
 
             // Log accumulated response in debug mode
-            // Note: Styling differs from genai_rs request logs. For consistent styling,
-            // response logging should be added to genai_rs upstream.
             if log::log_enabled!(log::Level::Debug) && !accumulated_response.is_empty() {
                 log::debug!("Response Body (streamed):\n{}", accumulated_response);
             }
 
             // Record the step at the end of streaming
+            // Note: For streaming, we store null for the request since we take a builder
+            // (builders can't be serialized after they've created a stream)
             if is_recording {
                 let duration_ms = start_instant.elapsed().as_millis() as u64;
                 self.record_step(TrajectoryStep {
                     phase,
-                    request: serializable_request,
+                    request: serde_json::Value::Null,
                     response: LlmResponseData::Streaming(recorded_chunks),
                     duration_ms,
                     started_at,
@@ -722,16 +762,18 @@ impl LlmClient {
     /// # Example
     ///
     /// ```no_run
-    /// # use gemicro_core::{LlmClient, LlmRequest, LlmConfig};
+    /// # use gemicro_core::{LlmClient, LlmConfig};
     /// # use futures_util::stream::StreamExt;
     /// # use tokio_util::sync::CancellationToken;
     /// # async fn example() -> Result<(), gemicro_core::LlmError> {
     /// # let genai_client = genai_rs::Client::builder("key".to_string()).build().unwrap();
     /// let client = LlmClient::new(genai_client, LlmConfig::default());
     /// let token = CancellationToken::new();
-    /// let request = LlmRequest::new("Count to 10");
+    /// // Note: Don't call .build() - pass the builder directly for streaming
+    /// let builder = client.client().interaction()
+    ///     .with_text("Count to 10");
     ///
-    /// let stream = client.generate_stream_with_cancellation(request, token.clone());
+    /// let stream = client.generate_stream_with_cancellation(builder, token.clone());
     /// futures_util::pin_mut!(stream);
     /// // In another task: token.cancel() to abort
     /// while let Some(chunk) = stream.next().await {
@@ -741,11 +783,14 @@ impl LlmClient {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn generate_stream_with_cancellation(
-        &self,
-        request: LlmRequest,
+    pub fn generate_stream_with_cancellation<'a, S>(
+        &'a self,
+        builder: genai_rs::InteractionBuilder<'a, S>,
         cancellation_token: CancellationToken,
-    ) -> impl Stream<Item = Result<LlmStreamChunk, LlmError>> + Send + '_ {
+    ) -> impl Stream<Item = Result<LlmStreamChunk, LlmError>> + Send + 'a
+    where
+        S: Send + 'a,
+    {
         let timeout_duration = self.config.timeout;
 
         async_stream::try_stream! {
@@ -754,23 +799,18 @@ impl LlmClient {
                 Err(LlmError::Cancelled)?;
             }
 
-            self.validate_request(&request)?;
-
-            let interaction = self.build_interaction(&request);
-
             // Capture timing and chunks for recording
             let started_at = SystemTime::now();
             let start_instant = Instant::now();
             let mut recorded_chunks: Vec<SerializableStreamChunk> = Vec::new();
             let is_recording = self.is_recording();
-            let serializable_request = SerializableLlmRequest::from(&request);
             let phase = self.current_phase();
 
             // Accumulate response text for debug logging
             let mut accumulated_response = String::new();
 
             // Get the stream (not async - returns immediately)
-            let stream = interaction.create_stream();
+            let stream = builder.create_stream();
             futures_util::pin_mut!(stream);
 
             // Process chunks with per-chunk timeout and cancellation
@@ -832,135 +872,23 @@ impl LlmClient {
             }
 
             // Log accumulated response in debug mode
-            // Note: Styling differs from genai_rs request logs. For consistent styling,
-            // response logging should be added to genai_rs upstream.
             if log::log_enabled!(log::Level::Debug) && !accumulated_response.is_empty() {
                 log::debug!("Response Body (streamed):\n{}", accumulated_response);
             }
 
             // Record the step at the end of streaming
+            // Note: For streaming, we store null for the request since we take a builder
             if is_recording {
                 let duration_ms = start_instant.elapsed().as_millis() as u64;
                 self.record_step(TrajectoryStep {
                     phase,
-                    request: serializable_request,
+                    request: serde_json::Value::Null,
                     response: LlmResponseData::Streaming(recorded_chunks),
                     duration_ms,
                     started_at,
                 });
             }
         }
-    }
-
-    /// Validate the request before processing
-    fn validate_request(&self, request: &LlmRequest) -> Result<(), LlmError> {
-        // Continuations (function result responses) don't require a prompt
-        if request.prompt.is_empty() && !self.is_continuation(request) {
-            return Err(LlmError::InvalidRequest(
-                "Prompt cannot be empty".to_string(),
-            ));
-        }
-        Ok(())
-    }
-
-    /// Build an interaction from the request (DRY helper for initial requests)
-    fn build_interaction(&self, request: &LlmRequest) -> genai_rs::InteractionBuilder<'_> {
-        let generation_config = GenerationConfig {
-            temperature: Some(self.config.temperature),
-            max_output_tokens: Some(self.config.max_tokens as i32),
-            ..Default::default()
-        };
-
-        let mut interaction = self
-            .client
-            .interaction()
-            .with_model(MODEL)
-            .with_generation_config(generation_config);
-
-        // Initial request: use turns or simple text prompt
-        if let Some(ref turns) = request.turns {
-            // Clone turns and append current prompt as final user turn
-            let mut full_turns = turns.clone();
-            full_turns.push(genai_rs::Turn::user(request.prompt.as_str()));
-            interaction = interaction.with_turns(full_turns);
-        } else if !request.prompt.is_empty() {
-            interaction = interaction.with_text(&request.prompt);
-        }
-
-        if let Some(ref system) = request.system_instruction {
-            interaction = interaction.with_system_instruction(system);
-        }
-
-        // Add function declarations if provided
-        if let Some(ref functions) = request.functions {
-            interaction = interaction.with_functions(functions.clone());
-        }
-
-        // Enable storage for interaction chaining
-        if request.store_enabled {
-            interaction = interaction.with_store_enabled();
-        }
-
-        if request.use_google_search {
-            interaction = interaction.with_tools(vec![genai_rs::Tool::GoogleSearch]);
-        }
-
-        if let Some(ref schema) = request.response_format {
-            interaction = interaction.with_response_format(schema.clone());
-        }
-
-        interaction
-    }
-
-    /// Build a continuation interaction from the request (for function calling chains)
-    ///
-    /// This uses genai_rs's Chained typestate which is distinct from initial FirstTurn requests.
-    fn build_continuation_interaction(
-        &self,
-        request: &LlmRequest,
-    ) -> Result<genai_rs::InteractionBuilder<'_, genai_rs::request_builder::Chained>, LlmError>
-    {
-        let generation_config = GenerationConfig {
-            temperature: Some(self.config.temperature),
-            max_output_tokens: Some(self.config.max_tokens as i32),
-            ..Default::default()
-        };
-
-        // Start with previous interaction - this creates a Chained builder
-        let prev_id = request.previous_interaction_id.as_ref().ok_or_else(|| {
-            LlmError::InvalidRequest(
-                "Continuation request missing previous_interaction_id".to_string(),
-            )
-        })?;
-
-        let mut interaction = self
-            .client
-            .interaction()
-            .with_model(MODEL)
-            .with_generation_config(generation_config)
-            .with_previous_interaction(prev_id);
-
-        // Add function results
-        if let Some(ref results) = request.function_results {
-            interaction = interaction.with_content(results.clone());
-        }
-
-        // Add function declarations if provided
-        if let Some(ref functions) = request.functions {
-            interaction = interaction.with_functions(functions.clone());
-        }
-
-        // Enable storage for interaction chaining (usually already enabled for continuations)
-        if request.store_enabled {
-            interaction = interaction.with_store_enabled();
-        }
-
-        Ok(interaction)
-    }
-
-    /// Check if a request is a continuation (for validation bypass)
-    fn is_continuation(&self, request: &LlmRequest) -> bool {
-        request.previous_interaction_id.is_some() && request.function_results.is_some()
     }
 }
 
@@ -971,11 +899,6 @@ mod tests {
     #[test]
     fn test_is_retryable_timeout() {
         assert!(LlmError::Timeout(5000).is_retryable());
-    }
-
-    #[test]
-    fn test_is_retryable_rate_limit() {
-        assert!(LlmError::RateLimit("Too many requests".to_string()).is_retryable());
     }
 
     #[test]
@@ -1073,94 +996,7 @@ mod tests {
     #[test]
     fn test_retry_after_non_genai_returns_none() {
         assert_eq!(LlmError::Timeout(5000).retry_after(), None);
-        assert_eq!(
-            LlmError::RateLimit("Too many requests".to_string()).retry_after(),
-            None
-        );
         assert_eq!(LlmError::NoContent.retry_after(), None);
-    }
-
-    #[test]
-    fn test_validate_request_empty_prompt() {
-        let genai_client = genai_rs::Client::builder("test-key".to_string())
-            .build()
-            .unwrap();
-        let client = LlmClient::new(genai_client, LlmConfig::default());
-        let request = LlmRequest::new("");
-
-        let result = client.validate_request(&request);
-        assert!(result.is_err());
-        assert!(matches!(result, Err(LlmError::InvalidRequest(_))));
-    }
-
-    #[test]
-    fn test_validate_request_valid_prompt() {
-        let genai_client = genai_rs::Client::builder("test-key".to_string())
-            .build()
-            .unwrap();
-        let client = LlmClient::new(genai_client, LlmConfig::default());
-        let request = LlmRequest::new("Valid prompt");
-
-        let result = client.validate_request(&request);
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_validate_request_continuation_empty_prompt_allowed() {
-        use genai_rs::function_result_content;
-
-        let genai_client = genai_rs::Client::builder("test-key".to_string())
-            .build()
-            .unwrap();
-        let client = LlmClient::new(genai_client, LlmConfig::default());
-
-        // A continuation request has empty prompt but previous_interaction_id + function_results
-        let request = LlmRequest::continuation(
-            "interaction_123",
-            vec![], // Empty functions for this test
-            vec![function_result_content(
-                "get_time",
-                "call_1",
-                serde_json::json!({"time": "12:00"}),
-            )],
-        );
-
-        let result = client.validate_request(&request);
-        assert!(
-            result.is_ok(),
-            "Continuation with empty prompt should be valid"
-        );
-    }
-
-    #[test]
-    fn test_is_continuation() {
-        use genai_rs::function_result_content;
-
-        let genai_client = genai_rs::Client::builder("test-key".to_string())
-            .build()
-            .unwrap();
-        let client = LlmClient::new(genai_client, LlmConfig::default());
-
-        // Regular request is not a continuation
-        let regular = LlmRequest::new("Hello");
-        assert!(!client.is_continuation(&regular));
-
-        // Request with only previous_interaction_id is not a continuation
-        let mut partial = LlmRequest::new("");
-        partial.previous_interaction_id = Some("interaction_123".to_string());
-        assert!(!client.is_continuation(&partial));
-
-        // Proper continuation request
-        let continuation = LlmRequest::continuation(
-            "interaction_123",
-            vec![],
-            vec![function_result_content(
-                "get_time",
-                "call_1",
-                serde_json::json!({}),
-            )],
-        );
-        assert!(client.is_continuation(&continuation));
     }
 
     #[test]
@@ -1197,13 +1033,7 @@ mod tests {
         // Get debug output
         let debug_output = format!("{:?}", client);
 
-        // Should contain model name for debugging
-        assert!(
-            debug_output.contains("gemini"),
-            "Debug output should contain model name"
-        );
-
-        // Should contain REDACTED marker
+        // Should contain REDACTED marker for client
         assert!(
             debug_output.contains("[REDACTED]"),
             "Debug output should contain [REDACTED]"
@@ -1271,16 +1101,10 @@ mod tests {
             .unwrap();
         let client = LlmClient::with_recording(genai_client, LlmConfig::default());
 
-        // Manually record a step for testing
+        // Manually record a step for testing (request is now serde_json::Value)
         let step = TrajectoryStep {
             phase: "test".to_string(),
-            request: SerializableLlmRequest {
-                prompt: "Test prompt".to_string(),
-                turns: None,
-                system_instruction: None,
-                use_google_search: false,
-                response_format: None,
-            },
+            request: serde_json::json!({"prompt": "Test prompt"}),
             response: LlmResponseData::Buffered(serde_json::json!({"text": "Test"})),
             duration_ms: 100,
             started_at: SystemTime::now(),
@@ -1327,25 +1151,6 @@ mod tests {
     // generate_with_tools tests
 
     #[tokio::test]
-    async fn test_generate_with_tools_validates_empty_prompt() {
-        let genai_client = genai_rs::Client::builder("test-key".to_string())
-            .build()
-            .unwrap();
-        let client = LlmClient::new(genai_client, LlmConfig::default());
-        let token = CancellationToken::new();
-
-        // Request with empty prompt (not a continuation) should fail validation
-        let request = LlmRequest::new("");
-
-        let result = client
-            .generate_with_tools(request, |_fc| async { serde_json::json!({}) }, 10, &token)
-            .await;
-
-        assert!(result.is_err());
-        assert!(matches!(result, Err(LlmError::InvalidRequest(_))));
-    }
-
-    #[tokio::test]
     async fn test_generate_with_tools_respects_cancellation_before_start() {
         let genai_client = genai_rs::Client::builder("test-key".to_string())
             .build()
@@ -1356,10 +1161,23 @@ mod tests {
         // Cancel before calling
         token.cancel();
 
-        let request = LlmRequest::new("Test prompt");
+        // Build a valid request using genai-rs InteractionBuilder
+        let request = client
+            .client()
+            .interaction()
+            .with_model("gemini-3-flash-preview")
+            .with_text("Test prompt")
+            .build()
+            .unwrap();
 
         let result = client
-            .generate_with_tools(request, |_fc| async { serde_json::json!({}) }, 10, &token)
+            .generate_with_tools(
+                request,
+                vec![],
+                |_fc| async { serde_json::json!({}) },
+                10,
+                &token,
+            )
             .await;
 
         assert!(result.is_err());

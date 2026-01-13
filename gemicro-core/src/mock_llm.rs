@@ -21,14 +21,13 @@
 //! let mock = MockLlmClient::from_trajectory(&trajectory);
 //!
 //! // Use like a regular LlmClient - returns recorded responses
-//! let request = gemicro_core::LlmRequest::new("What is the capital of France?");
-//! let response = mock.generate(request).await?;
+//! let response = mock.generate("What is the capital of France?").await?;
 //! # Ok(())
 //! # }
 //! ```
 
 use crate::error::LlmError;
-use crate::llm::{LlmRequest, LlmStreamChunk};
+use crate::llm::LlmStreamChunk;
 use crate::trajectory::{LlmResponseData, Trajectory, TrajectoryStep};
 use futures_util::stream::Stream;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -118,16 +117,17 @@ impl MockLlmClient {
     /// Generate a response by returning the next recorded step
     ///
     /// This simulates `LlmClient::generate()` by returning the recorded
-    /// response from the next step. The request is validated but not used
+    /// response from the next step. The prompt is validated but not used
     /// to select the response - steps are returned in order.
     ///
     /// # Errors
     ///
     /// - `LlmError::NoContent` if no more steps are available or step was streaming
-    /// - `LlmError::InvalidRequest` if the request prompt is empty
-    pub async fn generate(&self, request: LlmRequest) -> Result<serde_json::Value, LlmError> {
+    /// - `LlmError::InvalidRequest` if the prompt is empty
+    pub async fn generate(&self, prompt: impl Into<String>) -> Result<serde_json::Value, LlmError> {
+        let prompt = prompt.into();
         // Validate request (same as real client)
-        if request.prompt.is_empty() {
+        if prompt.is_empty() {
             return Err(LlmError::InvalidRequest(
                 "Prompt cannot be empty".to_string(),
             ));
@@ -157,11 +157,12 @@ impl MockLlmClient {
     /// proportional to their recorded offsets.
     pub fn generate_stream(
         &self,
-        request: LlmRequest,
+        prompt: impl Into<String>,
     ) -> impl Stream<Item = Result<LlmStreamChunk, LlmError>> + Send + '_ {
+        let prompt = prompt.into();
         async_stream::try_stream! {
             // Validate request
-            if request.prompt.is_empty() {
+            if prompt.is_empty() {
                 Err(LlmError::InvalidRequest("Prompt cannot be empty".to_string()))?;
             }
 
@@ -211,7 +212,6 @@ impl MockLlmClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::trajectory::SerializableLlmRequest;
     use crate::trajectory::SerializableStreamChunk;
     use futures_util::StreamExt;
     use serde_json::json;
@@ -220,13 +220,11 @@ mod tests {
     fn sample_buffered_step() -> TrajectoryStep {
         TrajectoryStep {
             phase: "test".to_string(),
-            request: SerializableLlmRequest {
-                prompt: "What is 2+2?".to_string(),
-                turns: None,
-                system_instruction: None,
-                use_google_search: false,
-                response_format: None,
-            },
+            request: json!({
+                "prompt": "What is 2+2?",
+                "system_instruction": null,
+                "use_google_search": false
+            }),
             // Use genai-rs InteractionResponse structure
             response: LlmResponseData::Buffered(json!({
                 "outputs": [{"type": "text", "text": "The answer is 4."}],
@@ -240,13 +238,11 @@ mod tests {
     fn sample_streaming_step() -> TrajectoryStep {
         TrajectoryStep {
             phase: "streaming".to_string(),
-            request: SerializableLlmRequest {
-                prompt: "Count to 3".to_string(),
-                turns: None,
-                system_instruction: None,
-                use_google_search: false,
-                response_format: None,
-            },
+            request: json!({
+                "prompt": "Count to 3",
+                "system_instruction": null,
+                "use_google_search": false
+            }),
             response: LlmResponseData::Streaming(vec![
                 SerializableStreamChunk {
                     text: "One".to_string(),
@@ -311,7 +307,7 @@ mod tests {
     async fn test_generate_returns_recorded_response() {
         let mock = MockLlmClient::from_steps(vec![sample_buffered_step()]);
 
-        let response = mock.generate(LlmRequest::new("Any prompt")).await.unwrap();
+        let response = mock.generate("Any prompt").await.unwrap();
 
         assert_eq!(extract_text(&response), Some("The answer is 4."));
         assert!(mock.is_exhausted());
@@ -334,11 +330,11 @@ mod tests {
 
         let mock = MockLlmClient::from_steps(vec![step1, step2]);
 
-        let r1 = mock.generate(LlmRequest::new("First")).await.unwrap();
+        let r1 = mock.generate("First").await.unwrap();
         assert_eq!(extract_text(&r1), Some("First response"));
         assert_eq!(mock.current_index(), 1);
 
-        let r2 = mock.generate(LlmRequest::new("Second")).await.unwrap();
+        let r2 = mock.generate("Second").await.unwrap();
         assert_eq!(extract_text(&r2), Some("Second response"));
         assert!(mock.is_exhausted());
     }
@@ -347,7 +343,7 @@ mod tests {
     async fn test_generate_returns_error_when_exhausted() {
         let mock = MockLlmClient::from_steps(vec![]);
 
-        let result = mock.generate(LlmRequest::new("Test")).await;
+        let result = mock.generate("Test").await;
         assert!(matches!(result, Err(LlmError::NoContent)));
     }
 
@@ -355,7 +351,7 @@ mod tests {
     async fn test_generate_validates_empty_prompt() {
         let mock = MockLlmClient::from_steps(vec![sample_buffered_step()]);
 
-        let result = mock.generate(LlmRequest::new("")).await;
+        let result = mock.generate("").await;
         assert!(matches!(result, Err(LlmError::InvalidRequest(_))));
     }
 
@@ -363,7 +359,7 @@ mod tests {
     async fn test_generate_stream_yields_chunks() {
         let mock = MockLlmClient::from_steps(vec![sample_streaming_step()]);
 
-        let stream = mock.generate_stream(LlmRequest::new("Count"));
+        let stream = mock.generate_stream("Count");
         futures_util::pin_mut!(stream);
 
         let mut collected = Vec::new();
@@ -380,7 +376,7 @@ mod tests {
         // Step with response but no stream chunks
         let mock = MockLlmClient::from_steps(vec![sample_buffered_step()]);
 
-        let stream = mock.generate_stream(LlmRequest::new("Test"));
+        let stream = mock.generate_stream("Test");
         futures_util::pin_mut!(stream);
 
         let mut collected = Vec::new();
@@ -415,7 +411,7 @@ mod tests {
     async fn test_generate_stream_validates_empty_prompt() {
         let mock = MockLlmClient::from_steps(vec![sample_streaming_step()]);
 
-        let stream = mock.generate_stream(LlmRequest::new(""));
+        let stream = mock.generate_stream("");
         futures_util::pin_mut!(stream);
 
         let result = stream.next().await;
@@ -426,7 +422,7 @@ mod tests {
     async fn test_generate_stream_returns_error_when_exhausted() {
         let mock = MockLlmClient::from_steps(vec![]);
 
-        let stream = mock.generate_stream(LlmRequest::new("Test"));
+        let stream = mock.generate_stream("Test");
         futures_util::pin_mut!(stream);
 
         let result = stream.next().await;
@@ -437,13 +433,11 @@ mod tests {
     async fn test_generate_stream_timing_simulation() {
         let step = TrajectoryStep {
             phase: "timed".to_string(),
-            request: SerializableLlmRequest {
-                prompt: "Count".to_string(),
-                turns: None,
-                system_instruction: None,
-                use_google_search: false,
-                response_format: None,
-            },
+            request: json!({
+                "prompt": "Count",
+                "system_instruction": null,
+                "use_google_search": false
+            }),
             response: LlmResponseData::Streaming(vec![
                 SerializableStreamChunk {
                     text: "One".to_string(),
@@ -461,7 +455,7 @@ mod tests {
         let mock = MockLlmClient::from_steps(vec![step]).with_timing_simulation();
 
         let start = std::time::Instant::now();
-        let stream = mock.generate_stream(LlmRequest::new("Count"));
+        let stream = mock.generate_stream("Count");
         futures_util::pin_mut!(stream);
 
         let mut collected = Vec::new();

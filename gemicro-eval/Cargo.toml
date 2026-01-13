@@ -13,10 +13,10 @@ gemicro-core = { path = "../gemicro-core" }
 gemicro-runner = { path = "../gemicro-runner" }
 
 # Agent crates - eval needs these for the CLI and scoring
-gemicro-deep-research = { path = "../agents/gemicro-deep-research" }
-gemicro-react = { path = "../agents/gemicro-react" }
+gemicro-deep-research-agent = { path = "../agents/gemicro-deep-research-agent" }
+gemicro-react-agent = { path = "../agents/gemicro-react-agent" }
 gemicro-prompt-agent = { path = "../agents/gemicro-prompt-agent" }
-gemicro-critique = { path = "../agents/gemicro-critique" }
+gemicro-critique-agent = { path = "../agents/gemicro-critique-agent" }
 tokio = { workspace = true }
 futures-util = { workspace = true }
 serde = { workspace = true }

@@ -14,10 +14,10 @@
 //! ## Agent Implementations
 //!
 //! Agents are in separate crates for hermetic isolation:
-//! - `gemicro-deep-research`: Decomposes queries, executes sub-queries in parallel, synthesizes
-//! - `gemicro-react`: Reasoning + Acting pattern with iterative tool use
+//! - `gemicro-deep-research-agent`: Decomposes queries, executes sub-queries in parallel, synthesizes
+//! - `gemicro-react-agent`: Reasoning + Acting pattern with iterative tool use
 //! - `gemicro-prompt-agent`: Executes prompts with optional tool support
-//! - `gemicro-critique`: Generalized output validation and actionable feedback
+//! - `gemicro-critique-agent`: Generalized output validation and actionable feedback
 //!
 //! ## Example
 //!
@@ -65,13 +65,12 @@ pub use agent::{
     DEFAULT_MAX_DEPTH, DEFAULT_PER_PARENT_MAX_CONCURRENT, DEFAULT_TOTAL_TIMEOUT_SECS,
     EVENT_FINAL_RESULT,
 };
-pub use config::{GemicroConfig, LlmConfig, MODEL};
+pub use config::{GemicroConfig, LlmConfig};
 pub use context::{ContextLevel, ContextUsage, DEFAULT_CONTEXT_WINDOW, DEFAULT_WARNING_THRESHOLD};
 pub use error::{AgentError, GemicroError, LlmError};
 pub use history::{ConversationHistory, HistoryEntry};
 pub use llm::{
-    FunctionCallInfo, GenerateWithToolsResponse, LlmClient, LlmRequest, LlmStreamChunk, Role, Turn,
-    TurnContent,
+    FunctionCallInfo, GenerateWithToolsResponse, LlmClient, LlmStreamChunk, Role, Turn, TurnContent,
 };
 pub use mock_llm::MockLlmClient;
 pub use tool::{
@@ -81,8 +80,8 @@ pub use tool::{
 };
 pub use tracking::{DefaultTracker, ExecutionTracking};
 pub use trajectory::{
-    LlmResponseData, SerializableLlmRequest, SerializableStreamChunk, Trajectory,
-    TrajectoryBuilder, TrajectoryMetadata, TrajectoryStep, SCHEMA_VERSION,
+    LlmResponseData, SerializableStreamChunk, Trajectory, TrajectoryBuilder, TrajectoryMetadata,
+    TrajectoryStep, SCHEMA_VERSION,
 };
 pub use update::{AgentUpdate, FinalResult, ResultMetadata};
 pub use utils::{extract_total_tokens, first_sentence, truncate, truncate_with_count};

@@ -3,7 +3,7 @@
 //! These types mirror the agent config structs but use serde-friendly types
 //! (e.g., `u64` for seconds instead of `Duration`).
 
-use gemicro_deep_research::{ResearchConfig, ResearchPrompts};
+use gemicro_deep_research_agent::{DeepResearchAgentConfig, ResearchPrompts};
 use gemicro_prompt_agent::PromptAgentConfig;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -99,9 +99,9 @@ impl DeepResearchToml {
         }
     }
 
-    /// Convert to ResearchConfig, applying overrides to defaults.
-    pub fn to_research_config(&self) -> ResearchConfig {
-        let mut config = ResearchConfig::default();
+    /// Convert to DeepResearchAgentConfig, applying overrides to defaults.
+    pub fn to_research_config(&self) -> DeepResearchAgentConfig {
+        let mut config = DeepResearchAgentConfig::default();
 
         if let Some(v) = self.min_sub_queries {
             config = config.with_min_sub_queries(v);
