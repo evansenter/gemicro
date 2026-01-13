@@ -64,13 +64,6 @@ async fn main() -> Result<()> {
         env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
     }
 
-    // Log if Google Search grounding is enabled
-    if args.google_search {
-        log::info!(
-            "Google Search grounding enabled - sub-queries will search the web for real-time data"
-        );
-    }
-
     // Interactive mode: explicit -i flag OR no query provided (default)
     let interactive_mode = args.interactive || args.query.is_none();
 
@@ -118,7 +111,7 @@ async fn run_interactive(args: &cli::Args) -> Result<()> {
 
     // Set CLI overrides (these take precedence over file config)
     session.set_cli_overrides(repl::CliOverrides {
-        research_config: Some(args.research_config()),
+        model: args.model.clone(),
     });
 
     // Set sandbox paths for file access restriction (if configured)
@@ -177,18 +170,23 @@ async fn run_single_query(args: &cli::Args, query: &str) -> Result<()> {
     // Context is agent-specific: prompt_agent gets tools, others don't
     let (agent, context): (Box<dyn Agent>, AgentContext) = match args.agent.as_str() {
         "deep_research" => {
+            let mut config = gemicro_deep_research_agent::DeepResearchAgentConfig::default();
+            if let Some(ref model) = args.model {
+                config = config.with_model(model);
+            }
             let agent = Box::new(
-                DeepResearchAgent::new(args.research_config())
-                    .context("Failed to create research agent")?,
+                DeepResearchAgent::new(config).context("Failed to create research agent")?,
             );
             let context = AgentContext::new_with_cancellation(llm, cancellation_token.clone());
             (agent, context)
         }
         "prompt_agent" => {
-            let agent = Box::new(
-                PromptAgent::new(PromptAgentConfig::default())
-                    .context("Failed to create prompt agent")?,
-            );
+            let mut config = PromptAgentConfig::default();
+            if let Some(ref model) = args.model {
+                config = config.with_model(model);
+            }
+            let agent =
+                Box::new(PromptAgent::new(config).context("Failed to create prompt agent")?);
             // Add bundled tools (Calculator, CurrentDatetime)
             let context = AgentContext::new_with_cancellation(llm, cancellation_token.clone())
                 .with_tools(tools::default_registry());

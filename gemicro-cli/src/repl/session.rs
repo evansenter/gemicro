@@ -123,8 +123,9 @@ pub struct Session {
 /// CLI argument overrides that take precedence over file config.
 #[derive(Debug, Clone, Default)]
 pub struct CliOverrides {
-    /// Deep research config from CLI args
-    pub research_config: Option<gemicro_deep_research_agent::DeepResearchAgentConfig>,
+    /// Model override from CLI --model flag or GEMINI_MODEL env var.
+    /// Applied to all agents when set.
+    pub model: Option<String>,
 }
 
 /// Result of a config reload operation.
@@ -318,15 +319,20 @@ impl Session {
 
     /// Register agents based on config.
     fn register_agents_from_config(&mut self, config: &GemicroConfig) {
-        // Build deep_research config: CLI overrides > file config > defaults
-        // Validate and fallback to defaults on error
-        let research_config = if let Some(cli_config) = &self.cli_overrides.research_config {
-            cli_config.clone()
-        } else if let Some(file_config) = &config.deep_research {
+        // Get model override from CLI (if any)
+        let model_override = self.cli_overrides.model.clone();
+
+        // Build deep_research config from file or defaults
+        let mut research_config = if let Some(file_config) = &config.deep_research {
             file_config.to_research_config()
         } else {
             gemicro_deep_research_agent::DeepResearchAgentConfig::default()
         };
+
+        // Apply model override if present
+        if let Some(ref model) = model_override {
+            research_config = research_config.with_model(model);
+        }
 
         // Validate config before registering - fallback to defaults on error
         let research_config = match DeepResearchAgent::new(research_config.clone()) {
@@ -338,11 +344,16 @@ impl Session {
         };
 
         // Build prompt_agent config from file or defaults
-        let prompt_config = if let Some(file_config) = &config.prompt_agent {
+        let mut prompt_config = if let Some(file_config) = &config.prompt_agent {
             file_config.to_prompt_agent_config()
         } else {
             PromptAgentConfig::default()
         };
+
+        // Apply model override if present
+        if let Some(ref model) = model_override {
+            prompt_config = prompt_config.with_model(model);
+        }
 
         // Validate config before registering - fallback to defaults on error
         let prompt_config = match PromptAgent::new(prompt_config.clone()) {
@@ -353,8 +364,11 @@ impl Session {
             }
         };
 
-        // Register developer agent with defaults (config from file/CLI not yet implemented)
-        let developer_config = DeveloperAgentConfig::default();
+        // Build developer agent config
+        let mut developer_config = DeveloperAgentConfig::default();
+        if let Some(ref model) = model_override {
+            developer_config = developer_config.with_model(model);
+        }
 
         // Acquire write lock and register all agents
         let mut registry = self.registry.write().expect("agent registry lock poisoned");
