@@ -133,17 +133,11 @@ Run a single research query with real-time streaming output:
 # Basic query
 gemicro "What is Rust?"
 
-# With custom configuration
-gemicro "Compare async runtimes" \
-    --min-sub-queries 3 \
-    --max-sub-queries 7 \
-    --timeout 120
-
-# With Google Search grounding for real-time web data
-gemicro "What are the latest AI developments this week?" --google-search
+# With a specific model
+gemicro "Compare async runtimes" --agent deep_research --model gemini-2.5-pro-preview
 
 # Verbose mode (debug logging)
-gemicro "Your query" --verbose
+gemicro "Your query" --agent deep_research --verbose
 ```
 
 ### Interactive REPL Mode
@@ -198,8 +192,7 @@ Key options (run `gemicro --help` for full list):
 |--------|-------------|
 | `-i, --interactive` | REPL mode |
 | `--agent <NAME>` | Agent to use (required) |
-| `--google-search` | Enable web grounding |
-| `--timeout <SECS>` | Total timeout [default: 180] |
+| `--model <MODEL>` | Override default model (or set `GEMINI_MODEL` env var) |
 | `-v, --verbose` | Debug logging |
 
 ## Development
