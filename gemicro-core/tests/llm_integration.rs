@@ -7,8 +7,6 @@ mod common;
 
 use common::{create_test_client, get_api_key, validate_response_semantically};
 use futures_util::StreamExt;
-// Model specified inline
-use genai_rs::Turn;
 
 #[tokio::test]
 #[ignore] // Requires GEMINI_API_KEY
@@ -336,21 +334,16 @@ async fn test_generate_with_turns() {
 
     let client = create_test_client(&api_key);
 
-    // Create a conversation history where we established a math context
-    // NOTE: with_text() overwrites with_turns(), so we must include the follow-up
-    // question in the turns array itself.
-    let history = vec![
-        Turn::user("What is 2 + 2?"),
-        Turn::model("2 + 2 equals 4."),
-        Turn::user("And what is that multiplied by 3? Just the number please."),
-    ];
-
-    // Follow-up question that relies on the context
+    // Use ConversationBuilder for clean multi-turn syntax
     let request = client
         .client()
         .interaction()
         .with_model("gemini-3-flash-preview")
-        .with_turns(history)
+        .conversation()
+        .user("What is 2 + 2?")
+        .model("2 + 2 equals 4.")
+        .user("And what is that multiplied by 3? Just the number please.")
+        .done()
         .build()
         .unwrap();
 
