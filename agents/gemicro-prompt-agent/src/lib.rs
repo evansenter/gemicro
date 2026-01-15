@@ -437,10 +437,15 @@ impl PromptAgent {
         def.validate()
             .map_err(|e| AgentError::InvalidConfig(e.to_string()))?;
 
-        let config = PromptAgentConfig::default()
+        let mut config = PromptAgentConfig::default()
             .with_system_prompt(&def.system_prompt)
             .with_tool_filter(def.tools.clone())
             .with_description(&def.description);
+
+        // Apply model from definition if specified
+        if let Some(ref model) = def.model {
+            config = config.with_model(model);
+        }
 
         Self::new(config)
     }

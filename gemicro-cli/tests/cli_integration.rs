@@ -61,51 +61,15 @@ fn test_cli_invalid_temperature() {
 }
 
 #[test]
-fn test_cli_invalid_min_max_queries() {
+fn test_cli_zero_llm_timeout() {
     let output = run_cli(&[
         "test query",
         "--agent",
         "echo",
         "--api-key",
         "fake-key",
-        "--min-sub-queries",
-        "10",
-        "--max-sub-queries",
-        "5",
-    ]);
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("min-sub-queries"));
-}
-
-#[test]
-fn test_cli_zero_timeout() {
-    let output = run_cli(&[
-        "test query",
-        "--agent",
-        "echo",
-        "--api-key",
-        "fake-key",
-        "--timeout",
-        "0",
-    ]);
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("timeout"));
-}
-
-#[test]
-fn test_cli_llm_timeout_exceeds_total() {
-    let output = run_cli(&[
-        "test query",
-        "--agent",
-        "echo",
-        "--api-key",
-        "fake-key",
-        "--timeout",
-        "60",
         "--llm-timeout",
-        "120",
+        "0",
     ]);
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -120,26 +84,20 @@ fn test_cli_simple_query() {
         return;
     }
 
-    let output = run_cli(&[
-        "What is 2 + 2?",
-        "--agent",
-        "deep_research",
-        "--min-sub-queries",
-        "2",
-        "--max-sub-queries",
-        "3",
-        "--timeout",
-        "120",
-    ]);
+    let output = run_cli(&["What is 2 + 2?", "--agent", "prompt_agent"]);
 
     assert!(output.status.success(), "CLI failed: {:?}", output);
 
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     // Check for expected output sections
-    assert!(stdout.contains("gemicro Deep Research"), "Missing header");
-    assert!(stdout.contains("Performance:"), "Missing performance stats");
-    assert!(stdout.contains("Steps:"), "Missing step stats");
+    // Header uses agent name directly (e.g., "gemicro prompt_agent")
+    assert!(stdout.contains("gemicro prompt_agent"), "Missing header");
+    // prompt_agent uses simpler output format
+    assert!(
+        stdout.contains("4") || stdout.contains("four"),
+        "Response should contain the answer"
+    );
 }
 
 #[test]
@@ -150,18 +108,7 @@ fn test_cli_verbose_mode() {
         return;
     }
 
-    let output = run_cli(&[
-        "What is Rust?",
-        "--agent",
-        "deep_research",
-        "--verbose",
-        "--min-sub-queries",
-        "2",
-        "--max-sub-queries",
-        "2",
-        "--timeout",
-        "120",
-    ]);
+    let output = run_cli(&["test query", "--agent", "echo", "--verbose"]);
 
     assert!(output.status.success(), "CLI failed: {:?}", output);
 
@@ -173,36 +120,10 @@ fn test_cli_verbose_mode() {
     );
 }
 
-#[test]
-#[ignore] // Requires GEMINI_API_KEY
-fn test_cli_token_counts_displayed() {
-    if !has_api_key() {
-        eprintln!("Skipping test: GEMINI_API_KEY not set");
-        return;
-    }
-
-    let output = run_cli(&[
-        "Explain recursion briefly",
-        "--agent",
-        "deep_research",
-        "--min-sub-queries",
-        "2",
-        "--max-sub-queries",
-        "2",
-        "--timeout",
-        "120",
-    ]);
-
-    assert!(output.status.success(), "CLI failed: {:?}", output);
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-
-    // Token counts should be displayed (now that genai-rs is fixed)
-    assert!(
-        stdout.contains("tokens)") || stdout.contains("Tokens used:"),
-        "Token counts should be displayed in output"
-    );
-}
+// NOTE: test_cli_token_counts_displayed was removed in PR #259.
+// The test was flaky because it depended on the Gemini API consistently
+// returning token counts, which isn't guaranteed. The token display logic
+// is now tested via unit tests in format.rs instead.
 
 // NOTE: test_cli_parallel_speedup_displayed was removed in #124.
 // The simplified CLI no longer tracks step-level timing for parallel speedup
@@ -387,7 +308,7 @@ fn test_cli_interactive_quit() {
     }
 
     // Send /quit to exit the REPL immediately
-    let output = run_cli_with_stdin(&["--interactive", "--agent", "deep_research"], "/quit\n");
+    let output = run_cli_with_stdin(&["--interactive", "--agent", "echo"], "/quit\n");
 
     assert!(output.status.success(), "REPL should exit cleanly on /quit");
 
@@ -404,10 +325,7 @@ fn test_cli_interactive_list_agents() {
     }
 
     // List agents then quit
-    let output = run_cli_with_stdin(
-        &["--interactive", "--agent", "deep_research"],
-        "/agent\n/quit\n",
-    );
+    let output = run_cli_with_stdin(&["--interactive", "--agent", "echo"], "/agent\n/quit\n");
 
     assert!(output.status.success(), "REPL should exit cleanly");
 
@@ -431,10 +349,7 @@ fn test_cli_interactive_unknown_command() {
     }
 
     // Try unknown command then quit
-    let output = run_cli_with_stdin(
-        &["--interactive", "--agent", "deep_research"],
-        "/foobar\n/quit\n",
-    );
+    let output = run_cli_with_stdin(&["--interactive", "--agent", "echo"], "/foobar\n/quit\n");
 
     assert!(
         output.status.success(),
@@ -460,17 +375,7 @@ fn test_cli_interactive_simple_query() {
     // Run a simple query then quit
     // Note: Rustyline may not work perfectly with piped stdin in all environments
     let output = run_cli_with_stdin(
-        &[
-            "--interactive",
-            "--agent",
-            "deep_research",
-            "--timeout",
-            "120",
-            "--min-sub-queries",
-            "2",
-            "--max-sub-queries",
-            "2",
-        ],
+        &["--interactive", "--agent", "echo"],
         "What is 1+1?\n/quit\n",
     );
 
@@ -480,9 +385,7 @@ fn test_cli_interactive_simple_query() {
     let combined = format!("{}{}", stdout, stderr);
 
     assert!(
-        combined.contains("gemicro REPL")
-            || combined.contains("deep_research")
-            || combined.contains("Decomposing"),
+        combined.contains("gemicro REPL") || combined.contains("echo"),
         "Should show REPL activity. stdout: {}, stderr: {}",
         stdout,
         stderr

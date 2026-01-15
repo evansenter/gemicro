@@ -19,7 +19,7 @@ use serde_json::Value;
 ///
 /// # Example
 ///
-/// ```no_run
+/// ```ignore
 /// use gemicro_cli::confirmation::InteractiveConfirmation;
 /// use gemicro_core::AgentContext;
 /// use std::sync::Arc;

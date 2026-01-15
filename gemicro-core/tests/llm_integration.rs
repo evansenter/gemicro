@@ -5,10 +5,8 @@
 
 mod common;
 
-use common::{create_test_client, get_api_key};
+use common::{create_test_client, get_api_key, validate_response_semantically};
 use futures_util::StreamExt;
-// Model specified inline
-use genai_rs::Turn;
 
 #[tokio::test]
 #[ignore] // Requires GEMINI_API_KEY
@@ -336,16 +334,16 @@ async fn test_generate_with_turns() {
 
     let client = create_test_client(&api_key);
 
-    // Create a conversation history where we established a math context
-    let history = vec![Turn::user("What is 2 + 2?"), Turn::model("2 + 2 equals 4.")];
-
-    // Follow-up question that relies on the context
+    // Use ConversationBuilder for clean multi-turn syntax
     let request = client
         .client()
         .interaction()
         .with_model("gemini-3-flash-preview")
-        .with_turns(history)
-        .with_text("And what is that multiplied by 3? Just the number please.")
+        .conversation()
+        .user("What is 2 + 2?")
+        .model("2 + 2 equals 4.")
+        .user("And what is that multiplied by 3? Just the number please.")
+        .done()
         .build()
         .unwrap();
 
@@ -357,10 +355,23 @@ async fn test_generate_with_turns() {
             println!("Multi-turn response: {}", text);
 
             assert!(!text.is_empty(), "Response text should not be empty");
-            // The model should understand "that" refers to 4, and return 12
+
+            // Use semantic validation instead of brittle string matching.
+            // The model should understand "that" refers to 4, and return 12.
+            // But it might phrase it as "12", "twelve", "The answer is 12", etc.
+            let (is_valid, reason) = validate_response_semantically(
+                &client,
+                "User established that 2+2=4, then asked 'what is that multiplied by 3?'",
+                text,
+                "Does this response correctly indicate that the answer is 12 (4 * 3)?",
+            )
+            .await
+            .expect("Semantic validation request failed");
+
             assert!(
-                text.contains("12"),
-                "Response should contain '12' (4 * 3), got: {}",
+                is_valid,
+                "Response should correctly answer 4 * 3 = 12. Validation reason: {}. Response was: {}",
+                reason,
                 text
             );
         }

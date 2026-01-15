@@ -9,6 +9,7 @@ use crate::confirmation::InteractiveConfirmation;
 use crate::display::{IndicatifRenderer, Renderer};
 use crate::error::ErrorFormatter;
 use crate::format::truncate;
+use crate::registry::{register_builtin_agents, register_markdown_agents, RegistryOptions};
 use anyhow::{Context, Result};
 use futures_util::StreamExt;
 use gemicro_audit_log::AuditLog;
@@ -19,13 +20,8 @@ use gemicro_core::{
     AgentContext, AgentError, AgentUpdate, AutoApprove, BatchConfirmationHandler,
     ConversationHistory, HistoryEntry, LlmClient,
 };
-use gemicro_critique_agent::CritiqueAgent;
-use gemicro_deep_research_agent::DeepResearchAgent;
-use gemicro_developer_agent::{DeveloperAgent, DeveloperAgentConfig};
-use gemicro_echo_agent::EchoAgent;
-use gemicro_loader::load_markdown_agents_from_dir;
 use gemicro_path_sandbox::PathSandbox;
-use gemicro_prompt_agent::{tools as prompt_tools, PromptAgent, PromptAgentConfig};
+use gemicro_prompt_agent::tools as prompt_tools;
 use gemicro_runner::AgentRegistry;
 use gemicro_task::{Task, TaskContext};
 // Explicit tool imports (per "Explicit Over Implicit" principle)
@@ -123,8 +119,9 @@ pub struct Session {
 /// CLI argument overrides that take precedence over file config.
 #[derive(Debug, Clone, Default)]
 pub struct CliOverrides {
-    /// Deep research config from CLI args
-    pub research_config: Option<gemicro_deep_research_agent::DeepResearchAgentConfig>,
+    /// Model override from CLI --model flag or GEMINI_MODEL env var.
+    /// Applied to all agents when set.
+    pub model: Option<String>,
 }
 
 /// Result of a config reload operation.
@@ -317,123 +314,28 @@ impl Session {
     }
 
     /// Register agents based on config.
-    fn register_agents_from_config(&mut self, config: &GemicroConfig) {
-        // Build deep_research config: CLI overrides > file config > defaults
-        // Validate and fallback to defaults on error
-        let research_config = if let Some(cli_config) = &self.cli_overrides.research_config {
-            cli_config.clone()
-        } else if let Some(file_config) = &config.deep_research {
-            file_config.to_research_config()
-        } else {
-            gemicro_deep_research_agent::DeepResearchAgentConfig::default()
+    ///
+    /// Delegates to the shared registry module for builtin agents, then loads
+    /// markdown agents from the runtime-agents directory.
+    fn register_agents_from_config(&mut self, _config: &GemicroConfig) {
+        // Build registry options from CLI overrides
+        let options = match &self.cli_overrides.model {
+            Some(model) => RegistryOptions::default().with_model(model),
+            None => RegistryOptions::default(),
         };
-
-        // Validate config before registering - fallback to defaults on error
-        let research_config = match DeepResearchAgent::new(research_config.clone()) {
-            Ok(_) => research_config,
-            Err(e) => {
-                log::warn!("Invalid deep_research config: {}. Using defaults.", e);
-                gemicro_deep_research_agent::DeepResearchAgentConfig::default()
-            }
-        };
-
-        // Build prompt_agent config from file or defaults
-        let prompt_config = if let Some(file_config) = &config.prompt_agent {
-            file_config.to_prompt_agent_config()
-        } else {
-            PromptAgentConfig::default()
-        };
-
-        // Validate config before registering - fallback to defaults on error
-        let prompt_config = match PromptAgent::new(prompt_config.clone()) {
-            Ok(_) => prompt_config,
-            Err(e) => {
-                log::warn!("Invalid prompt_agent config: {}. Using defaults.", e);
-                PromptAgentConfig::default()
-            }
-        };
-
-        // Register developer agent with defaults (config from file/CLI not yet implemented)
-        let developer_config = DeveloperAgentConfig::default();
 
         // Acquire write lock and register all agents
         let mut registry = self.registry.write().expect("agent registry lock poisoned");
 
-        // Register deep_research agent (config is pre-validated, unwrap is safe)
-        registry.register("deep_research", move || {
-            Box::new(
-                DeepResearchAgent::new(research_config.clone())
-                    .expect("pre-validated config should not fail"),
-            )
-        });
+        // Register builtin agents (deep_research, prompt_agent, developer, react, echo, critique)
+        register_builtin_agents(&mut registry, &options);
 
-        // Register prompt_agent (config is pre-validated, unwrap is safe)
-        registry.register("prompt_agent", move || {
-            Box::new(
-                PromptAgent::new(prompt_config.clone())
-                    .expect("pre-validated config should not fail"),
-            )
-        });
-
-        // Register developer agent
-        registry.register("developer", move || {
-            Box::new(
-                DeveloperAgent::new(developer_config.clone())
-                    .expect("default config should not fail"),
-            )
-        });
-
-        // Register echo agent (no config needed - for testing)
-        registry.register("echo", || Box::new(EchoAgent));
-
-        // Register critique agent (for self-validation via Task tool)
-        registry.register("critique", || Box::new(CritiqueAgent::default_agent()));
-
-        // Register bundled markdown agents
-        self.register_markdown_agents(&mut registry);
-    }
-
-    /// Register agents defined in markdown format.
-    ///
-    /// Loads markdown agents from `agents/runtime-agents/` directory. Each `.md` file
-    /// with YAML frontmatter becomes a registered agent. Future versions will support
-    /// user-defined agents from `~/.config/gemicro/agents/`.
-    fn register_markdown_agents(&self, registry: &mut AgentRegistry) {
-        use std::path::Path;
-
-        let agents_dir = Path::new(RUNTIME_AGENTS_DIR);
-        let (agents, errors) = load_markdown_agents_from_dir(agents_dir);
-
-        // Log any parsing errors (don't crash - graceful degradation)
-        for (path, err) in errors {
-            log::warn!("Failed to parse markdown agent {:?}: {}", path, err);
-        }
-
-        // Register each successfully parsed agent
-        for agent in agents {
-            let def = agent.definition.clone();
-            let name = agent.name.clone();
-
-            // Log tool availability warnings at load time
-            if let gemicro_core::ToolSet::Specific(ref tools) = def.tools {
-                for tool in tools {
-                    log::debug!("Markdown agent '{}' requests tool: {}", name, tool);
-                }
-            }
-
-            registry.register(&name, move || {
-                Box::new(
-                    PromptAgent::with_definition(&def)
-                        .expect("pre-validated markdown agent definition"),
-                )
-            });
-
-            log::info!(
-                "Registered markdown agent: {} - {}",
-                agent.name,
-                agent.definition.description
-            );
-        }
+        // Register bundled markdown agents from runtime-agents directory
+        register_markdown_agents(
+            &mut registry,
+            &options,
+            std::path::Path::new(RUNTIME_AGENTS_DIR),
+        );
     }
 
     /// Reload configuration from files.
