@@ -337,7 +337,13 @@ async fn test_generate_with_turns() {
     let client = create_test_client(&api_key);
 
     // Create a conversation history where we established a math context
-    let history = vec![Turn::user("What is 2 + 2?"), Turn::model("2 + 2 equals 4.")];
+    // NOTE: with_text() overwrites with_turns(), so we must include the follow-up
+    // question in the turns array itself.
+    let history = vec![
+        Turn::user("What is 2 + 2?"),
+        Turn::model("2 + 2 equals 4."),
+        Turn::user("And what is that multiplied by 3? Just the number please."),
+    ];
 
     // Follow-up question that relies on the context
     let request = client
@@ -345,7 +351,6 @@ async fn test_generate_with_turns() {
         .interaction()
         .with_model("gemini-3-flash-preview")
         .with_turns(history)
-        .with_text("And what is that multiplied by 3? Just the number please.")
         .build()
         .unwrap();
 
