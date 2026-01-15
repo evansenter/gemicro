@@ -331,7 +331,11 @@ impl Session {
         register_builtin_agents(&mut registry, &options);
 
         // Register bundled markdown agents from runtime-agents directory
-        register_markdown_agents(&mut registry, std::path::Path::new(RUNTIME_AGENTS_DIR));
+        register_markdown_agents(
+            &mut registry,
+            &options,
+            std::path::Path::new(RUNTIME_AGENTS_DIR),
+        );
     }
 
     /// Reload configuration from files.

@@ -151,8 +151,13 @@ pub fn agent_needs_tools(name: &str) -> bool {
 /// # Arguments
 ///
 /// * `registry` - The registry to populate
+/// * `options` - Configuration options (model override, etc.)
 /// * `dir` - Directory containing markdown agent definitions
-pub fn register_markdown_agents(registry: &mut AgentRegistry, dir: &Path) {
+pub fn register_markdown_agents(
+    registry: &mut AgentRegistry,
+    options: &RegistryOptions,
+    dir: &Path,
+) {
     let (agents, errors) = load_markdown_agents_from_dir(dir);
 
     // Log parse errors but continue (graceful degradation)
@@ -160,9 +165,16 @@ pub fn register_markdown_agents(registry: &mut AgentRegistry, dir: &Path) {
         log::warn!("Failed to parse markdown agent {:?}: {}", path, err);
     }
 
+    let model_override = options.model.clone();
+
     for agent in agents {
-        let def = agent.definition.clone();
+        let mut def = agent.definition.clone();
         let name = agent.name.clone();
+
+        // Apply model override from CLI (takes precedence over markdown frontmatter)
+        if let Some(ref model) = model_override {
+            def.model = Some(model.clone());
+        }
 
         // Log tool requests for debugging
         if let gemicro_core::ToolSet::Specific(ref tools) = def.tools {
@@ -245,8 +257,9 @@ pub fn default_registry_with_markdown(
     options: Option<RegistryOptions>,
     markdown_dir: &Path,
 ) -> AgentRegistry {
-    let mut registry = default_registry(options);
-    register_markdown_agents(&mut registry, markdown_dir);
+    let options = options.unwrap_or_default();
+    let mut registry = default_registry(Some(options.clone()));
+    register_markdown_agents(&mut registry, &options, markdown_dir);
     registry
 }
 
