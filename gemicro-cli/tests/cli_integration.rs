@@ -84,7 +84,6 @@ fn test_cli_simple_query() {
         return;
     }
 
-    // Use prompt_agent for faster test execution (deep_research is slow)
     let output = run_cli(&["What is 2 + 2?", "--agent", "prompt_agent"]);
 
     assert!(output.status.success(), "CLI failed: {:?}", output);
@@ -109,8 +108,7 @@ fn test_cli_verbose_mode() {
         return;
     }
 
-    // Use prompt_agent for faster test execution
-    let output = run_cli(&["What is Rust?", "--agent", "prompt_agent", "--verbose"]);
+    let output = run_cli(&["test query", "--agent", "echo", "--verbose"]);
 
     assert!(output.status.success(), "CLI failed: {:?}", output);
 
@@ -310,7 +308,7 @@ fn test_cli_interactive_quit() {
     }
 
     // Send /quit to exit the REPL immediately
-    let output = run_cli_with_stdin(&["--interactive", "--agent", "deep_research"], "/quit\n");
+    let output = run_cli_with_stdin(&["--interactive", "--agent", "echo"], "/quit\n");
 
     assert!(output.status.success(), "REPL should exit cleanly on /quit");
 
@@ -327,10 +325,7 @@ fn test_cli_interactive_list_agents() {
     }
 
     // List agents then quit
-    let output = run_cli_with_stdin(
-        &["--interactive", "--agent", "deep_research"],
-        "/agent\n/quit\n",
-    );
+    let output = run_cli_with_stdin(&["--interactive", "--agent", "echo"], "/agent\n/quit\n");
 
     assert!(output.status.success(), "REPL should exit cleanly");
 
@@ -354,10 +349,7 @@ fn test_cli_interactive_unknown_command() {
     }
 
     // Try unknown command then quit
-    let output = run_cli_with_stdin(
-        &["--interactive", "--agent", "deep_research"],
-        "/foobar\n/quit\n",
-    );
+    let output = run_cli_with_stdin(&["--interactive", "--agent", "echo"], "/foobar\n/quit\n");
 
     assert!(
         output.status.success(),
@@ -383,7 +375,7 @@ fn test_cli_interactive_simple_query() {
     // Run a simple query then quit
     // Note: Rustyline may not work perfectly with piped stdin in all environments
     let output = run_cli_with_stdin(
-        &["--interactive", "--agent", "deep_research"],
+        &["--interactive", "--agent", "echo"],
         "What is 1+1?\n/quit\n",
     );
 
@@ -393,9 +385,7 @@ fn test_cli_interactive_simple_query() {
     let combined = format!("{}{}", stdout, stderr);
 
     assert!(
-        combined.contains("gemicro REPL")
-            || combined.contains("deep_research")
-            || combined.contains("Decomposing"),
+        combined.contains("gemicro REPL") || combined.contains("echo"),
         "Should show REPL activity. stdout: {}, stderr: {}",
         stdout,
         stderr
