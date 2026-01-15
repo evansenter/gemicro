@@ -120,7 +120,7 @@ pub async fn validate_response_semantically(
     let request = client
         .client()
         .interaction()
-        .with_model("gemini-3.0-flash-preview")
+        .with_model("gemini-3-flash-preview")
         .with_text(&validation_prompt)
         .with_response_format(schema)
         .build()
