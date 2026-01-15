@@ -84,16 +84,21 @@ fn test_cli_simple_query() {
         return;
     }
 
-    let output = run_cli(&["What is 2 + 2?", "--agent", "deep_research"]);
+    // Use prompt_agent for faster test execution (deep_research is slow)
+    let output = run_cli(&["What is 2 + 2?", "--agent", "prompt_agent"]);
 
     assert!(output.status.success(), "CLI failed: {:?}", output);
 
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     // Check for expected output sections
-    assert!(stdout.contains("gemicro Deep Research"), "Missing header");
-    assert!(stdout.contains("Performance:"), "Missing performance stats");
-    assert!(stdout.contains("Steps:"), "Missing step stats");
+    // Header uses agent name directly (e.g., "gemicro prompt_agent")
+    assert!(stdout.contains("gemicro prompt_agent"), "Missing header");
+    // prompt_agent uses simpler output format
+    assert!(
+        stdout.contains("4") || stdout.contains("four"),
+        "Response should contain the answer"
+    );
 }
 
 #[test]
@@ -104,7 +109,8 @@ fn test_cli_verbose_mode() {
         return;
     }
 
-    let output = run_cli(&["What is Rust?", "--agent", "deep_research", "--verbose"]);
+    // Use prompt_agent for faster test execution
+    let output = run_cli(&["What is Rust?", "--agent", "prompt_agent", "--verbose"]);
 
     assert!(output.status.success(), "CLI failed: {:?}", output);
 

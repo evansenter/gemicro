@@ -5,7 +5,7 @@
 
 mod common;
 
-use common::{create_test_client, get_api_key};
+use common::{create_test_client, get_api_key, validate_response_semantically};
 use futures_util::StreamExt;
 // Model specified inline
 use genai_rs::Turn;
@@ -22,7 +22,7 @@ async fn test_generate_simple_prompt() {
     let request = client
         .client()
         .interaction()
-        .with_model("gemini-3-flash-preview")
+        .with_model("gemini-3.0-flash-preview")
         .with_text("What is 2 + 2? Reply with just the number.")
         .build()
         .unwrap();
@@ -66,7 +66,7 @@ async fn test_generate_with_system_instruction() {
     let request = client
         .client()
         .interaction()
-        .with_model("gemini-3-flash-preview")
+        .with_model("gemini-3.0-flash-preview")
         .with_system_instruction("You are a helpful assistant. Always respond in exactly one word.")
         .with_text("What is the capital of France?")
         .build()
@@ -105,7 +105,7 @@ async fn test_generate_stream_simple_prompt() {
     let builder = client
         .client()
         .interaction()
-        .with_model("gemini-3-flash-preview")
+        .with_model("gemini-3.0-flash-preview")
         .with_text("Count from 1 to 5, one number per line.");
 
     let stream = client.generate_stream(builder);
@@ -158,7 +158,7 @@ async fn test_generate_stream_with_system_instruction() {
     let builder = client
         .client()
         .interaction()
-        .with_model("gemini-3-flash-preview")
+        .with_model("gemini-3.0-flash-preview")
         .with_system_instruction("You are a pirate. Always respond in pirate speak.")
         .with_text("Say hello");
 
@@ -209,7 +209,7 @@ async fn test_google_search_grounding() {
     let request = client
         .client()
         .interaction()
-        .with_model("gemini-3-flash-preview")
+        .with_model("gemini-3.0-flash-preview")
         .with_text("What is today's date?")
         .with_google_search()
         .build()
@@ -275,7 +275,7 @@ async fn test_structured_output_response_format() {
     let request = client
         .client()
         .interaction()
-        .with_model("gemini-3-flash-preview")
+        .with_model("gemini-3.0-flash-preview")
         .with_text("What is the capital of France? Respond with high confidence.")
         .with_response_format(schema)
         .build()
@@ -343,7 +343,7 @@ async fn test_generate_with_turns() {
     let request = client
         .client()
         .interaction()
-        .with_model("gemini-3-flash-preview")
+        .with_model("gemini-3.0-flash-preview")
         .with_turns(history)
         .with_text("And what is that multiplied by 3? Just the number please.")
         .build()
@@ -357,10 +357,23 @@ async fn test_generate_with_turns() {
             println!("Multi-turn response: {}", text);
 
             assert!(!text.is_empty(), "Response text should not be empty");
-            // The model should understand "that" refers to 4, and return 12
+
+            // Use semantic validation instead of brittle string matching.
+            // The model should understand "that" refers to 4, and return 12.
+            // But it might phrase it as "12", "twelve", "The answer is 12", etc.
+            let (is_valid, reason) = validate_response_semantically(
+                &client,
+                "User established that 2+2=4, then asked 'what is that multiplied by 3?'",
+                text,
+                "Does this response correctly indicate that the answer is 12 (4 * 3)?",
+            )
+            .await
+            .expect("Semantic validation request failed");
+
             assert!(
-                text.contains("12"),
-                "Response should contain '12' (4 * 3), got: {}",
+                is_valid,
+                "Response should correctly answer 4 * 3 = 12. Validation reason: {}. Response was: {}",
+                reason,
                 text
             );
         }

@@ -127,17 +127,20 @@ use gemicro_critique_agent::CritiqueAgent;                             // Critiq
 
 ### Single Query Mode
 
-Run a single research query with real-time streaming output:
+Run a single query with real-time streaming output:
 
 ```bash
-# Basic query
+# Basic query (uses prompt_agent by default)
 gemicro "What is Rust?"
 
 # With a specific model
-gemicro "Compare async runtimes" --agent deep_research --model gemini-2.5-pro-preview
+gemicro "Explain async/await" --agent prompt_agent --model gemini-3.0-flash-preview
 
 # Verbose mode (debug logging)
-gemicro "Your query" --agent deep_research --verbose
+gemicro "Your query" --agent prompt_agent --verbose
+
+# Deep research mode (slower, more thorough)
+gemicro "Compare async runtimes" --agent deep_research
 ```
 
 ### Interactive REPL Mode
