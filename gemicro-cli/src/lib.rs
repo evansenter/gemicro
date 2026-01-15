@@ -75,7 +75,7 @@ pub mod confirmation;
 
 // Re-export public API from registry module
 pub use registry::{
-    default_registry, default_registry_with_markdown, register_builtin_agents,
+    agent_needs_tools, default_registry, default_registry_with_markdown, register_builtin_agents,
     register_markdown_agents, RegistryOptions,
 };
 

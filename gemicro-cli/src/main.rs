@@ -18,7 +18,7 @@ use gemicro_core::{
     LlmClient,
 };
 use gemicro_prompt_agent::tools;
-use registry::RegistryOptions;
+use registry::{agent_needs_tools, RegistryOptions};
 use repl::Session;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
@@ -168,18 +168,12 @@ async fn run_single_query(args: &cli::Args, query: &str) -> Result<()> {
         )
     })?;
 
-    // Create context based on agent type
-    // Context is agent-specific: some agents get tools, others don't
-    let context = match args.agent.as_str() {
-        "prompt_agent" | "developer" | "react" => {
-            // Tool-using agents get the bundled tool registry
-            AgentContext::new_with_cancellation(llm, cancellation_token.clone())
-                .with_tools(tools::default_registry())
-        }
-        _ => {
-            // Research agents and others don't need tools
-            AgentContext::new_with_cancellation(llm, cancellation_token.clone())
-        }
+    // Create context - tool-using agents get tools attached
+    let context = AgentContext::new_with_cancellation(llm, cancellation_token.clone());
+    let context = if agent_needs_tools(&args.agent) {
+        context.with_tools(tools::default_registry())
+    } else {
+        context
     };
 
     let mut tracker = agent.create_tracker();

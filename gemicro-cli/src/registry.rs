@@ -130,6 +130,16 @@ pub fn register_builtin_agents(registry: &mut AgentRegistry, options: &RegistryO
     registry.register("critique", || Box::new(CritiqueAgent::default_agent()));
 }
 
+/// Check if an agent requires tools in its context.
+///
+/// Tool-using agents (prompt_agent, developer, react) need a tool registry
+/// attached to their context. Research and utility agents don't use tools.
+///
+/// This centralizes agent-specific knowledge to avoid scattered match statements.
+pub fn agent_needs_tools(name: &str) -> bool {
+    matches!(name, "prompt_agent" | "developer" | "react")
+}
+
 /// Register markdown-defined agents from a directory.
 ///
 /// Loads agent definitions from `.md` files in the specified directory.
