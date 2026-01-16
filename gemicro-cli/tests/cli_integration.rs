@@ -307,10 +307,13 @@ async fn test_cli_clear_resets_conversation_chain() {
 
     // Generate a unique secret that can't be found in the codebase.
     // This prevents the model from finding it via file reading tools.
-    let unique_secret = format!("secret_{}", std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos());
+    let unique_secret = format!(
+        "secret_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
 
     // Verify that /clear resets the conversation chain
     let output = run_cli_with_stdin(
