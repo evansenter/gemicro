@@ -107,33 +107,6 @@ impl ConversationHistory {
     pub fn clear(&mut self) {
         self.entries.clear();
     }
-
-    /// Build a context string from recent history for agent prompts
-    ///
-    /// Returns a formatted string with query/answer pairs from the last N entries.
-    /// This can be prepended to new queries to provide conversational context.
-    pub fn context_for_prompt(&self, last_n: usize) -> String {
-        if self.entries.is_empty() {
-            return String::new();
-        }
-
-        let entries = self.last_n(last_n);
-        let mut context = String::from("Previous conversation:\n\n");
-
-        for entry in entries {
-            context.push_str("User: ");
-            context.push_str(&entry.query);
-            context.push('\n');
-
-            if let Some(result) = entry.final_result() {
-                context.push_str("Assistant: ");
-                context.push_str(result);
-                context.push_str("\n\n");
-            }
-        }
-
-        context
-    }
 }
 
 /// Serde helper for SystemTime
@@ -245,27 +218,6 @@ mod tests {
 
         let last_10 = history.last_n(10);
         assert_eq!(last_10.len(), 1);
-    }
-
-    #[test]
-    fn test_context_for_prompt_empty() {
-        let history = ConversationHistory::new();
-        assert_eq!(history.context_for_prompt(3), "");
-    }
-
-    #[test]
-    fn test_context_for_prompt_with_entries() {
-        let mut history = ConversationHistory::new();
-
-        history.push(HistoryEntry::new(
-            "What is Rust?".to_string(),
-            "agent".to_string(),
-            sample_events(),
-        ));
-
-        let context = history.context_for_prompt(3);
-        assert!(context.contains("User: What is Rust?"));
-        assert!(context.contains("Assistant: The answer is 42"));
     }
 
     #[test]
