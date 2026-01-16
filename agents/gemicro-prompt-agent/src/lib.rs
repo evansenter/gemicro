@@ -43,9 +43,7 @@ use gemicro_core::{
 };
 
 use async_stream::try_stream;
-use genai_rs::{
-    function_result_content, CallableFunction, FunctionDeclaration, InteractionContent,
-};
+use genai_rs::{CallableFunction, Content, FunctionDeclaration};
 use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -500,7 +498,7 @@ impl Agent for PromptAgent {
                     .with_model(&config.model)
                     .with_system_instruction(&config.system_prompt)
                     .with_text(&query)
-                    .with_functions(function_declarations.clone())
+                    .add_functions(function_declarations.clone())
                     .with_store_enabled() // Enable storage for function calling chains
                     .build().map_err(|e| AgentError::Other(e.to_string()))?;
 
@@ -535,7 +533,7 @@ impl Agent for PromptAgent {
 
                     if function_calls.is_empty() {
                         // No function calls - done, return final text
-                        break response.text().unwrap_or("").to_string();
+                        break response.as_text().unwrap_or("").to_string();
                     }
 
                     // Get interaction ID for chaining
@@ -544,7 +542,7 @@ impl Agent for PromptAgent {
                     })?;
 
                     // Execute each function call with events
-                    let mut function_results: Vec<InteractionContent> = Vec::new();
+                    let mut function_results: Vec<Content> = Vec::new();
 
                     for fc in function_calls {
                         let tool_name = &fc.name;
@@ -605,7 +603,7 @@ impl Agent for PromptAgent {
                         );
 
                         // Add to results for next LLM call
-                        function_results.push(function_result_content(
+                        function_results.push(Content::function_result(
                             tool_name.to_string(),
                             call_id.to_string(),
                             result_json,
@@ -619,7 +617,7 @@ impl Agent for PromptAgent {
                         .interaction()
                         .with_model(&config.model)
                         .with_previous_interaction(&interaction_id)
-                        .with_functions(function_declarations.clone())
+                        .add_functions(function_declarations.clone())
                         .with_content(function_results)
                         .with_store_enabled()
                         .build().map_err(|e| AgentError::Other(e.to_string()))?;
@@ -666,7 +664,7 @@ impl Agent for PromptAgent {
                 )
                 .await?;
 
-                let text = response.text().unwrap_or("").to_string();
+                let text = response.as_text().unwrap_or("").to_string();
                 let tokens = gemicro_core::extract_total_tokens(&response).map(|t| t as u64);
                 (text, tokens)
             };

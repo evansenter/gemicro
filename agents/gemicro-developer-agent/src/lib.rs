@@ -54,10 +54,7 @@ use gemicro_core::{
     BatchConfirmationHandler, ContextLevel, ContextUsage, DefaultTracker, ExecutionTracking,
     PendingToolCall, ResultMetadata, ToolBatch,
 };
-use genai_rs::{
-    function_result_content, CallableFunction, FunctionDeclaration, InteractionContent,
-    OwnedFunctionCallInfo,
-};
+use genai_rs::{CallableFunction, Content, FunctionDeclaration, OwnedFunctionCallInfo};
 use serde_json::json;
 use std::sync::Arc;
 use std::time::Instant;
@@ -70,10 +67,13 @@ fn build_final_result(
     total_tool_time_ms: u64,
     iteration: usize,
 ) -> AgentUpdate {
-    let answer = response.text().map(|s| s.to_string()).unwrap_or_else(|| {
-        log::warn!("LLM response contained no text content");
-        String::new()
-    });
+    let answer = response
+        .as_text()
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| {
+            log::warn!("LLM response contained no text content");
+            String::new()
+        });
     let total_tokens = gemicro_core::extract_total_tokens(response).unwrap_or_else(|| {
         log::debug!("Could not extract token count from response");
         0
@@ -170,15 +170,12 @@ fn maybe_emit_context_usage(
 ///
 /// Used when a batch is denied - we send back error results to the LLM
 /// so it knows the tools weren't executed.
-fn build_denial_results(
-    function_calls: &[OwnedFunctionCallInfo],
-    reason: &str,
-) -> Vec<InteractionContent> {
+fn build_denial_results(function_calls: &[OwnedFunctionCallInfo], reason: &str) -> Vec<Content> {
     function_calls
         .iter()
         .map(|fc| {
             let call_id = fc.id.as_deref().unwrap_or("unknown");
-            function_result_content(
+            Content::function_result(
                 fc.name.clone(),
                 call_id.to_string(),
                 json!({ "error": reason }),
@@ -256,7 +253,7 @@ fn handle_batch_approval(approval: BatchApproval, batch_len: usize) -> BatchAppr
 #[cfg(test)]
 pub(crate) struct ToolExecutionResult {
     /// The function result content to send back to LLM.
-    pub function_result: InteractionContent,
+    pub function_result: Content,
     /// Event emitted when tool started.
     pub started_event: AgentUpdate,
     /// Event emitted when tool completed.
@@ -306,7 +303,7 @@ pub(crate) fn execute_tool_sync_result(
     );
 
     let function_result =
-        function_result_content(tool_name.to_string(), call_id.to_string(), result_json);
+        Content::function_result(tool_name.to_string(), call_id.to_string(), result_json);
 
     ToolExecutionResult {
         function_result,
@@ -490,7 +487,7 @@ impl Agent for DeveloperAgent {
                         .with_model(&model)
                         .with_system_instruction(&system_prompt)
                         .with_text(&query)
-                        .with_functions(function_declarations.clone())
+                        .add_functions(function_declarations.clone())
                         .with_store_enabled() // Enable storage for function calling chains
                         .build().map_err(|e| AgentError::Other(e.to_string()))?;
 
@@ -590,7 +587,7 @@ impl Agent for DeveloperAgent {
                         .interaction()
                         .with_model(&model)
                         .with_previous_interaction(prev_id)
-                        .with_functions(function_declarations.clone())
+                        .add_functions(function_declarations.clone())
                         .with_content(denial_results)
                         .with_store_enabled()
                         .build().map_err(|e| AgentError::Other(e.to_string()))?;
@@ -624,7 +621,7 @@ impl Agent for DeveloperAgent {
                 // SECTION 2b: Execute Function Calls with Real-Time Events
                 // ─────────────────────────────────────────────────────────────
 
-                let mut function_results: Vec<InteractionContent> = Vec::new();
+                let mut function_results: Vec<Content> = Vec::new();
                 let mut cancelled = false;
 
                 for fc in &function_calls_to_process {
@@ -759,7 +756,7 @@ impl Agent for DeveloperAgent {
                     }
 
                     // Add function result for the next LLM call
-                    function_results.push(function_result_content(
+                    function_results.push(Content::function_result(
                         tool_name.to_string(),
                         call_id.to_string(),
                         result_json,
@@ -791,7 +788,7 @@ impl Agent for DeveloperAgent {
                     .interaction()
                     .with_model(&model)
                     .with_previous_interaction(prev_id)
-                    .with_functions(function_declarations.clone())
+                    .add_functions(function_declarations.clone())
                     .with_content(function_results)
                     .with_store_enabled()
                     .build().map_err(|e| AgentError::Other(e.to_string()))?;
@@ -852,14 +849,13 @@ mod tests {
             name: "bash".to_string(),
             id: Some("call_123".to_string()),
             args: json!({"command": "rm -rf /"}),
-            thought_signature: None,
         }];
 
         let results = build_denial_results(&calls, "User denied execution");
 
         assert_eq!(results.len(), 1);
         // Verify it's a FunctionResult content type
-        if let InteractionContent::FunctionResult {
+        if let Content::FunctionResult {
             name,
             call_id,
             result,
@@ -881,13 +877,11 @@ mod tests {
                 name: "file_write".to_string(),
                 id: Some("call_1".to_string()),
                 args: json!({"path": "/etc/passwd"}),
-                thought_signature: None,
             },
             OwnedFunctionCallInfo {
                 name: "bash".to_string(),
                 id: Some("call_2".to_string()),
                 args: json!({"command": "echo test"}),
-                thought_signature: None,
             },
         ];
 
@@ -896,7 +890,7 @@ mod tests {
         assert_eq!(results.len(), 2);
         // Check both are FunctionResult
         for (i, result) in results.iter().enumerate() {
-            if let InteractionContent::FunctionResult {
+            if let Content::FunctionResult {
                 call_id, result, ..
             } = result
             {
@@ -914,13 +908,12 @@ mod tests {
             name: "glob".to_string(),
             id: None, // No ID provided
             args: json!({"pattern": "*.rs"}),
-            thought_signature: None,
         }];
 
         let results = build_denial_results(&calls, "Denied");
 
         assert_eq!(results.len(), 1);
-        if let InteractionContent::FunctionResult { call_id, .. } = &results[0] {
+        if let Content::FunctionResult { call_id, .. } = &results[0] {
             assert_eq!(call_id, "unknown"); // Falls back to "unknown"
         } else {
             panic!("Expected FunctionResult content");
@@ -999,7 +992,7 @@ mod tests {
         assert_eq!(result.completed_event.data["duration_ms"], 42);
 
         // Check function result
-        if let InteractionContent::FunctionResult {
+        if let Content::FunctionResult {
             name,
             call_id,
             result,
@@ -1032,7 +1025,7 @@ mod tests {
         assert_eq!(result.completed_event.data["success"], false);
 
         // Check function result contains error
-        if let InteractionContent::FunctionResult { name, result, .. } = &result.function_result {
+        if let Content::FunctionResult { name, result, .. } = &result.function_result {
             assert_eq!(name.as_deref(), Some("bash"));
             // Error message should be in the content
             let error_str = result["error"].as_str().unwrap();
@@ -1057,7 +1050,7 @@ mod tests {
         assert!(!result.success);
 
         // Error should indicate denial
-        if let InteractionContent::FunctionResult { result, .. } = &result.function_result {
+        if let Content::FunctionResult { result, .. } = &result.function_result {
             let error_str = result["error"].as_str().unwrap();
             assert!(error_str.contains("file_write"));
         } else {

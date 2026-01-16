@@ -127,7 +127,7 @@ pub async fn validate_response_semantically(
         .map_err(|e| e.to_string())?;
 
     let response = client.generate(request).await.map_err(|e| e.to_string())?;
-    let text = response.text().unwrap_or("{}");
+    let text = response.as_text().unwrap_or("{}");
 
     // Parse the structured response
     let json: serde_json::Value =
