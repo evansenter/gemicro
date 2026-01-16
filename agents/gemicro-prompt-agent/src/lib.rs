@@ -710,6 +710,8 @@ impl Agent for PromptAgent {
             let duration_ms = start.elapsed().as_millis() as u64;
 
             // Emit agent-specific result event
+            // Note: interaction_id is in final_result.metadata.extra, not here
+            // (CLI extracts it from metadata.extra for server-side chaining)
             yield AgentUpdate::custom(
                 EVENT_PROMPT_AGENT_RESULT,
                 answer.clone(),
@@ -717,7 +719,6 @@ impl Agent for PromptAgent {
                     "answer": answer,
                     "tokens_used": tokens_used,
                     "duration_ms": duration_ms,
-                    "interaction_id": interaction_id,
                 }),
             );
 
