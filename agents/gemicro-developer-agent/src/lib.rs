@@ -60,6 +60,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 /// Build the final result event with answer and metadata.
+///
+/// Includes the final `interaction_id` for multi-turn conversation chaining.
 fn build_final_result(
     response: &genai_rs::InteractionResponse,
     start: Instant,
@@ -79,6 +81,7 @@ fn build_final_result(
         0
     });
     let duration_ms = start.elapsed().as_millis() as u64;
+    let interaction_id = response.id.clone();
 
     AgentUpdate::final_result(
         json!(answer),
@@ -90,6 +93,7 @@ fn build_final_result(
                 "tool_call_count": total_tool_calls,
                 "tool_time_ms": total_tool_time_ms,
                 "iterations": iteration,
+                "interaction_id": interaction_id,
             }),
         ),
     )
@@ -480,16 +484,33 @@ impl Agent for DeveloperAgent {
                     ))?
                 } else {
                     // First turn: make initial LLM request with system instruction and query
-                    let initial_request = context
-                        .llm
-                        .client()
-                        .interaction()
-                        .with_model(&model)
-                        .with_system_instruction(&system_prompt)
-                        .with_text(&query)
-                        .add_functions(function_declarations.clone())
-                        .with_store_enabled() // Enable storage for function calling chains
-                        .build().map_err(|e| AgentError::Other(e.to_string()))?;
+                    // Use context's previous_interaction_id for multi-turn conversation support
+                    let initial_request = if let Some(ref prev_id) = context.previous_interaction_id {
+                        context
+                            .llm
+                            .client()
+                            .interaction()
+                            .with_model(&model)
+                            .with_system_instruction(&system_prompt)
+                            .with_text(&query)
+                            .add_functions(function_declarations.clone())
+                            .with_store_enabled()
+                            .with_previous_interaction(prev_id)
+                            .build()
+                            .map_err(|e| AgentError::Other(e.to_string()))?
+                    } else {
+                        context
+                            .llm
+                            .client()
+                            .interaction()
+                            .with_model(&model)
+                            .with_system_instruction(&system_prompt)
+                            .with_text(&query)
+                            .add_functions(function_declarations.clone())
+                            .with_store_enabled()
+                            .build()
+                            .map_err(|e| AgentError::Other(e.to_string()))?
+                    };
 
                     let response = context
                         .llm

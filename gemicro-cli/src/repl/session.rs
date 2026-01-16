@@ -114,6 +114,15 @@ pub struct Session {
     /// handler, interceptors) after configuration changes, without needing
     /// to recreate the tool registry.
     task_context: Arc<TaskContext>,
+
+    /// Last interaction ID from the previous query, for server-side conversation chaining.
+    ///
+    /// When set, the agent can use `with_previous_interaction()` to continue
+    /// the conversation server-side, preserving context without re-sending
+    /// previous exchanges as text (saving tokens).
+    ///
+    /// Reset to `None` when the user runs `/clear`.
+    last_interaction_id: Option<String>,
 }
 
 /// CLI argument overrides that take precedence over file config.
@@ -196,6 +205,7 @@ impl Session {
             tool_registry,
             interceptors,
             task_context,
+            last_interaction_id: None,
         }
     }
 
@@ -443,6 +453,7 @@ impl Session {
             execution: gemicro_core::ExecutionContext::root(),
             orchestration: None,
             interceptors: self.interceptors.clone(),
+            previous_interaction_id: self.last_interaction_id.clone(),
         }
     }
 
@@ -473,9 +484,20 @@ impl Session {
         let agent_name = agent.name().to_string();
 
         // Build query with context
-        let full_query = if self.history.is_empty() {
+        //
+        // Server-side chaining: When last_interaction_id is set, the Gemini API preserves
+        // conversation context server-side. Agents MUST return `interaction_id` in their
+        // `ResultMetadata.extra` for this optimization to work (see PromptAgent, DeveloperAgent).
+        //
+        // Fallback: If no interaction_id is available (agent doesn't support chaining, or
+        // first turn), we prepend recent history as text via build_prompt_prefix(). This
+        // is less efficient but works with any agent. The build_prompt_prefix() function
+        // is intentionally kept for this fallback case.
+        let full_query = if self.last_interaction_id.is_some() || self.history.is_empty() {
+            // Server has context OR no history - use query as-is
             query.to_string()
         } else {
+            // No server-side chaining - prepend history as fallback
             format!("{}\n\nCurrent query: {}", self.build_prompt_prefix(), query)
         };
 
@@ -583,8 +605,14 @@ impl Session {
 
         renderer.finish().context("Renderer cleanup failed")?;
 
-        // Extract tokens before moving events to history
+        // Extract tokens and interaction_id before moving events to history
         let tokens_used = extract_tokens_from_events(&events);
+        let new_interaction_id = extract_interaction_id_from_events(&events);
+
+        // Update last_interaction_id for server-side conversation chaining
+        if new_interaction_id.is_some() {
+            self.last_interaction_id = new_interaction_id;
+        }
 
         // Store in history
         self.history
@@ -684,6 +712,7 @@ impl Session {
                         }
                         Command::Clear => {
                             self.history.clear();
+                            self.last_interaction_id = None;
                             println!("Conversation history cleared.");
                         }
                         Command::Reload => match self.reload() {
@@ -773,6 +802,23 @@ fn extract_tokens_from_events(events: &[AgentUpdate]) -> u64 {
         .filter_map(|e| e.as_final_result())
         .map(|r| u64::from(r.metadata.total_tokens))
         .sum()
+}
+
+/// Extract the interaction_id from the final_result event's metadata.extra.
+///
+/// The interaction_id is used for server-side conversation chaining via
+/// `with_previous_interaction()`. Agents include it in `ResultMetadata.extra["interaction_id"]`.
+fn extract_interaction_id_from_events(events: &[AgentUpdate]) -> Option<String> {
+    for event in events {
+        if let Some(result) = event.as_final_result() {
+            if let Some(id) = result.metadata.extra.get("interaction_id") {
+                if let Some(s) = id.as_str() {
+                    return Some(s.to_string());
+                }
+            }
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -1061,6 +1107,65 @@ mod tests {
             ),
         ];
         assert_eq!(extract_tokens_from_events(&events), 1500);
+    }
+
+    // ========================================================================
+    // extract_interaction_id_from_events Tests
+    // ========================================================================
+
+    #[test]
+    fn test_extract_interaction_id_empty_events() {
+        let events: Vec<AgentUpdate> = vec![];
+        assert_eq!(extract_interaction_id_from_events(&events), None);
+    }
+
+    #[test]
+    fn test_extract_interaction_id_no_final_result() {
+        use serde_json::json;
+        let events = vec![
+            AgentUpdate::custom("step_started", "Starting step", json!({})),
+            AgentUpdate::custom("step_complete", "Done", json!({})),
+        ];
+        assert_eq!(extract_interaction_id_from_events(&events), None);
+    }
+
+    #[test]
+    fn test_extract_interaction_id_final_result_without_id() {
+        use serde_json::json;
+        let events = vec![AgentUpdate::final_result(
+            json!("The answer"),
+            ResultMetadata::new(1500, 0, 1000),
+        )];
+        assert_eq!(extract_interaction_id_from_events(&events), None);
+    }
+
+    #[test]
+    fn test_extract_interaction_id_with_id() {
+        use serde_json::json;
+        let events = vec![AgentUpdate::final_result(
+            json!("The answer"),
+            ResultMetadata::with_extra(1500, 0, 1000, json!({ "interaction_id": "abc123" })),
+        )];
+        assert_eq!(
+            extract_interaction_id_from_events(&events),
+            Some("abc123".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_interaction_id_multiple_events_with_final() {
+        use serde_json::json;
+        let events = vec![
+            AgentUpdate::custom("step_started", "Starting", json!({})),
+            AgentUpdate::final_result(
+                json!("Result"),
+                ResultMetadata::with_extra(500, 0, 200, json!({ "interaction_id": "xyz789" })),
+            ),
+        ];
+        assert_eq!(
+            extract_interaction_id_from_events(&events),
+            Some("xyz789".to_string())
+        );
     }
 
     // ========================================================================

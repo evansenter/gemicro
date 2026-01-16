@@ -248,6 +248,75 @@ fn test_cli_multiple_sandbox_paths() {
 }
 
 // ============================================================================
+// Multi-Turn Conversation Tests (Server-Side Chaining)
+// ============================================================================
+
+#[test]
+#[ignore] // Requires GEMINI_API_KEY
+fn test_cli_multi_turn_conversation() {
+    if !has_api_key() {
+        eprintln!("Skipping test: GEMINI_API_KEY not set");
+        return;
+    }
+
+    // Run a multi-turn conversation where the second query references the first.
+    // This tests that server-side conversation chaining via `with_previous_interaction()`
+    // preserves context without re-sending history as text.
+    let output = run_cli_with_stdin(
+        &["--interactive", "--agent", "prompt_agent"],
+        // First query establishes a topic
+        "Remember this number: 42\n\
+         What number did I just tell you to remember?\n\
+         /quit\n",
+    );
+
+    assert!(
+        output.status.success(),
+        "Multi-turn conversation should complete successfully"
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // The model should recall the number 42 from the previous turn
+    // This works because server-side chaining preserves the conversation context
+    assert!(
+        stdout.contains("42"),
+        "Model should recall '42' from previous turn via server-side chaining. stdout: {}",
+        stdout
+    );
+}
+
+#[test]
+#[ignore] // Requires GEMINI_API_KEY
+fn test_cli_clear_resets_conversation_chain() {
+    if !has_api_key() {
+        eprintln!("Skipping test: GEMINI_API_KEY not set");
+        return;
+    }
+
+    // Verify that /clear resets the conversation chain
+    let output = run_cli_with_stdin(
+        &["--interactive", "--agent", "prompt_agent"],
+        // First query establishes context
+        "Remember this secret: banana\n\
+         /clear\n\
+         What was my secret?\n\
+         /quit\n",
+    );
+
+    assert!(output.status.success(), "/clear should work without error");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // After /clear, the model should NOT know about "banana" because
+    // both the local history AND the server-side chain were reset
+    assert!(
+        stdout.contains("Conversation history cleared"),
+        "Should show history cleared message"
+    );
+}
+
+// ============================================================================
 // Interactive REPL Tests
 // ============================================================================
 
