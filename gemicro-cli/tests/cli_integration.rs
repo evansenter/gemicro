@@ -305,14 +305,24 @@ async fn test_cli_clear_resets_conversation_chain() {
         return;
     }
 
+    // Generate a unique secret that can't be found in the codebase.
+    // This prevents the model from finding it via file reading tools.
+    let unique_secret = format!("secret_{}", std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos());
+
     // Verify that /clear resets the conversation chain
     let output = run_cli_with_stdin(
         &["--interactive", "--agent", "prompt_agent"],
         // First query establishes context
-        "Remember this secret: banana\n\
-         /clear\n\
-         What was my secret?\n\
-         /quit\n",
+        &format!(
+            "Remember this secret code: {}\n\
+             /clear\n\
+             What was my secret code?\n\
+             /quit\n",
+            unique_secret
+        ),
     );
 
     assert!(output.status.success(), "/clear should work without error");
@@ -329,16 +339,23 @@ async fn test_cli_clear_resets_conversation_chain() {
     let client = common::create_test_client();
     let (context_lost, reason) = common::validate_response_semantically(
         &client,
-        "User told model a secret 'banana', then ran /clear, then asked 'What was my secret?'",
+        &format!(
+            "User told model a unique secret code '{}', then ran /clear, then asked 'What was my secret code?'",
+            unique_secret
+        ),
         &stdout,
-        "After the /clear command, does the model indicate it doesn't know or can't recall the secret? (It should NOT know 'banana')",
+        &format!(
+            "After the /clear command, does the model indicate it doesn't know or can't recall the secret? \
+             (It should NOT know '{}' - this is a unique code that doesn't exist in any file)",
+            unique_secret
+        ),
     )
     .await
     .expect("Semantic validation failed");
 
     assert!(
         context_lost,
-        "/clear should reset conversation context so model doesn't know 'banana'. Reason: {}. stdout: {}",
+        "/clear should reset conversation context so model doesn't know the secret. Reason: {}. stdout: {}",
         reason, stdout
     );
 }
