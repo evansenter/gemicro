@@ -486,7 +486,7 @@ impl Tool for Task {
                                 },
                                 "model": {
                                     "type": "string",
-                                    "description": "Optional model override (e.g., 'gemini-1.5-flash')"
+                                    "description": "Optional model override (e.g., 'gemini-3-flash-preview')"
                                 }
                             }
                         }
@@ -951,13 +951,13 @@ mod tests {
             "description": "Test",
             "system_prompt": "Test prompt",
             "tools": ["file_read", "grep"],
-            "model": "gemini-1.5-flash"
+            "model": "gemini-3-flash-preview"
         }))
         .unwrap();
 
         if let AgentSpec::Prompt(def) = spec {
             assert!(matches!(def.tools, ToolSet::Specific(ref tools) if tools.len() == 2));
-            assert_eq!(def.model, Some("gemini-1.5-flash".to_string()));
+            assert_eq!(def.model, Some("gemini-3-flash-preview".to_string()));
         } else {
             panic!("Expected AgentSpec::Prompt");
         }

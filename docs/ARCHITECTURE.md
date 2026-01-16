@@ -104,11 +104,11 @@ For advanced use cases needing direct genai_rs access:
 
 ```rust
 let genai_client = context.llm.client();
-genai_client.interaction()
+let request = genai_client.interaction()
     .with_model("gemini-3-flash-preview")
     // ... custom configuration
-    .create()
-    .await
+    .build()?;
+let response = context.llm.generate(request).await?;
 ```
 
 **When to use `client()`:**
@@ -207,14 +207,12 @@ Fine-grained control with batch confirmation:
 
 ```rust
 // Uses client() for optimized continuation (doesn't re-send functions)
-let genai_client = context.llm.client();
-
 loop {
-    let response = genai_client.interaction()
+    let request = context.llm.client().interaction()
         .with_previous_interaction(prev_id)
         .with_content(function_results)  // No functions re-sent
-        .create()
-        .await?;
+        .build()?;
+    let response = context.llm.generate(request).await?;
     // ...
 }
 ```

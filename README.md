@@ -134,7 +134,7 @@ Run a single query with real-time streaming output:
 gemicro "What is Rust?"
 
 # With a specific model
-gemicro "Explain async/await" --agent prompt_agent --model gemini-3.0-flash-preview
+gemicro "Explain async/await" --agent prompt_agent --model gemini-3-flash-preview
 
 # Verbose mode (debug logging)
 gemicro "Your query" --agent prompt_agent --verbose
