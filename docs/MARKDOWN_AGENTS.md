@@ -8,7 +8,7 @@ Define gemicro agents using markdown files with YAML frontmatter. This format se
 ---
 name: my-agent
 description: What this agent does
-model: gemini-3.0-flash-preview  # optional
+model: gemini-3-flash-preview  # optional
 tools:                           # optional
   - file_read
   - grep
@@ -28,7 +28,7 @@ The entire markdown body becomes the agent's system prompt.
 |-------|----------|---------|-------------|
 | `name` | Yes | - | Unique identifier for agent registration |
 | `description` | No | Uses `name` | Human-readable description shown in `/agents` |
-| `model` | No | Inherited | Model override (e.g., `gemini-3.0-flash-preview`) |
+| `model` | No | Inherited | Model override (e.g., `gemini-3-flash-preview`) |
 | `tools` | No | Inherit | Tool access configuration (see below) |
 
 ## Tool Configuration

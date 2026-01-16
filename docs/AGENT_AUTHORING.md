@@ -73,10 +73,57 @@ pub struct AgentContext {
     pub tools: Option<Arc<ToolRegistry>>,       // Shared tool registry
     pub confirmation_handler: Option<Arc<dyn ConfirmationHandler>>,  // Tool confirmation
     pub execution: ExecutionContext,      // Execution tracking for subagents
+    pub previous_interaction_id: Option<String>,  // For multi-turn conversation chaining
 }
 ```
 
 **Important:** Do NOT add agent-specific config here. Config belongs in the agent constructor.
+
+#### Multi-Turn Conversation Support
+
+The `previous_interaction_id` field enables server-side conversation chaining via the Gemini Interactions API. When set, agents can use `with_previous_interaction()` to continue a conversation without re-sending previous exchanges as text (saving tokens).
+
+**How it works:**
+
+1. **CLI session** tracks the last interaction ID after each query
+2. **AgentContext** receives the previous ID via `with_previous_interaction()`
+3. **Agent** uses it when building LLM requests:
+
+```rust
+let request = if let Some(ref prev_id) = context.previous_interaction_id {
+    context.llm.client().interaction()
+        .with_model(&config.model)
+        .with_system_instruction(&config.system_prompt)
+        .with_text(&query)
+        .with_store_enabled()
+        .with_previous_interaction(prev_id)  // Chain to previous turn
+        .build()?
+} else {
+    context.llm.client().interaction()
+        .with_model(&config.model)
+        .with_system_instruction(&config.system_prompt)
+        .with_text(&query)
+        .with_store_enabled()
+        .build()?
+};
+```
+
+4. **Agent** returns the new interaction ID in `ResultMetadata.extra`:
+
+```rust
+let metadata = ResultMetadata::with_extra(
+    tokens_used,
+    failures,
+    duration_ms,
+    json!({ "interaction_id": response.id }),
+);
+yield AgentUpdate::final_result(json!(answer), metadata);
+```
+
+**Important notes:**
+- System instructions, tools, and model are **NOT** inherited - they must be resent each turn
+- Only conversation history is preserved server-side
+- Subagents do NOT inherit `previous_interaction_id` (they start fresh chains)
 
 ### ExecutionContext (Subagent Tracking)
 
@@ -852,7 +899,7 @@ use gemicro_runner::AgentRunner;
 use serde_json::json;
 
 async fn record_trajectory(agent: &impl Agent, query: &str) -> Result<Trajectory, AgentError> {
-    let genai_client = rust_genai::Client::builder(api_key).build();
+    let genai_client = genai_rs::Client::builder(api_key).build()?;
     let llm_config = LlmConfig::default();
 
     // Use AgentRunner for trajectory capture
@@ -983,11 +1030,11 @@ impl Agent for PromptAgent {
             );
 
             // Use with automatic function calling
-            let response = context.llm.genai_client()
+            let response = context.llm.client()
                 .interaction()
                 .with_model(&self.config.model)
-                .with_system(&self.config.system_prompt)
-                .with_user(query)
+                .with_system_instruction(&self.config.system_prompt)
+                .with_text(query)
                 .with_tool_service(service)
                 .create_with_auto_functions()
                 .await?;
@@ -1135,7 +1182,7 @@ use gemicro_core::agent::{PromptAgentDef, AgentSpec};
 let def = PromptAgentDef::new("Python security reviewer")
     .with_system_prompt("You are an expert Python security auditor...")
     .with_tools(ToolSet::Specific(vec!["file_read".into(), "grep".into()]))
-    .with_model("gemini-1.5-flash");
+    .with_model("gemini-3-flash-preview");
 ```
 
 ### AgentSpec
@@ -1191,7 +1238,7 @@ The Task tool (in `tools/gemicro-task/`) uses these types to spawn subagents:
         "description": "Python security reviewer",
         "system_prompt": "You are an expert Python security auditor...",
         "tools": ["file_read", "grep"],
-        "model": "gemini-1.5-flash"
+        "model": "gemini-3-flash-preview"
     },
     "query": "Review src/auth.py for security issues"
 }

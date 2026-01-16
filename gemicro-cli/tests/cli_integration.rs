@@ -3,6 +3,8 @@
 //! These tests require GEMINI_API_KEY to be set and are marked #[ignore].
 //! Run with: cargo test -p gemicro-cli -- --include-ignored
 
+mod common;
+
 use std::process::Command;
 
 /// Helper to run the CLI binary with arguments.
@@ -251,9 +253,9 @@ fn test_cli_multiple_sandbox_paths() {
 // Multi-Turn Conversation Tests (Server-Side Chaining)
 // ============================================================================
 
-#[test]
+#[tokio::test]
 #[ignore] // Requires GEMINI_API_KEY
-fn test_cli_multi_turn_conversation() {
+async fn test_cli_multi_turn_conversation() {
     if !has_api_key() {
         eprintln!("Skipping test: GEMINI_API_KEY not set");
         return;
@@ -277,42 +279,87 @@ fn test_cli_multi_turn_conversation() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    // The model should recall the number 42 from the previous turn
-    // This works because server-side chaining preserves the conversation context
+    // Use semantic validation instead of brittle string matching
+    let client = common::create_test_client();
+    let (is_valid, reason) = common::validate_response_semantically(
+        &client,
+        "User asked model to remember the number 42, then asked what number they told it to remember",
+        &stdout,
+        "Does the model's second response correctly recall or reference the number 42?",
+    )
+    .await
+    .expect("Semantic validation failed");
+
     assert!(
-        stdout.contains("42"),
-        "Model should recall '42' from previous turn via server-side chaining. stdout: {}",
-        stdout
+        is_valid,
+        "Model should recall '42' from previous turn via server-side chaining. Reason: {}. stdout: {}",
+        reason, stdout
     );
 }
 
-#[test]
+#[tokio::test]
 #[ignore] // Requires GEMINI_API_KEY
-fn test_cli_clear_resets_conversation_chain() {
+async fn test_cli_clear_resets_conversation_chain() {
     if !has_api_key() {
         eprintln!("Skipping test: GEMINI_API_KEY not set");
         return;
     }
 
+    // Generate a unique secret that can't be found in the codebase.
+    // This prevents the model from finding it via file reading tools.
+    let unique_secret = format!(
+        "secret_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+
     // Verify that /clear resets the conversation chain
     let output = run_cli_with_stdin(
         &["--interactive", "--agent", "prompt_agent"],
         // First query establishes context
-        "Remember this secret: banana\n\
-         /clear\n\
-         What was my secret?\n\
-         /quit\n",
+        &format!(
+            "Remember this secret code: {}\n\
+             /clear\n\
+             What was my secret code?\n\
+             /quit\n",
+            unique_secret
+        ),
     );
 
     assert!(output.status.success(), "/clear should work without error");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    // After /clear, the model should NOT know about "banana" because
-    // both the local history AND the server-side chain were reset
+    // Verify clear message appeared
     assert!(
         stdout.contains("Conversation history cleared"),
         "Should show history cleared message"
+    );
+
+    // Use semantic validation to verify the model doesn't know the secret after /clear
+    let client = common::create_test_client();
+    let (context_lost, reason) = common::validate_response_semantically(
+        &client,
+        &format!(
+            "User told model a unique secret code '{}', then ran /clear, then asked 'What was my secret code?'",
+            unique_secret
+        ),
+        &stdout,
+        &format!(
+            "After the /clear command, does the model indicate it doesn't know or can't recall the secret? \
+             (It should NOT know '{}' - this is a unique code that doesn't exist in any file)",
+            unique_secret
+        ),
+    )
+    .await
+    .expect("Semantic validation failed");
+
+    assert!(
+        context_lost,
+        "/clear should reset conversation context so model doesn't know the secret. Reason: {}. stdout: {}",
+        reason, stdout
     );
 }
 

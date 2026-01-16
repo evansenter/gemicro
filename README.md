@@ -55,7 +55,7 @@ gemicro --interactive
 use gemicro_developer_agent::{DeveloperAgent, DeveloperAgentConfig};
 use gemicro_core::{Agent, AgentContext, LlmClient, LlmConfig};
 
-let llm = LlmClient::new(rust_genai::Client::builder(api_key).build(), LlmConfig::default());
+let llm = LlmClient::new(genai_rs::Client::builder(api_key).build()?, LlmConfig::default());
 let agent = DeveloperAgent::new(DeveloperAgentConfig::default())?;
 let stream = agent.execute("Read CLAUDE.md and summarize it", AgentContext::new(llm));
 
@@ -134,7 +134,7 @@ Run a single query with real-time streaming output:
 gemicro "What is Rust?"
 
 # With a specific model
-gemicro "Explain async/await" --agent prompt_agent --model gemini-3.0-flash-preview
+gemicro "Explain async/await" --agent prompt_agent --model gemini-3-flash-preview
 
 # Verbose mode (debug logging)
 gemicro "Your query" --agent prompt_agent --verbose

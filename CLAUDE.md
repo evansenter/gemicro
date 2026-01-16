@@ -28,7 +28,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Gemicro is a CLI agent exploration platform for AI agent patterns, powered by Gemini API via genai-rs.
 
-**Architecture**: 26-crate workspace (7 agents, 10 tools, 5 hooks, 4 core)
+**Architecture**: 27-crate workspace (6 agents, 10 tools, 6 hooks, 5 core)
 
 **Status**: Core complete. Remaining work in [GitHub Issues](https://github.com/evansenter/gemicro/issues).
 
@@ -187,7 +187,7 @@ Bump the version in `Cargo.toml` when new releases are published. Check the [cha
 
 ## Model Selection
 
-Always use `gemini-3.0-flash-preview` as the default model. Do not use older models like `gemini-2.0-flash`.
+Always use `gemini-3-flash-preview` as the default model. Do not use older models like `gemini-2.0-flash`.
 
 ## genai-rs Integration
 

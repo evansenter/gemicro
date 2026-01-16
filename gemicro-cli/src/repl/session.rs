@@ -457,12 +457,6 @@ impl Session {
         }
     }
 
-    /// Build prompt prefix with context
-    fn build_prompt_prefix(&self) -> String {
-        // Include conversation history as context
-        self.history.context_for_prompt(3) // Last 3 exchanges
-    }
-
     /// Run a query through the current agent
     ///
     /// Supports Ctrl+C cancellation - pressing Ctrl+C during execution will
@@ -483,23 +477,10 @@ impl Session {
 
         let agent_name = agent.name().to_string();
 
-        // Build query with context
-        //
-        // Server-side chaining: When last_interaction_id is set, the Gemini API preserves
-        // conversation context server-side. Agents MUST return `interaction_id` in their
-        // `ResultMetadata.extra` for this optimization to work (see PromptAgent, DeveloperAgent).
-        //
-        // Fallback: If no interaction_id is available (agent doesn't support chaining, or
-        // first turn), we prepend recent history as text via build_prompt_prefix(). This
-        // is less efficient but works with any agent. The build_prompt_prefix() function
-        // is intentionally kept for this fallback case.
-        let full_query = if self.last_interaction_id.is_some() || self.history.is_empty() {
-            // Server has context OR no history - use query as-is
-            query.to_string()
-        } else {
-            // No server-side chaining - prepend history as fallback
-            format!("{}\n\nCurrent query: {}", self.build_prompt_prefix(), query)
-        };
+        // Server-side chaining handles multi-turn context. Agents MUST return
+        // `interaction_id` in `ResultMetadata.extra` for chaining to work.
+        // See PromptAgent, DeveloperAgent for reference implementations.
+        let full_query = query.to_string();
 
         // Set up cancellation infrastructure for this query
         let cancellation_token = CancellationToken::new();
