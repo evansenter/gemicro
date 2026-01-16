@@ -55,7 +55,7 @@ gemicro --interactive
 use gemicro_developer_agent::{DeveloperAgent, DeveloperAgentConfig};
 use gemicro_core::{Agent, AgentContext, LlmClient, LlmConfig};
 
-let llm = LlmClient::new(rust_genai::Client::builder(api_key).build(), LlmConfig::default());
+let llm = LlmClient::new(genai_rs::Client::builder(api_key).build()?, LlmConfig::default());
 let agent = DeveloperAgent::new(DeveloperAgentConfig::default())?;
 let stream = agent.execute("Read CLAUDE.md and summarize it", AgentContext::new(llm));
 

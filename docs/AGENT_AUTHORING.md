@@ -852,7 +852,7 @@ use gemicro_runner::AgentRunner;
 use serde_json::json;
 
 async fn record_trajectory(agent: &impl Agent, query: &str) -> Result<Trajectory, AgentError> {
-    let genai_client = rust_genai::Client::builder(api_key).build();
+    let genai_client = genai_rs::Client::builder(api_key).build()?;
     let llm_config = LlmConfig::default();
 
     // Use AgentRunner for trajectory capture
@@ -983,11 +983,11 @@ impl Agent for PromptAgent {
             );
 
             // Use with automatic function calling
-            let response = context.llm.genai_client()
+            let response = context.llm.client()
                 .interaction()
                 .with_model(&self.config.model)
-                .with_system(&self.config.system_prompt)
-                .with_user(query)
+                .with_system_instruction(&self.config.system_prompt)
+                .with_text(query)
                 .with_tool_service(service)
                 .create_with_auto_functions()
                 .await?;
