@@ -114,6 +114,15 @@ pub struct Session {
     /// handler, interceptors) after configuration changes, without needing
     /// to recreate the tool registry.
     task_context: Arc<TaskContext>,
+
+    /// Last interaction ID from the previous query, for server-side conversation chaining.
+    ///
+    /// When set, the agent can use `with_previous_interaction()` to continue
+    /// the conversation server-side, preserving context without re-sending
+    /// previous exchanges as text (saving tokens).
+    ///
+    /// Reset to `None` when the user runs `/clear`.
+    last_interaction_id: Option<String>,
 }
 
 /// CLI argument overrides that take precedence over file config.
@@ -196,6 +205,7 @@ impl Session {
             tool_registry,
             interceptors,
             task_context,
+            last_interaction_id: None,
         }
     }
 
@@ -443,6 +453,7 @@ impl Session {
             execution: gemicro_core::ExecutionContext::root(),
             orchestration: None,
             interceptors: self.interceptors.clone(),
+            previous_interaction_id: self.last_interaction_id.clone(),
         }
     }
 
@@ -473,9 +484,14 @@ impl Session {
         let agent_name = agent.name().to_string();
 
         // Build query with context
-        let full_query = if self.history.is_empty() {
+        // When server-side chaining is active (last_interaction_id is set), the server
+        // already has conversation context. Skip client-side history prepending to save tokens.
+        // Fall back to client-side prepending for agents that don't support chaining.
+        let full_query = if self.last_interaction_id.is_some() || self.history.is_empty() {
+            // Server has context OR no history - use query as-is
             query.to_string()
         } else {
+            // No server-side chaining - prepend history as fallback
             format!("{}\n\nCurrent query: {}", self.build_prompt_prefix(), query)
         };
 
@@ -583,8 +599,14 @@ impl Session {
 
         renderer.finish().context("Renderer cleanup failed")?;
 
-        // Extract tokens before moving events to history
+        // Extract tokens and interaction_id before moving events to history
         let tokens_used = extract_tokens_from_events(&events);
+        let new_interaction_id = extract_interaction_id_from_events(&events);
+
+        // Update last_interaction_id for server-side conversation chaining
+        if new_interaction_id.is_some() {
+            self.last_interaction_id = new_interaction_id;
+        }
 
         // Store in history
         self.history
@@ -684,6 +706,7 @@ impl Session {
                         }
                         Command::Clear => {
                             self.history.clear();
+                            self.last_interaction_id = None;
                             println!("Conversation history cleared.");
                         }
                         Command::Reload => match self.reload() {
@@ -773,6 +796,23 @@ fn extract_tokens_from_events(events: &[AgentUpdate]) -> u64 {
         .filter_map(|e| e.as_final_result())
         .map(|r| u64::from(r.metadata.total_tokens))
         .sum()
+}
+
+/// Extract the interaction_id from the final_result event's metadata.extra.
+///
+/// The interaction_id is used for server-side conversation chaining via
+/// `with_previous_interaction()`. Agents include it in `ResultMetadata.extra["interaction_id"]`.
+fn extract_interaction_id_from_events(events: &[AgentUpdate]) -> Option<String> {
+    for event in events {
+        if let Some(result) = event.as_final_result() {
+            if let Some(id) = result.metadata.extra.get("interaction_id") {
+                if let Some(s) = id.as_str() {
+                    return Some(s.to_string());
+                }
+            }
+        }
+    }
+    None
 }
 
 #[cfg(test)]
