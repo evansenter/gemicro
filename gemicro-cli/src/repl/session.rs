@@ -484,9 +484,15 @@ impl Session {
         let agent_name = agent.name().to_string();
 
         // Build query with context
-        // When server-side chaining is active (last_interaction_id is set), the server
-        // already has conversation context. Skip client-side history prepending to save tokens.
-        // Fall back to client-side prepending for agents that don't support chaining.
+        //
+        // Server-side chaining: When last_interaction_id is set, the Gemini API preserves
+        // conversation context server-side. Agents MUST return `interaction_id` in their
+        // `ResultMetadata.extra` for this optimization to work (see PromptAgent, DeveloperAgent).
+        //
+        // Fallback: If no interaction_id is available (agent doesn't support chaining, or
+        // first turn), we prepend recent history as text via build_prompt_prefix(). This
+        // is less efficient but works with any agent. The build_prompt_prefix() function
+        // is intentionally kept for this fallback case.
         let full_query = if self.last_interaction_id.is_some() || self.history.is_empty() {
             // Server has context OR no history - use query as-is
             query.to_string()
@@ -1101,6 +1107,70 @@ mod tests {
             ),
         ];
         assert_eq!(extract_tokens_from_events(&events), 1500);
+    }
+
+    // ========================================================================
+    // extract_interaction_id_from_events Tests
+    // ========================================================================
+
+    #[test]
+    fn test_extract_interaction_id_empty_events() {
+        let events: Vec<AgentUpdate> = vec![];
+        assert_eq!(extract_interaction_id_from_events(&events), None);
+    }
+
+    #[test]
+    fn test_extract_interaction_id_no_final_result() {
+        use serde_json::json;
+        let events = vec![
+            AgentUpdate::custom("step_started", "Starting step", json!({})),
+            AgentUpdate::custom("step_complete", "Done", json!({})),
+        ];
+        assert_eq!(extract_interaction_id_from_events(&events), None);
+    }
+
+    #[test]
+    fn test_extract_interaction_id_final_result_without_id() {
+        use serde_json::json;
+        let events = vec![AgentUpdate::final_result(
+            json!("The answer"),
+            ResultMetadata::new(1500, 0, 1000),
+        )];
+        assert_eq!(extract_interaction_id_from_events(&events), None);
+    }
+
+    #[test]
+    fn test_extract_interaction_id_with_id() {
+        use serde_json::json;
+        let events = vec![AgentUpdate::final_result(
+            json!("The answer"),
+            ResultMetadata::with_extra(
+                1500,
+                0,
+                1000,
+                json!({ "interaction_id": "abc123" }),
+            ),
+        )];
+        assert_eq!(
+            extract_interaction_id_from_events(&events),
+            Some("abc123".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_interaction_id_multiple_events_with_final() {
+        use serde_json::json;
+        let events = vec![
+            AgentUpdate::custom("step_started", "Starting", json!({})),
+            AgentUpdate::final_result(
+                json!("Result"),
+                ResultMetadata::with_extra(500, 0, 200, json!({ "interaction_id": "xyz789" })),
+            ),
+        ];
+        assert_eq!(
+            extract_interaction_id_from_events(&events),
+            Some("xyz789".to_string())
+        );
     }
 
     // ========================================================================
