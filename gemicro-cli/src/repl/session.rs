@@ -1144,12 +1144,7 @@ mod tests {
         use serde_json::json;
         let events = vec![AgentUpdate::final_result(
             json!("The answer"),
-            ResultMetadata::with_extra(
-                1500,
-                0,
-                1000,
-                json!({ "interaction_id": "abc123" }),
-            ),
+            ResultMetadata::with_extra(1500, 0, 1000, json!({ "interaction_id": "abc123" })),
         )];
         assert_eq!(
             extract_interaction_id_from_events(&events),
