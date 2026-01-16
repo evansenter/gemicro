@@ -200,6 +200,19 @@ Use genai-rs types directly when passing through. Wrap when adding functionality
 
 **Don't add to gemicro**: Alternative LLM backends, Gemini API wrappers, complex workarounds (fix genai-rs instead).
 
+### API Naming Conventions
+
+Follow genai-rs patterns for consistency:
+
+| Prefix | Meaning | Example |
+|--------|---------|---------|
+| `with_*` | Configure/replace a setting | `with_model()`, `with_text()` |
+| `add_*` | Accumulate to collection | `add_function()`, `add_tools()` |
+| `as_*` | Accessor returning borrowed ref | `as_text()`, `as_content()` |
+| `into_*` | Consuming conversion | `into_string()`, `into_vec()` |
+
+Builder methods are chainable and return `Self`.
+
 ## Troubleshooting
 
 | Issue | Solution |

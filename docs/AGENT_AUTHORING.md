@@ -282,7 +282,7 @@ impl Agent for PromptAgent {
             ).await?;
 
             // Extract text and token count from InteractionResponse
-            let answer = response.text().unwrap_or("").to_string();
+            let answer = response.as_text().unwrap_or("").to_string();
             let tokens_used = extract_total_tokens(&response);
 
             // Emit result event
@@ -993,7 +993,7 @@ impl Agent for PromptAgent {
                 .await?;
 
             // LLM automatically called tools as needed
-            let answer = response.text().unwrap_or("");
+            let answer = response.as_text().unwrap_or("");
             yield AgentUpdate::final_result(answer.to_string(), ResultMetadata::default());
         })
     }

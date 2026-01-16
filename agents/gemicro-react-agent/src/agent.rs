@@ -155,7 +155,7 @@ impl ReactAgent {
                 }
 
                 // Parse structured response
-                let response_text = response.text().unwrap_or("");
+                let response_text = response.as_text().unwrap_or("");
                 let step: ReactStep = serde_json::from_str(response_text)
                     .map_err(|e| AgentError::ParseFailed(format!(
                         "Failed to parse ReAct step: {}. Response: {}",
@@ -409,7 +409,7 @@ impl ReactAgent {
         };
 
         match tokio::time::timeout(timeout, context.llm.generate(request)).await {
-            Ok(Ok(response)) => (response.text().unwrap_or("").to_string(), false),
+            Ok(Ok(response)) => (response.as_text().unwrap_or("").to_string(), false),
             Ok(Err(e)) => (format!("Web search failed: {}", e), true),
             Err(_) => ("Web search timed out".to_string(), true),
         }

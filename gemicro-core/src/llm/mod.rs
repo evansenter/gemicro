@@ -23,7 +23,7 @@
 //!
 //! let response = client.generate(request).await?;
 //!
-//! println!("Response: {}", response.text().unwrap_or(""));
+//! println!("Response: {}", response.as_text().unwrap_or(""));
 //! if let Some(usage) = &response.usage {
 //!     println!("Tokens used: {:?}", usage.total_tokens);
 //! }

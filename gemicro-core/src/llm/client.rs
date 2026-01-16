@@ -4,7 +4,7 @@ use crate::config::LlmConfig;
 use crate::error::LlmError;
 use crate::trajectory::{LlmResponseData, SerializableStreamChunk, TrajectoryStep};
 use futures_util::stream::{Stream, StreamExt};
-use genai_rs::{function_result_content, FunctionCallInfo, InteractionRequest};
+use genai_rs::{Content, FunctionCallInfo, InteractionRequest};
 use std::future::Future;
 use std::sync::{Arc, RwLock};
 use std::time::{Instant, SystemTime};
@@ -235,7 +235,7 @@ impl LlmClient {
     /// let request = client.client().interaction()
     ///     .with_model("gemini-3-flash-preview")
     ///     .with_text("What time is it?")
-    ///     .with_functions(function_declarations)
+    ///     .add_functions(function_declarations)
     ///     .with_store_enabled()  // Required for chaining
     ///     .build()
     ///     .unwrap();
@@ -245,7 +245,7 @@ impl LlmClient {
     ///     .with_model("gemini-3-flash-preview")
     ///     .with_previous_interaction(&interaction_id)
     ///     .with_content(function_results)
-    ///     .with_functions(function_declarations)
+    ///     .add_functions(function_declarations)
     ///     .with_store_enabled()
     ///     .build()
     ///     .unwrap();
@@ -277,13 +277,13 @@ impl LlmClient {
     ///     .with_text("Explain quantum computing")
     ///     .build()?;
     /// let response = client.generate(request).await?;
-    /// println!("{}", response.text().unwrap_or(""));
+    /// println!("{}", response.as_text().unwrap_or(""));
     /// # Ok(())
     /// # }
     /// ```
     ///
     /// Returns the full [`genai_rs::InteractionResponse`] with access to:
-    /// - `response.text()` - the generated text
+    /// - `response.as_text()` - the generated text
     /// - `response.usage` - full token usage metadata
     /// - `response.id` - interaction ID for tracking
     /// - `response.grounding_metadata` - Google Search sources (if enabled)
@@ -423,7 +423,7 @@ impl LlmClient {
     ///
     /// # Arguments
     ///
-    /// * `request` - Initial request (should include functions via `with_functions()`)
+    /// * `request` - Initial request (should include functions via `add_functions()`)
     /// * `function_declarations` - Function declarations for continuations
     /// * `tool_executor` - Async callback that executes function calls. Receives a reference
     ///   to each [`FunctionCallInfo`] and returns a [`serde_json::Value`] result. Errors should
@@ -448,7 +448,7 @@ impl LlmClient {
     /// let request = client.client().interaction()
     ///     .with_text("What time is it?")
     ///     .with_system_instruction("You have tools.")
-    ///     .with_functions(function_declarations.clone())
+    ///     .add_functions(function_declarations.clone())
     ///     .with_store_enabled()
     ///     .build()?;
     ///
@@ -460,7 +460,7 @@ impl LlmClient {
     ///     &cancellation_token,
     /// ).await?;
     ///
-    /// println!("Answer: {}", result.response.text().unwrap_or(""));
+    /// println!("Answer: {}", result.response.as_text().unwrap_or(""));
     /// println!("Tokens: {}, Turns: {}", result.total_tokens, result.turns);
     /// ```
     ///
@@ -531,7 +531,7 @@ impl LlmClient {
                 let result = tool_executor(fc).await;
                 let call_id = fc.id.unwrap_or("unknown");
 
-                results.push(function_result_content(
+                results.push(Content::function_result(
                     fc.name.to_string(),
                     call_id.to_string(),
                     result,
@@ -544,7 +544,7 @@ impl LlmClient {
                 .interaction()
                 .with_previous_interaction(&interaction_id)
                 .with_content(results)
-                .with_functions(function_declarations.clone())
+                .add_functions(function_declarations.clone())
                 .with_store_enabled()
                 .build()
                 .map_err(LlmError::from)?;
@@ -591,7 +591,7 @@ impl LlmClient {
 
         // Validate response has content (text or function calls)
         // Function calling responses may have function_calls but no text
-        if response.text().is_none() && response.function_calls().is_empty() {
+        if response.as_text().is_none() && response.function_calls().is_empty() {
             return Err(LlmError::NoContent);
         }
 
@@ -695,7 +695,7 @@ impl LlmClient {
                         use genai_rs::StreamChunk;
                         match stream_event.chunk {
                             StreamChunk::Delta(delta) => {
-                                if let Some(text) = delta.text() {
+                                if let Some(text) = delta.as_text() {
                                     let text_str = text.to_string();
 
                                     // Record chunk if recording is enabled
@@ -835,7 +835,7 @@ impl LlmClient {
                         use genai_rs::StreamChunk;
                         match stream_event.chunk {
                             StreamChunk::Delta(delta) => {
-                                if let Some(text) = delta.text() {
+                                if let Some(text) = delta.as_text() {
                                     let text_str = text.to_string();
 
                                     // Record chunk if recording is enabled
