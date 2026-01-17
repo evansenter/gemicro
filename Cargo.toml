@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "gemicro-streaming-events",
     "gemicro-core",
     "gemicro-loader",
     "gemicro-runner",

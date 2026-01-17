@@ -3,7 +3,7 @@
 //! Stores the full event stream from each query execution, enabling
 //! context-aware multi-turn interactions.
 
-use crate::update::AgentUpdate;
+use crate::update::{AgentUpdate, EVENT_FINAL_RESULT};
 use serde::{Deserialize, Serialize};
 use std::time::SystemTime;
 
@@ -51,7 +51,7 @@ impl HistoryEntry {
     pub fn final_result(&self) -> Option<&str> {
         self.events
             .iter()
-            .find(|e| e.event_type == crate::agent::EVENT_FINAL_RESULT)
+            .find(|e| e.event_type == EVENT_FINAL_RESULT)
             .and_then(|e| e.data.get("result"))
             .and_then(|v| v.as_str())
     }

@@ -63,7 +63,6 @@ pub use agent::{
     Agent, AgentContext, AgentStream, ExecutionContext, ExecutionId, OrchestrationConfig,
     OrchestrationError, OrchestrationGuard, OrchestrationState, DEFAULT_GLOBAL_MAX_CONCURRENT,
     DEFAULT_MAX_DEPTH, DEFAULT_PER_PARENT_MAX_CONCURRENT, DEFAULT_TOTAL_TIMEOUT_SECS,
-    EVENT_FINAL_RESULT,
 };
 pub use config::{GemicroConfig, LlmConfig};
 pub use context::{ContextLevel, ContextUsage, DEFAULT_CONTEXT_WINDOW, DEFAULT_WARNING_THRESHOLD};
@@ -83,7 +82,7 @@ pub use trajectory::{
     LlmResponseData, SerializableStreamChunk, Trajectory, TrajectoryBuilder, TrajectoryMetadata,
     TrajectoryStep, SCHEMA_VERSION,
 };
-pub use update::{AgentUpdate, FinalResult, ResultMetadata};
+pub use update::{AgentUpdate, FinalResult, ResultMetadata, EVENT_FINAL_RESULT};
 pub use utils::{extract_total_tokens, first_sentence, truncate, truncate_with_count};
 
 // Coordination infrastructure for cross-agent event handling
