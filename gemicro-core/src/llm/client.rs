@@ -660,13 +660,10 @@ impl LlmClient {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn generate_stream<'a, S>(
+    pub fn generate_stream<'a>(
         &'a self,
-        builder: genai_rs::InteractionBuilder<'a, S>,
-    ) -> impl Stream<Item = Result<LlmStreamChunk, LlmError>> + Send + 'a
-    where
-        S: Send + 'a,
-    {
+        builder: genai_rs::InteractionBuilder<'a>,
+    ) -> impl Stream<Item = Result<LlmStreamChunk, LlmError>> + Send + 'a {
         let timeout_duration = self.config.timeout;
 
         async_stream::try_stream! {
@@ -783,14 +780,11 @@ impl LlmClient {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn generate_stream_with_cancellation<'a, S>(
+    pub fn generate_stream_with_cancellation<'a>(
         &'a self,
-        builder: genai_rs::InteractionBuilder<'a, S>,
+        builder: genai_rs::InteractionBuilder<'a>,
         cancellation_token: CancellationToken,
-    ) -> impl Stream<Item = Result<LlmStreamChunk, LlmError>> + Send + 'a
-    where
-        S: Send + 'a,
-    {
+    ) -> impl Stream<Item = Result<LlmStreamChunk, LlmError>> + Send + 'a {
         let timeout_duration = self.config.timeout;
 
         async_stream::try_stream! {

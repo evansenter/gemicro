@@ -69,7 +69,7 @@ use crate::interceptor::{InterceptorChain, ToolCall};
 use crate::llm::LlmClient;
 use crate::tool::{BatchConfirmationHandler, Tool, ToolRegistry, ToolResult};
 use crate::tracking::ExecutionTracking;
-use crate::update::AgentUpdate;
+use crate::update::{AgentUpdate, EVENT_FINAL_RESULT};
 
 use futures_util::{Stream, StreamExt};
 use std::pin::Pin;
@@ -501,15 +501,6 @@ where
 // ============================================================================
 // Contract enforcement
 // ============================================================================
-
-/// The event type that signals agent completion.
-///
-/// This is the **only** universal event constant. Agent-specific events
-/// (like `react_thought`, `decomposition_started`, `critique_started`) should
-/// be defined as constants within their respective agent crates, not here.
-/// Per Evergreen soft-typing principles, adding agent-specific constants here
-/// would require core changes for each new agent.
-pub const EVENT_FINAL_RESULT: &str = "final_result";
 
 /// Wraps an agent stream to enforce the `final_result` contract.
 ///

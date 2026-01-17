@@ -5,6 +5,7 @@ edition = "2021"
 description = "Core library for gemicro AI agent exploration platform"
 
 [dependencies]
+gemicro-streaming-events = { path = "../gemicro-streaming-events" }
 genai-rs = { workspace = true }
 genai-rs-macros = { workspace = true }
 tokio = { workspace = true }
