@@ -119,8 +119,9 @@ impl Tool for WebSearch {
 
         // Extract the response text
         let text = response
-            .text()
-            .ok_or_else(|| ToolError::ExecutionFailed("Search returned no content".into()))?;
+            .as_text()
+            .ok_or_else(|| ToolError::ExecutionFailed("Search returned no content".into()))?
+            .to_string();
 
         Ok(ToolResult::text(text))
     }

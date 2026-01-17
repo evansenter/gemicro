@@ -889,7 +889,7 @@ impl Agent for CritiqueAgent {
             .await?;
 
             // Parse structured output
-            let response_text = response.text().ok_or_else(|| {
+            let response_text = response.as_text().ok_or_else(|| {
                 AgentError::ParseFailed(
                     "LLM returned no text content. The model may have refused or failed to respond.".to_string()
                 )

@@ -4,7 +4,7 @@ use crate::config::LlmConfig;
 use crate::error::LlmError;
 use crate::trajectory::{LlmResponseData, SerializableStreamChunk, TrajectoryStep};
 use futures_util::stream::{Stream, StreamExt};
-use genai_rs::{function_result_content, FunctionCallInfo, InteractionRequest};
+use genai_rs::{Content, FunctionCallInfo, InteractionRequest};
 use std::future::Future;
 use std::sync::{Arc, RwLock};
 use std::time::{Instant, SystemTime};
@@ -448,7 +448,7 @@ impl LlmClient {
     /// let request = client.client().interaction()
     ///     .with_text("What time is it?")
     ///     .with_system_instruction("You have tools.")
-    ///     .with_functions(function_declarations.clone())
+    ///     .add_functions(function_declarations.clone())
     ///     .with_store_enabled()
     ///     .build()?;
     ///
@@ -531,7 +531,7 @@ impl LlmClient {
                 let result = tool_executor(fc).await;
                 let call_id = fc.id.unwrap_or("unknown");
 
-                results.push(function_result_content(
+                results.push(Content::function_result(
                     fc.name.to_string(),
                     call_id.to_string(),
                     result,
@@ -544,7 +544,7 @@ impl LlmClient {
                 .interaction()
                 .with_previous_interaction(&interaction_id)
                 .with_content(results)
-                .with_functions(function_declarations.clone())
+                .add_functions(function_declarations.clone())
                 .with_store_enabled()
                 .build()
                 .map_err(LlmError::from)?;
@@ -591,7 +591,7 @@ impl LlmClient {
 
         // Validate response has content (text or function calls)
         // Function calling responses may have function_calls but no text
-        if response.text().is_none() && response.function_calls().is_empty() {
+        if response.as_text().is_none() && response.function_calls().is_empty() {
             return Err(LlmError::NoContent);
         }
 
@@ -660,13 +660,10 @@ impl LlmClient {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn generate_stream<'a, S>(
+    pub fn generate_stream<'a>(
         &'a self,
-        builder: genai_rs::InteractionBuilder<'a, S>,
-    ) -> impl Stream<Item = Result<LlmStreamChunk, LlmError>> + Send + 'a
-    where
-        S: Send + 'a,
-    {
+        builder: genai_rs::InteractionBuilder<'a>,
+    ) -> impl Stream<Item = Result<LlmStreamChunk, LlmError>> + Send + 'a {
         let timeout_duration = self.config.timeout;
 
         async_stream::try_stream! {
@@ -695,7 +692,7 @@ impl LlmClient {
                         use genai_rs::StreamChunk;
                         match stream_event.chunk {
                             StreamChunk::Delta(delta) => {
-                                if let Some(text) = delta.text() {
+                                if let Some(text) = delta.as_text() {
                                     let text_str = text.to_string();
 
                                     // Record chunk if recording is enabled
@@ -783,14 +780,11 @@ impl LlmClient {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn generate_stream_with_cancellation<'a, S>(
+    pub fn generate_stream_with_cancellation<'a>(
         &'a self,
-        builder: genai_rs::InteractionBuilder<'a, S>,
+        builder: genai_rs::InteractionBuilder<'a>,
         cancellation_token: CancellationToken,
-    ) -> impl Stream<Item = Result<LlmStreamChunk, LlmError>> + Send + 'a
-    where
-        S: Send + 'a,
-    {
+    ) -> impl Stream<Item = Result<LlmStreamChunk, LlmError>> + Send + 'a {
         let timeout_duration = self.config.timeout;
 
         async_stream::try_stream! {
@@ -835,7 +829,7 @@ impl LlmClient {
                         use genai_rs::StreamChunk;
                         match stream_event.chunk {
                             StreamChunk::Delta(delta) => {
-                                if let Some(text) = delta.text() {
+                                if let Some(text) = delta.as_text() {
                                     let text_str = text.to_string();
 
                                     // Record chunk if recording is enabled

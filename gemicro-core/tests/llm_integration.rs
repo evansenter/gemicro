@@ -31,7 +31,7 @@ async fn test_generate_simple_prompt() {
 
     match response {
         Ok(resp) => {
-            let text = resp.text().unwrap_or("");
+            let text = resp.as_text().unwrap_or("");
             let tokens_used = resp.usage.as_ref().and_then(|u| u.total_tokens);
             println!("Response: {}", text);
             println!("Tokens used: {:?}", tokens_used);
@@ -76,7 +76,7 @@ async fn test_generate_with_system_instruction() {
 
     match response {
         Ok(resp) => {
-            let text = resp.text().unwrap_or("");
+            let text = resp.as_text().unwrap_or("");
             println!("Response: {}", text);
 
             assert!(!text.is_empty(), "Response text should not be empty");
@@ -219,7 +219,7 @@ async fn test_google_search_grounding() {
 
     match response {
         Ok(resp) => {
-            let text = resp.text().unwrap_or("");
+            let text = resp.as_text().unwrap_or("");
             let tokens_used = resp.usage.as_ref().and_then(|u| u.total_tokens);
             println!("Grounded response: {}", text);
             println!("Tokens used: {:?}", tokens_used);
@@ -285,7 +285,7 @@ async fn test_structured_output_response_format() {
 
     match response {
         Ok(resp) => {
-            let text = resp.text().unwrap_or("");
+            let text = resp.as_text().unwrap_or("");
             println!("Structured response: {}", text);
 
             // Parse the response as JSON
@@ -344,7 +344,7 @@ async fn test_generate_with_turns() {
         .client()
         .interaction()
         .with_model("gemini-3-flash-preview")
-        .with_turns(history)
+        .with_history(history)
         .with_text("And what is that multiplied by 3? Just the number please.")
         .build()
         .unwrap();
@@ -353,7 +353,7 @@ async fn test_generate_with_turns() {
 
     match response {
         Ok(resp) => {
-            let text = resp.text().unwrap_or("");
+            let text = resp.as_text().unwrap_or("");
             println!("Multi-turn response: {}", text);
 
             assert!(!text.is_empty(), "Response text should not be empty");

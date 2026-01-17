@@ -326,7 +326,7 @@ async fn decompose(
     let tokens_used = extract_total_tokens(&response);
 
     // Parse JSON response (guaranteed valid by response_format)
-    let response_text = response.text().unwrap_or("");
+    let response_text = response.as_text().unwrap_or("");
     let sub_queries: Vec<String> = serde_json::from_str(response_text)
         .map_err(|e| AgentError::ParseFailed(format!("Failed to parse decomposition: {}", e)))?;
 
@@ -422,7 +422,7 @@ async fn execute_parallel(
                 .await
             {
                 Ok(response) => {
-                    let text = response.text().unwrap_or("").to_string();
+                    let text = response.as_text().unwrap_or("").to_string();
                     let tokens = extract_total_tokens(&response);
                     Ok((text, tokens))
                 }
