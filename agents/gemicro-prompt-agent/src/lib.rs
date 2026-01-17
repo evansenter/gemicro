@@ -435,10 +435,15 @@ impl PromptAgent {
         def.validate()
             .map_err(|e| AgentError::InvalidConfig(e.to_string()))?;
 
-        let config = PromptAgentConfig::default()
+        let mut config = PromptAgentConfig::default()
             .with_system_prompt(&def.system_prompt)
             .with_tool_filter(def.tools.clone())
             .with_description(&def.description);
+
+        // Apply model from definition if specified
+        if let Some(ref model) = def.model {
+            config = config.with_model(model);
+        }
 
         Self::new(config)
     }
@@ -474,7 +479,7 @@ impl Agent for PromptAgent {
             let timeout = remaining_time(start, config.timeout, "query")?;
 
             // Branch based on whether tools are available
-            let (answer, tokens_used) = if let Some(ref registry) = context.tools {
+            let (answer, tokens_used, interaction_id) = if let Some(ref registry) = context.tools {
                 // Tool path: function calling loop with events
                 // Uses LlmClient's generate() for centralized logging/retry/recording
                 let tools = registry.filter(&config.tool_filter);
@@ -486,16 +491,33 @@ impl Agent for PromptAgent {
                 let mut total_tokens: u64 = 0;
 
                 // Initial request with query and function declarations
-                let initial_request = context
-                    .llm
-                    .client()
-                    .interaction()
-                    .with_model(&config.model)
-                    .with_system_instruction(&config.system_prompt)
-                    .with_text(&query)
-                    .add_functions(function_declarations.clone())
-                    .with_store_enabled() // Enable storage for function calling chains
-                    .build().map_err(|e| AgentError::Other(e.to_string()))?;
+                // Use previous interaction for multi-turn support if available
+                let initial_request = if let Some(ref prev_id) = context.previous_interaction_id {
+                    context
+                        .llm
+                        .client()
+                        .interaction()
+                        .with_model(&config.model)
+                        .with_system_instruction(&config.system_prompt)
+                        .with_text(&query)
+                        .add_functions(function_declarations.clone())
+                        .with_store_enabled()
+                        .with_previous_interaction(prev_id)
+                        .build()
+                        .map_err(|e| AgentError::Other(e.to_string()))?
+                } else {
+                    context
+                        .llm
+                        .client()
+                        .interaction()
+                        .with_model(&config.model)
+                        .with_system_instruction(&config.system_prompt)
+                        .with_text(&query)
+                        .add_functions(function_declarations.clone())
+                        .with_store_enabled()
+                        .build()
+                        .map_err(|e| AgentError::Other(e.to_string()))?
+                };
 
                 let mut response = context
                     .llm
@@ -631,17 +653,37 @@ impl Agent for PromptAgent {
                     // Loop continues - check for more function calls at top of loop
                 };
 
-                (final_text, Some(total_tokens))
+                // Capture the interaction_id from the final response for multi-turn chaining
+                let final_interaction_id = response.id.clone();
+
+                (final_text, Some(total_tokens), final_interaction_id)
             } else {
                 // Simple path: no tools, just a prompt
-                let request = context
-                    .llm
-                    .client()
-                    .interaction()
-                    .with_model(&config.model)
-                    .with_system_instruction(&config.system_prompt)
-                    .with_text(&query)
-                    .build().map_err(|e| AgentError::Other(e.to_string()))?;
+                // Use previous interaction for multi-turn support if available
+                let request = if let Some(ref prev_id) = context.previous_interaction_id {
+                    context
+                        .llm
+                        .client()
+                        .interaction()
+                        .with_model(&config.model)
+                        .with_system_instruction(&config.system_prompt)
+                        .with_text(&query)
+                        .with_store_enabled()
+                        .with_previous_interaction(prev_id)
+                        .build()
+                        .map_err(|e| AgentError::Other(e.to_string()))?
+                } else {
+                    context
+                        .llm
+                        .client()
+                        .interaction()
+                        .with_model(&config.model)
+                        .with_system_instruction(&config.system_prompt)
+                        .with_text(&query)
+                        .with_store_enabled()
+                        .build()
+                        .map_err(|e| AgentError::Other(e.to_string()))?
+                };
 
                 let generate_future = async {
                     context
@@ -661,12 +703,15 @@ impl Agent for PromptAgent {
 
                 let text = response.as_text().unwrap_or("").to_string();
                 let tokens = gemicro_core::extract_total_tokens(&response).map(|t| t as u64);
-                (text, tokens)
+                let interaction_id = response.id.clone();
+                (text, tokens, interaction_id)
             };
 
             let duration_ms = start.elapsed().as_millis() as u64;
 
             // Emit agent-specific result event
+            // Note: interaction_id is in final_result.metadata.extra, not here
+            // (CLI extracts it from metadata.extra for server-side chaining)
             yield AgentUpdate::custom(
                 EVENT_PROMPT_AGENT_RESULT,
                 answer.clone(),
@@ -678,10 +723,17 @@ impl Agent for PromptAgent {
             );
 
             // Emit standard final_result for ExecutionState/harness compatibility
-            let metadata = ResultMetadata::new(
+            // Include interaction_id in extra for CLI to extract and track
+            let extra = if let Some(ref id) = interaction_id {
+                json!({ "interaction_id": id })
+            } else {
+                json!({})
+            };
+            let metadata = ResultMetadata::with_extra(
                 tokens_used.unwrap_or(0) as u32,
                 if tokens_used.is_none() { 1 } else { 0 },
                 duration_ms,
+                extra,
             );
             yield AgentUpdate::final_result(json!(answer), metadata);
         })

@@ -25,7 +25,7 @@
 //!     PromptAgentDef::new("Python security reviewer")
 //!         .with_system_prompt("You are an expert Python security auditor...")
 //!         .with_tools(ToolSet::Specific(vec!["file_read".into(), "grep".into()]))
-//!         .with_model("gemini-1.5-flash")
+//!         .with_model("gemini-3-flash-preview")
 //! );
 //!
 //! // Or use the convenience builder
@@ -85,7 +85,7 @@ pub struct PromptAgentDef {
     /// Optional model override.
     ///
     /// If `None`, uses the default model from configuration.
-    /// Example: `Some("gemini-1.5-flash".into())` for cheaper operations.
+    /// Example: `Some("gemini-3-flash-preview".into())` for different models.
     pub model: Option<String>,
 }
 
@@ -254,12 +254,12 @@ mod tests {
         let def = PromptAgentDef::new("Code reviewer")
             .with_system_prompt("Review code for quality")
             .with_tools(ToolSet::Specific(vec!["file_read".into()]))
-            .with_model("gemini-1.5-flash");
+            .with_model("gemini-3-flash-preview");
 
         assert_eq!(def.description, "Code reviewer");
         assert_eq!(def.system_prompt, "Review code for quality");
         assert!(matches!(def.tools, ToolSet::Specific(_)));
-        assert_eq!(def.model, Some("gemini-1.5-flash".to_string()));
+        assert_eq!(def.model, Some("gemini-3-flash-preview".to_string()));
     }
 
     #[test]

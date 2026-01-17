@@ -9,6 +9,7 @@ use crate::confirmation::InteractiveConfirmation;
 use crate::display::{IndicatifRenderer, Renderer};
 use crate::error::ErrorFormatter;
 use crate::format::truncate;
+use crate::registry::{register_builtin_agents, register_markdown_agents, RegistryOptions};
 use anyhow::{Context, Result};
 use futures_util::StreamExt;
 use gemicro_audit_log::AuditLog;
@@ -19,13 +20,8 @@ use gemicro_core::{
     AgentContext, AgentError, AgentUpdate, AutoApprove, BatchConfirmationHandler,
     ConversationHistory, HistoryEntry, LlmClient,
 };
-use gemicro_critique_agent::CritiqueAgent;
-use gemicro_deep_research_agent::DeepResearchAgent;
-use gemicro_developer_agent::{DeveloperAgent, DeveloperAgentConfig};
-use gemicro_echo_agent::EchoAgent;
-use gemicro_loader::load_markdown_agents_from_dir;
 use gemicro_path_sandbox::PathSandbox;
-use gemicro_prompt_agent::{tools as prompt_tools, PromptAgent, PromptAgentConfig};
+use gemicro_prompt_agent::tools as prompt_tools;
 use gemicro_runner::AgentRegistry;
 use gemicro_task::{Task, TaskContext};
 // Explicit tool imports (per "Explicit Over Implicit" principle)
@@ -118,13 +114,23 @@ pub struct Session {
     /// handler, interceptors) after configuration changes, without needing
     /// to recreate the tool registry.
     task_context: Arc<TaskContext>,
+
+    /// Last interaction ID from the previous query, for server-side conversation chaining.
+    ///
+    /// When set, the agent can use `with_previous_interaction()` to continue
+    /// the conversation server-side, preserving context without re-sending
+    /// previous exchanges as text (saving tokens).
+    ///
+    /// Reset to `None` when the user runs `/clear`.
+    last_interaction_id: Option<String>,
 }
 
 /// CLI argument overrides that take precedence over file config.
 #[derive(Debug, Clone, Default)]
 pub struct CliOverrides {
-    /// Deep research config from CLI args
-    pub research_config: Option<gemicro_deep_research_agent::DeepResearchAgentConfig>,
+    /// Model override from CLI --model flag or GEMINI_MODEL env var.
+    /// Applied to all agents when set.
+    pub model: Option<String>,
 }
 
 /// Result of a config reload operation.
@@ -199,6 +205,7 @@ impl Session {
             tool_registry,
             interceptors,
             task_context,
+            last_interaction_id: None,
         }
     }
 
@@ -317,123 +324,28 @@ impl Session {
     }
 
     /// Register agents based on config.
-    fn register_agents_from_config(&mut self, config: &GemicroConfig) {
-        // Build deep_research config: CLI overrides > file config > defaults
-        // Validate and fallback to defaults on error
-        let research_config = if let Some(cli_config) = &self.cli_overrides.research_config {
-            cli_config.clone()
-        } else if let Some(file_config) = &config.deep_research {
-            file_config.to_research_config()
-        } else {
-            gemicro_deep_research_agent::DeepResearchAgentConfig::default()
+    ///
+    /// Delegates to the shared registry module for builtin agents, then loads
+    /// markdown agents from the runtime-agents directory.
+    fn register_agents_from_config(&mut self, _config: &GemicroConfig) {
+        // Build registry options from CLI overrides
+        let options = match &self.cli_overrides.model {
+            Some(model) => RegistryOptions::default().with_model(model),
+            None => RegistryOptions::default(),
         };
-
-        // Validate config before registering - fallback to defaults on error
-        let research_config = match DeepResearchAgent::new(research_config.clone()) {
-            Ok(_) => research_config,
-            Err(e) => {
-                log::warn!("Invalid deep_research config: {}. Using defaults.", e);
-                gemicro_deep_research_agent::DeepResearchAgentConfig::default()
-            }
-        };
-
-        // Build prompt_agent config from file or defaults
-        let prompt_config = if let Some(file_config) = &config.prompt_agent {
-            file_config.to_prompt_agent_config()
-        } else {
-            PromptAgentConfig::default()
-        };
-
-        // Validate config before registering - fallback to defaults on error
-        let prompt_config = match PromptAgent::new(prompt_config.clone()) {
-            Ok(_) => prompt_config,
-            Err(e) => {
-                log::warn!("Invalid prompt_agent config: {}. Using defaults.", e);
-                PromptAgentConfig::default()
-            }
-        };
-
-        // Register developer agent with defaults (config from file/CLI not yet implemented)
-        let developer_config = DeveloperAgentConfig::default();
 
         // Acquire write lock and register all agents
         let mut registry = self.registry.write().expect("agent registry lock poisoned");
 
-        // Register deep_research agent (config is pre-validated, unwrap is safe)
-        registry.register("deep_research", move || {
-            Box::new(
-                DeepResearchAgent::new(research_config.clone())
-                    .expect("pre-validated config should not fail"),
-            )
-        });
+        // Register builtin agents (deep_research, prompt_agent, developer, react, echo, critique)
+        register_builtin_agents(&mut registry, &options);
 
-        // Register prompt_agent (config is pre-validated, unwrap is safe)
-        registry.register("prompt_agent", move || {
-            Box::new(
-                PromptAgent::new(prompt_config.clone())
-                    .expect("pre-validated config should not fail"),
-            )
-        });
-
-        // Register developer agent
-        registry.register("developer", move || {
-            Box::new(
-                DeveloperAgent::new(developer_config.clone())
-                    .expect("default config should not fail"),
-            )
-        });
-
-        // Register echo agent (no config needed - for testing)
-        registry.register("echo", || Box::new(EchoAgent));
-
-        // Register critique agent (for self-validation via Task tool)
-        registry.register("critique", || Box::new(CritiqueAgent::default_agent()));
-
-        // Register bundled markdown agents
-        self.register_markdown_agents(&mut registry);
-    }
-
-    /// Register agents defined in markdown format.
-    ///
-    /// Loads markdown agents from `agents/runtime-agents/` directory. Each `.md` file
-    /// with YAML frontmatter becomes a registered agent. Future versions will support
-    /// user-defined agents from `~/.config/gemicro/agents/`.
-    fn register_markdown_agents(&self, registry: &mut AgentRegistry) {
-        use std::path::Path;
-
-        let agents_dir = Path::new(RUNTIME_AGENTS_DIR);
-        let (agents, errors) = load_markdown_agents_from_dir(agents_dir);
-
-        // Log any parsing errors (don't crash - graceful degradation)
-        for (path, err) in errors {
-            log::warn!("Failed to parse markdown agent {:?}: {}", path, err);
-        }
-
-        // Register each successfully parsed agent
-        for agent in agents {
-            let def = agent.definition.clone();
-            let name = agent.name.clone();
-
-            // Log tool availability warnings at load time
-            if let gemicro_core::ToolSet::Specific(ref tools) = def.tools {
-                for tool in tools {
-                    log::debug!("Markdown agent '{}' requests tool: {}", name, tool);
-                }
-            }
-
-            registry.register(&name, move || {
-                Box::new(
-                    PromptAgent::with_definition(&def)
-                        .expect("pre-validated markdown agent definition"),
-                )
-            });
-
-            log::info!(
-                "Registered markdown agent: {} - {}",
-                agent.name,
-                agent.definition.description
-            );
-        }
+        // Register bundled markdown agents from runtime-agents directory
+        register_markdown_agents(
+            &mut registry,
+            &options,
+            std::path::Path::new(RUNTIME_AGENTS_DIR),
+        );
     }
 
     /// Reload configuration from files.
@@ -541,13 +453,8 @@ impl Session {
             execution: gemicro_core::ExecutionContext::root(),
             orchestration: None,
             interceptors: self.interceptors.clone(),
+            previous_interaction_id: self.last_interaction_id.clone(),
         }
-    }
-
-    /// Build prompt prefix with context
-    fn build_prompt_prefix(&self) -> String {
-        // Include conversation history as context
-        self.history.context_for_prompt(3) // Last 3 exchanges
     }
 
     /// Run a query through the current agent
@@ -570,12 +477,10 @@ impl Session {
 
         let agent_name = agent.name().to_string();
 
-        // Build query with context
-        let full_query = if self.history.is_empty() {
-            query.to_string()
-        } else {
-            format!("{}\n\nCurrent query: {}", self.build_prompt_prefix(), query)
-        };
+        // Server-side chaining handles multi-turn context. Agents MUST return
+        // `interaction_id` in `ResultMetadata.extra` for chaining to work.
+        // See PromptAgent, DeveloperAgent for reference implementations.
+        let full_query = query.to_string();
 
         // Set up cancellation infrastructure for this query
         let cancellation_token = CancellationToken::new();
@@ -681,8 +586,14 @@ impl Session {
 
         renderer.finish().context("Renderer cleanup failed")?;
 
-        // Extract tokens before moving events to history
+        // Extract tokens and interaction_id before moving events to history
         let tokens_used = extract_tokens_from_events(&events);
+        let new_interaction_id = extract_interaction_id_from_events(&events);
+
+        // Update last_interaction_id for server-side conversation chaining
+        if new_interaction_id.is_some() {
+            self.last_interaction_id = new_interaction_id;
+        }
 
         // Store in history
         self.history
@@ -782,6 +693,7 @@ impl Session {
                         }
                         Command::Clear => {
                             self.history.clear();
+                            self.last_interaction_id = None;
                             println!("Conversation history cleared.");
                         }
                         Command::Reload => match self.reload() {
@@ -871,6 +783,23 @@ fn extract_tokens_from_events(events: &[AgentUpdate]) -> u64 {
         .filter_map(|e| e.as_final_result())
         .map(|r| u64::from(r.metadata.total_tokens))
         .sum()
+}
+
+/// Extract the interaction_id from the final_result event's metadata.extra.
+///
+/// The interaction_id is used for server-side conversation chaining via
+/// `with_previous_interaction()`. Agents include it in `ResultMetadata.extra["interaction_id"]`.
+fn extract_interaction_id_from_events(events: &[AgentUpdate]) -> Option<String> {
+    for event in events {
+        if let Some(result) = event.as_final_result() {
+            if let Some(id) = result.metadata.extra.get("interaction_id") {
+                if let Some(s) = id.as_str() {
+                    return Some(s.to_string());
+                }
+            }
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -1159,6 +1088,65 @@ mod tests {
             ),
         ];
         assert_eq!(extract_tokens_from_events(&events), 1500);
+    }
+
+    // ========================================================================
+    // extract_interaction_id_from_events Tests
+    // ========================================================================
+
+    #[test]
+    fn test_extract_interaction_id_empty_events() {
+        let events: Vec<AgentUpdate> = vec![];
+        assert_eq!(extract_interaction_id_from_events(&events), None);
+    }
+
+    #[test]
+    fn test_extract_interaction_id_no_final_result() {
+        use serde_json::json;
+        let events = vec![
+            AgentUpdate::custom("step_started", "Starting step", json!({})),
+            AgentUpdate::custom("step_complete", "Done", json!({})),
+        ];
+        assert_eq!(extract_interaction_id_from_events(&events), None);
+    }
+
+    #[test]
+    fn test_extract_interaction_id_final_result_without_id() {
+        use serde_json::json;
+        let events = vec![AgentUpdate::final_result(
+            json!("The answer"),
+            ResultMetadata::new(1500, 0, 1000),
+        )];
+        assert_eq!(extract_interaction_id_from_events(&events), None);
+    }
+
+    #[test]
+    fn test_extract_interaction_id_with_id() {
+        use serde_json::json;
+        let events = vec![AgentUpdate::final_result(
+            json!("The answer"),
+            ResultMetadata::with_extra(1500, 0, 1000, json!({ "interaction_id": "abc123" })),
+        )];
+        assert_eq!(
+            extract_interaction_id_from_events(&events),
+            Some("abc123".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_interaction_id_multiple_events_with_final() {
+        use serde_json::json;
+        let events = vec![
+            AgentUpdate::custom("step_started", "Starting", json!({})),
+            AgentUpdate::final_result(
+                json!("Result"),
+                ResultMetadata::with_extra(500, 0, 200, json!({ "interaction_id": "xyz789" })),
+            ),
+        ];
+        assert_eq!(
+            extract_interaction_id_from_events(&events),
+            Some("xyz789".to_string())
+        );
     }
 
     // ========================================================================

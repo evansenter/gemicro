@@ -3,6 +3,8 @@
 //! These tests require GEMINI_API_KEY to be set and are marked #[ignore].
 //! Run with: cargo test -p gemicro-cli -- --include-ignored
 
+mod common;
+
 use std::process::Command;
 
 /// Helper to run the CLI binary with arguments.
@@ -61,51 +63,15 @@ fn test_cli_invalid_temperature() {
 }
 
 #[test]
-fn test_cli_invalid_min_max_queries() {
+fn test_cli_zero_llm_timeout() {
     let output = run_cli(&[
         "test query",
         "--agent",
         "echo",
         "--api-key",
         "fake-key",
-        "--min-sub-queries",
-        "10",
-        "--max-sub-queries",
-        "5",
-    ]);
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("min-sub-queries"));
-}
-
-#[test]
-fn test_cli_zero_timeout() {
-    let output = run_cli(&[
-        "test query",
-        "--agent",
-        "echo",
-        "--api-key",
-        "fake-key",
-        "--timeout",
-        "0",
-    ]);
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("timeout"));
-}
-
-#[test]
-fn test_cli_llm_timeout_exceeds_total() {
-    let output = run_cli(&[
-        "test query",
-        "--agent",
-        "echo",
-        "--api-key",
-        "fake-key",
-        "--timeout",
-        "60",
         "--llm-timeout",
-        "120",
+        "0",
     ]);
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -120,26 +86,20 @@ fn test_cli_simple_query() {
         return;
     }
 
-    let output = run_cli(&[
-        "What is 2 + 2?",
-        "--agent",
-        "deep_research",
-        "--min-sub-queries",
-        "2",
-        "--max-sub-queries",
-        "3",
-        "--timeout",
-        "120",
-    ]);
+    let output = run_cli(&["What is 2 + 2?", "--agent", "prompt_agent"]);
 
     assert!(output.status.success(), "CLI failed: {:?}", output);
 
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     // Check for expected output sections
-    assert!(stdout.contains("gemicro Deep Research"), "Missing header");
-    assert!(stdout.contains("Performance:"), "Missing performance stats");
-    assert!(stdout.contains("Steps:"), "Missing step stats");
+    // Header uses agent name directly (e.g., "gemicro prompt_agent")
+    assert!(stdout.contains("gemicro prompt_agent"), "Missing header");
+    // prompt_agent uses simpler output format
+    assert!(
+        stdout.contains("4") || stdout.contains("four"),
+        "Response should contain the answer"
+    );
 }
 
 #[test]
@@ -150,18 +110,7 @@ fn test_cli_verbose_mode() {
         return;
     }
 
-    let output = run_cli(&[
-        "What is Rust?",
-        "--agent",
-        "deep_research",
-        "--verbose",
-        "--min-sub-queries",
-        "2",
-        "--max-sub-queries",
-        "2",
-        "--timeout",
-        "120",
-    ]);
+    let output = run_cli(&["test query", "--agent", "echo", "--verbose"]);
 
     assert!(output.status.success(), "CLI failed: {:?}", output);
 
@@ -173,36 +122,10 @@ fn test_cli_verbose_mode() {
     );
 }
 
-#[test]
-#[ignore] // Requires GEMINI_API_KEY
-fn test_cli_token_counts_displayed() {
-    if !has_api_key() {
-        eprintln!("Skipping test: GEMINI_API_KEY not set");
-        return;
-    }
-
-    let output = run_cli(&[
-        "Explain recursion briefly",
-        "--agent",
-        "deep_research",
-        "--min-sub-queries",
-        "2",
-        "--max-sub-queries",
-        "2",
-        "--timeout",
-        "120",
-    ]);
-
-    assert!(output.status.success(), "CLI failed: {:?}", output);
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-
-    // Token counts should be displayed (now that genai-rs is fixed)
-    assert!(
-        stdout.contains("tokens)") || stdout.contains("Tokens used:"),
-        "Token counts should be displayed in output"
-    );
-}
+// NOTE: test_cli_token_counts_displayed was removed in PR #259.
+// The test was flaky because it depended on the Gemini API consistently
+// returning token counts, which isn't guaranteed. The token display logic
+// is now tested via unit tests in format.rs instead.
 
 // NOTE: test_cli_parallel_speedup_displayed was removed in #124.
 // The simplified CLI no longer tracks step-level timing for parallel speedup
@@ -327,6 +250,120 @@ fn test_cli_multiple_sandbox_paths() {
 }
 
 // ============================================================================
+// Multi-Turn Conversation Tests (Server-Side Chaining)
+// ============================================================================
+
+#[tokio::test]
+#[ignore] // Requires GEMINI_API_KEY
+async fn test_cli_multi_turn_conversation() {
+    if !has_api_key() {
+        eprintln!("Skipping test: GEMINI_API_KEY not set");
+        return;
+    }
+
+    // Run a multi-turn conversation where the second query references the first.
+    // This tests that server-side conversation chaining via `with_previous_interaction()`
+    // preserves context without re-sending history as text.
+    let output = run_cli_with_stdin(
+        &["--interactive", "--agent", "prompt_agent"],
+        // First query establishes a topic
+        "Remember this number: 42\n\
+         What number did I just tell you to remember?\n\
+         /quit\n",
+    );
+
+    assert!(
+        output.status.success(),
+        "Multi-turn conversation should complete successfully"
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Use semantic validation instead of brittle string matching
+    let client = common::create_test_client();
+    let (is_valid, reason) = common::validate_response_semantically(
+        &client,
+        "User asked model to remember the number 42, then asked what number they told it to remember",
+        &stdout,
+        "Does the model's second response correctly recall or reference the number 42?",
+    )
+    .await
+    .expect("Semantic validation failed");
+
+    assert!(
+        is_valid,
+        "Model should recall '42' from previous turn via server-side chaining. Reason: {}. stdout: {}",
+        reason, stdout
+    );
+}
+
+#[tokio::test]
+#[ignore] // Requires GEMINI_API_KEY
+async fn test_cli_clear_resets_conversation_chain() {
+    if !has_api_key() {
+        eprintln!("Skipping test: GEMINI_API_KEY not set");
+        return;
+    }
+
+    // Generate a unique secret that can't be found in the codebase.
+    // This prevents the model from finding it via file reading tools.
+    let unique_secret = format!(
+        "secret_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+
+    // Verify that /clear resets the conversation chain
+    let output = run_cli_with_stdin(
+        &["--interactive", "--agent", "prompt_agent"],
+        // First query establishes context
+        &format!(
+            "Remember this secret code: {}\n\
+             /clear\n\
+             What was my secret code?\n\
+             /quit\n",
+            unique_secret
+        ),
+    );
+
+    assert!(output.status.success(), "/clear should work without error");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Verify clear message appeared
+    assert!(
+        stdout.contains("Conversation history cleared"),
+        "Should show history cleared message"
+    );
+
+    // Use semantic validation to verify the model doesn't know the secret after /clear
+    let client = common::create_test_client();
+    let (context_lost, reason) = common::validate_response_semantically(
+        &client,
+        &format!(
+            "User told model a unique secret code '{}', then ran /clear, then asked 'What was my secret code?'",
+            unique_secret
+        ),
+        &stdout,
+        &format!(
+            "After the /clear command, does the model indicate it doesn't know or can't recall the secret? \
+             (It should NOT know '{}' - this is a unique code that doesn't exist in any file)",
+            unique_secret
+        ),
+    )
+    .await
+    .expect("Semantic validation failed");
+
+    assert!(
+        context_lost,
+        "/clear should reset conversation context so model doesn't know the secret. Reason: {}. stdout: {}",
+        reason, stdout
+    );
+}
+
+// ============================================================================
 // Interactive REPL Tests
 // ============================================================================
 
@@ -387,7 +424,7 @@ fn test_cli_interactive_quit() {
     }
 
     // Send /quit to exit the REPL immediately
-    let output = run_cli_with_stdin(&["--interactive", "--agent", "deep_research"], "/quit\n");
+    let output = run_cli_with_stdin(&["--interactive", "--agent", "echo"], "/quit\n");
 
     assert!(output.status.success(), "REPL should exit cleanly on /quit");
 
@@ -404,10 +441,7 @@ fn test_cli_interactive_list_agents() {
     }
 
     // List agents then quit
-    let output = run_cli_with_stdin(
-        &["--interactive", "--agent", "deep_research"],
-        "/agent\n/quit\n",
-    );
+    let output = run_cli_with_stdin(&["--interactive", "--agent", "echo"], "/agent\n/quit\n");
 
     assert!(output.status.success(), "REPL should exit cleanly");
 
@@ -431,10 +465,7 @@ fn test_cli_interactive_unknown_command() {
     }
 
     // Try unknown command then quit
-    let output = run_cli_with_stdin(
-        &["--interactive", "--agent", "deep_research"],
-        "/foobar\n/quit\n",
-    );
+    let output = run_cli_with_stdin(&["--interactive", "--agent", "echo"], "/foobar\n/quit\n");
 
     assert!(
         output.status.success(),
@@ -460,17 +491,7 @@ fn test_cli_interactive_simple_query() {
     // Run a simple query then quit
     // Note: Rustyline may not work perfectly with piped stdin in all environments
     let output = run_cli_with_stdin(
-        &[
-            "--interactive",
-            "--agent",
-            "deep_research",
-            "--timeout",
-            "120",
-            "--min-sub-queries",
-            "2",
-            "--max-sub-queries",
-            "2",
-        ],
+        &["--interactive", "--agent", "echo"],
         "What is 1+1?\n/quit\n",
     );
 
@@ -480,9 +501,7 @@ fn test_cli_interactive_simple_query() {
     let combined = format!("{}{}", stdout, stderr);
 
     assert!(
-        combined.contains("gemicro REPL")
-            || combined.contains("deep_research")
-            || combined.contains("Decomposing"),
+        combined.contains("gemicro REPL") || combined.contains("echo"),
         "Should show REPL activity. stdout: {}, stderr: {}",
         stdout,
         stderr

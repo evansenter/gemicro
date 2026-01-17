@@ -235,7 +235,7 @@ impl LlmClient {
     /// let request = client.client().interaction()
     ///     .with_model("gemini-3-flash-preview")
     ///     .with_text("What time is it?")
-    ///     .with_functions(function_declarations)
+    ///     .add_functions(function_declarations)
     ///     .with_store_enabled()  // Required for chaining
     ///     .build()
     ///     .unwrap();
@@ -245,7 +245,7 @@ impl LlmClient {
     ///     .with_model("gemini-3-flash-preview")
     ///     .with_previous_interaction(&interaction_id)
     ///     .with_content(function_results)
-    ///     .with_functions(function_declarations)
+    ///     .add_functions(function_declarations)
     ///     .with_store_enabled()
     ///     .build()
     ///     .unwrap();
@@ -277,13 +277,13 @@ impl LlmClient {
     ///     .with_text("Explain quantum computing")
     ///     .build()?;
     /// let response = client.generate(request).await?;
-    /// println!("{}", response.text().unwrap_or(""));
+    /// println!("{}", response.as_text().unwrap_or(""));
     /// # Ok(())
     /// # }
     /// ```
     ///
     /// Returns the full [`genai_rs::InteractionResponse`] with access to:
-    /// - `response.text()` - the generated text
+    /// - `response.as_text()` - the generated text
     /// - `response.usage` - full token usage metadata
     /// - `response.id` - interaction ID for tracking
     /// - `response.grounding_metadata` - Google Search sources (if enabled)
@@ -423,7 +423,7 @@ impl LlmClient {
     ///
     /// # Arguments
     ///
-    /// * `request` - Initial request (should include functions via `with_functions()`)
+    /// * `request` - Initial request (should include functions via `add_functions()`)
     /// * `function_declarations` - Function declarations for continuations
     /// * `tool_executor` - Async callback that executes function calls. Receives a reference
     ///   to each [`FunctionCallInfo`] and returns a [`serde_json::Value`] result. Errors should
@@ -460,7 +460,7 @@ impl LlmClient {
     ///     &cancellation_token,
     /// ).await?;
     ///
-    /// println!("Answer: {}", result.response.text().unwrap_or(""));
+    /// println!("Answer: {}", result.response.as_text().unwrap_or(""));
     /// println!("Tokens: {}, Turns: {}", result.total_tokens, result.turns);
     /// ```
     ///

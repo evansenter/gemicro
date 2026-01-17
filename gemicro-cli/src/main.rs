@@ -6,6 +6,7 @@ pub mod confirmation;
 mod display;
 mod error;
 mod format;
+mod registry;
 mod repl;
 
 use anyhow::{bail, Context, Result};
@@ -13,11 +14,11 @@ use clap::Parser;
 use display::{IndicatifRenderer, Renderer};
 use futures_util::StreamExt;
 use gemicro_core::{
-    enforce_final_result_contract, Agent, AgentContext, AgentError, Coordination, HubCoordination,
+    enforce_final_result_contract, AgentContext, AgentError, Coordination, HubCoordination,
     LlmClient,
 };
-use gemicro_deep_research_agent::DeepResearchAgent;
-use gemicro_prompt_agent::{tools, PromptAgent, PromptAgentConfig};
+use gemicro_prompt_agent::tools;
+use registry::{agent_needs_tools, RegistryOptions};
 use repl::Session;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
@@ -64,13 +65,6 @@ async fn main() -> Result<()> {
         env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
     }
 
-    // Log if Google Search grounding is enabled
-    if args.google_search {
-        log::info!(
-            "Google Search grounding enabled - sub-queries will search the web for real-time data"
-        );
-    }
-
     // Interactive mode: explicit -i flag OR no query provided (default)
     let interactive_mode = args.interactive || args.query.is_none();
 
@@ -82,22 +76,8 @@ async fn main() -> Result<()> {
         log::debug!("Starting single-query execution with agent: {}", args.agent);
 
         // Print header for single query mode
-        // Note: Only hardcoded agents (deep_research, prompt_agent) are supported in single-query mode.
-        // Runtime-loaded markdown agents (like codebase-explorer) require interactive mode.
-        let agent_title = match args.agent.as_str() {
-            "deep_research" => "gemicro Deep Research",
-            "prompt_agent" => "gemicro Prompt Agent",
-            other => {
-                anyhow::bail!(
-                    "Single-query mode supports: deep_research, prompt_agent. \
-                     Use --interactive for runtime-loaded agents like '{}'.",
-                    other
-                );
-            }
-        };
-
         println!("╔══════════════════════════════════════════════════════════════╗");
-        println!("║{:^62}║", agent_title);
+        println!("║{:^62}║", format!("gemicro {}", args.agent));
         println!("╚══════════════════════════════════════════════════════════════╝");
         println!();
         println!("Query: {}", query);
@@ -118,7 +98,7 @@ async fn run_interactive(args: &cli::Args) -> Result<()> {
 
     // Set CLI overrides (these take precedence over file config)
     session.set_cli_overrides(repl::CliOverrides {
-        research_config: Some(args.research_config()),
+        model: args.model.clone(),
     });
 
     // Set sandbox paths for file access restriction (if configured)
@@ -173,28 +153,27 @@ async fn run_single_query(args: &cli::Args, query: &str) -> Result<()> {
         .context("Failed to create Gemini client")?;
     let llm = LlmClient::new(genai_client, args.llm_config());
 
-    // Create agent and context based on --agent flag
-    // Context is agent-specific: prompt_agent gets tools, others don't
-    let (agent, context): (Box<dyn Agent>, AgentContext) = match args.agent.as_str() {
-        "deep_research" => {
-            let agent = Box::new(
-                DeepResearchAgent::new(args.research_config())
-                    .context("Failed to create research agent")?,
-            );
-            let context = AgentContext::new_with_cancellation(llm, cancellation_token.clone());
-            (agent, context)
-        }
-        "prompt_agent" => {
-            let agent = Box::new(
-                PromptAgent::new(PromptAgentConfig::default())
-                    .context("Failed to create prompt agent")?,
-            );
-            // Add bundled tools (Calculator, CurrentDatetime)
-            let context = AgentContext::new_with_cancellation(llm, cancellation_token.clone())
-                .with_tools(tools::default_registry());
-            (agent, context)
-        }
-        other => anyhow::bail!("Unsupported agent for single-query mode: {}", other),
+    // Create agent registry with model override
+    let options = args
+        .model
+        .as_ref()
+        .map(|m| RegistryOptions::default().with_model(m));
+    let registry = registry::default_registry(options);
+
+    // Get agent from registry
+    let agent = registry.get(&args.agent).with_context(|| {
+        format!(
+            "Unknown agent: '{}'. Run gemicro -i to see available agents.",
+            args.agent
+        )
+    })?;
+
+    // Create context - tool-using agents get tools attached
+    let context = AgentContext::new_with_cancellation(llm, cancellation_token.clone());
+    let context = if agent_needs_tools(&args.agent) {
+        context.with_tools(tools::default_registry())
+    } else {
+        context
     };
 
     let mut tracker = agent.create_tracker();

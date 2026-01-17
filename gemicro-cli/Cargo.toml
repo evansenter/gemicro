@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 description = "CLI for gemicro AI agent exploration platform"
 
+[lib]
+name = "gemicro_cli"
+path = "src/lib.rs"
+
 [[bin]]
 name = "gemicro"
 path = "src/main.rs"

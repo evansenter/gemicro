@@ -225,6 +225,17 @@ pub struct AgentContext {
     /// Agents should attach these interceptors when building their
     /// `GemicroToolService`.
     pub interceptors: Option<Arc<InterceptorChain<ToolCall, ToolResult>>>,
+
+    /// Optional interaction ID from a previous turn for server-side continuation.
+    ///
+    /// When set, agents can use `with_previous_interaction()` in their
+    /// interaction builders to enable server-side conversation chaining.
+    /// The server preserves conversation history, eliminating the need
+    /// to re-send previous exchanges as text (saving tokens).
+    ///
+    /// Set by the CLI session after each query based on the agent's
+    /// response metadata (`ResultMetadata.extra["interaction_id"]`).
+    pub previous_interaction_id: Option<String>,
 }
 
 impl AgentContext {
@@ -242,6 +253,7 @@ impl AgentContext {
             execution: ExecutionContext::root(),
             orchestration: None,
             interceptors: None,
+            previous_interaction_id: None,
         }
     }
 
@@ -257,6 +269,7 @@ impl AgentContext {
             execution: ExecutionContext::root(),
             orchestration: None,
             interceptors: None,
+            previous_interaction_id: None,
         }
     }
 
@@ -272,6 +285,7 @@ impl AgentContext {
             execution: ExecutionContext::root(),
             orchestration: None,
             interceptors: None,
+            previous_interaction_id: None,
         }
     }
 
@@ -360,6 +374,22 @@ impl AgentContext {
         self
     }
 
+    /// Set a previous interaction ID for server-side conversation chaining.
+    ///
+    /// When set, agents can use `with_previous_interaction()` in their
+    /// interaction builders to enable server-side multi-turn support.
+    /// The Gemini API preserves conversation history server-side,
+    /// eliminating the need to re-send previous exchanges as text.
+    ///
+    /// This is typically set by the CLI session after each query,
+    /// using the `interaction_id` returned in the agent's result metadata.
+    ///
+    /// Note: Subagents do NOT inherit this (they start fresh chains).
+    pub fn with_previous_interaction(mut self, id: impl Into<String>) -> Self {
+        self.previous_interaction_id = Some(id.into());
+        self
+    }
+
     /// Create a child context for spawning a subagent.
     ///
     /// The child context:
@@ -369,6 +399,7 @@ impl AgentContext {
     /// - Inherits orchestration state (for shared concurrency limits)
     /// - Inherits interceptors (for shared security policy)
     /// - Creates a new execution context with this agent as parent
+    /// - Does NOT inherit `previous_interaction_id` (subagents start fresh)
     ///
     /// # Example
     ///
@@ -388,6 +419,8 @@ impl AgentContext {
             execution: self.execution.child(agent_name),
             orchestration: self.orchestration.clone(),
             interceptors: self.interceptors.clone(),
+            // Subagents start their own conversation chain
+            previous_interaction_id: None,
         }
     }
 

@@ -55,7 +55,7 @@ gemicro --interactive
 use gemicro_developer_agent::{DeveloperAgent, DeveloperAgentConfig};
 use gemicro_core::{Agent, AgentContext, LlmClient, LlmConfig};
 
-let llm = LlmClient::new(rust_genai::Client::builder(api_key).build(), LlmConfig::default());
+let llm = LlmClient::new(genai_rs::Client::builder(api_key).build()?, LlmConfig::default());
 let agent = DeveloperAgent::new(DeveloperAgentConfig::default())?;
 let stream = agent.execute("Read CLAUDE.md and summarize it", AgentContext::new(llm));
 
@@ -127,23 +127,20 @@ use gemicro_critique_agent::CritiqueAgent;                             // Critiq
 
 ### Single Query Mode
 
-Run a single research query with real-time streaming output:
+Run a single query with real-time streaming output:
 
 ```bash
-# Basic query
+# Basic query (uses prompt_agent by default)
 gemicro "What is Rust?"
 
-# With custom configuration
-gemicro "Compare async runtimes" \
-    --min-sub-queries 3 \
-    --max-sub-queries 7 \
-    --timeout 120
-
-# With Google Search grounding for real-time web data
-gemicro "What are the latest AI developments this week?" --google-search
+# With a specific model
+gemicro "Explain async/await" --agent prompt_agent --model gemini-3-flash-preview
 
 # Verbose mode (debug logging)
-gemicro "Your query" --verbose
+gemicro "Your query" --agent prompt_agent --verbose
+
+# Deep research mode (slower, more thorough)
+gemicro "Compare async runtimes" --agent deep_research
 ```
 
 ### Interactive REPL Mode
@@ -198,8 +195,7 @@ Key options (run `gemicro --help` for full list):
 |--------|-------------|
 | `-i, --interactive` | REPL mode |
 | `--agent <NAME>` | Agent to use (required) |
-| `--google-search` | Enable web grounding |
-| `--timeout <SECS>` | Total timeout [default: 180] |
+| `--model <MODEL>` | Override default model (or set `GEMINI_MODEL` env var) |
 | `-v, --verbose` | Debug logging |
 
 ## Development

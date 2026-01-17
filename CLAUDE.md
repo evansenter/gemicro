@@ -28,7 +28,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Gemicro is a CLI agent exploration platform for AI agent patterns, powered by Gemini API via genai-rs.
 
-**Architecture**: 26-crate workspace (7 agents, 10 tools, 5 hooks, 4 core)
+**Architecture**: 27-crate workspace (6 agents, 10 tools, 6 hooks, 5 core)
 
 **Status**: Core complete. Remaining work in [GitHub Issues](https://github.com/evansenter/gemicro/issues).
 
@@ -187,7 +187,7 @@ Bump the version in `Cargo.toml` when new releases are published. Check the [cha
 
 ## Model Selection
 
-Always use `gemini-3.0-flash-preview` as the default model. Do not use older models like `gemini-2.0-flash`.
+Always use `gemini-3-flash-preview` as the default model. Do not use older models like `gemini-2.0-flash`.
 
 ## genai-rs Integration
 
@@ -199,6 +199,19 @@ Always use `gemini-3.0-flash-preview` as the default model. Do not use older mod
 Use genai-rs types directly when passing through. Wrap when adding functionality (recording, metadata).
 
 **Don't add to gemicro**: Alternative LLM backends, Gemini API wrappers, complex workarounds (fix genai-rs instead).
+
+### API Naming Conventions
+
+Follow genai-rs patterns for consistency:
+
+| Prefix | Meaning | Example |
+|--------|---------|---------|
+| `with_*` | Configure/replace a setting | `with_model()`, `with_text()` |
+| `add_*` | Accumulate to collection | `add_function()`, `add_tools()` |
+| `as_*` | Accessor returning borrowed ref | `as_text()`, `as_content()` |
+| `into_*` | Consuming conversion | `into_string()`, `into_vec()` |
+
+Builder methods are chainable and return `Self`.
 
 ## Troubleshooting
 

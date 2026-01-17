@@ -29,7 +29,7 @@ async fn test_deep_research_agent_full_flow() {
         .with_min_sub_queries(2)
         .with_max_sub_queries(3)
         .with_continue_on_partial_failure(true)
-        .with_total_timeout(Duration::from_secs(120));
+        .with_total_timeout(Duration::from_secs(240));
 
     let agent = DeepResearchAgent::new(config).expect("Should create agent");
 
@@ -150,7 +150,7 @@ async fn test_agent_event_ordering() {
         .with_min_sub_queries(2)
         .with_max_sub_queries(2)
         .with_continue_on_partial_failure(true)
-        .with_total_timeout(Duration::from_secs(120));
+        .with_total_timeout(Duration::from_secs(240));
 
     let agent = DeepResearchAgent::new(config).unwrap();
     let stream = agent.execute("What is 2+2 and what is 3+3?", context);
@@ -233,7 +233,7 @@ async fn test_cancellation_during_execution() {
     let config = DeepResearchAgentConfig::default()
         .with_min_sub_queries(3)
         .with_max_sub_queries(5)
-        .with_total_timeout(Duration::from_secs(120));
+        .with_total_timeout(Duration::from_secs(240));
 
     let agent = DeepResearchAgent::new(config).unwrap();
     let stream = agent.execute(

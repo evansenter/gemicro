@@ -307,7 +307,7 @@ mod tests {
             .query("What is Rust?")
             .agent_name("test_agent")
             .agent_config(json!({"temperature": 0.7}))
-            .model("gemini-2.0-flash")
+            .model("gemini-3-flash-preview")
             .build(
                 vec![sample_step()],
                 sample_events(),
