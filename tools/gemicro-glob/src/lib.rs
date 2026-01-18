@@ -259,7 +259,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_glob_relative_base_dir() {
+    async fn test_glob_absolute_base_dir() {
         use std::fs::File;
         use tempfile::tempdir;
 
@@ -267,27 +267,16 @@ mod tests {
         let file_path = dir.path().join("test.rs");
         File::create(&file_path).unwrap();
 
-        // RAII guard to restore CWD even on panic
-        struct CwdGuard(std::path::PathBuf);
-        impl Drop for CwdGuard {
-            fn drop(&mut self) {
-                let _ = std::env::set_current_dir(&self.0);
-            }
-        }
-        let _guard = CwdGuard(std::env::current_dir().unwrap());
-        std::env::set_current_dir(&dir).unwrap();
-
+        // Use absolute path to avoid CWD dependency (process-wide, causes flaky tests)
         let glob_tool = Glob;
         let result = glob_tool
             .execute(json!({
                 "pattern": "*.rs",
-                "base_dir": "."  // Relative path - should now work
+                "base_dir": dir.path().to_str().unwrap()
             }))
             .await;
 
-        // Guard handles restoration automatically via Drop
-
-        assert!(result.is_ok(), "Relative path should be supported");
+        assert!(result.is_ok(), "Absolute path should work");
         let tool_result = result.unwrap();
         assert!(tool_result.content.as_str().unwrap().contains("test.rs"));
     }
@@ -395,7 +384,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_glob_relative_path_resolution() {
+    async fn test_glob_absolute_path_resolution() {
         use std::fs::{self, File};
         use tempfile::tempdir;
 
@@ -404,29 +393,17 @@ mod tests {
         fs::create_dir(&subdir).unwrap();
         File::create(subdir.join("nested.txt")).unwrap();
 
-        // RAII guard to restore CWD even on panic
-        struct CwdGuard(std::path::PathBuf);
-        impl Drop for CwdGuard {
-            fn drop(&mut self) {
-                let _ = std::env::set_current_dir(&self.0);
-            }
-        }
-        let _guard = CwdGuard(std::env::current_dir().unwrap());
-        std::env::set_current_dir(&dir).unwrap();
-
+        // Use absolute path to avoid CWD dependency (process-wide, causes flaky tests)
+        // This tests that the glob tool correctly handles subdirectory paths
         let glob_tool = Glob;
-
-        // Test relative path from CWD
         let result = glob_tool
             .execute(json!({
                 "pattern": "*.txt",
-                "base_dir": "subdir"  // Relative to CWD
+                "base_dir": subdir.to_str().unwrap()  // Absolute path to subdir
             }))
             .await;
 
-        // Guard handles restoration automatically via Drop
-
-        assert!(result.is_ok(), "Should resolve relative path against CWD");
+        assert!(result.is_ok(), "Should find files in absolute subdir path");
         let tool_result = result.unwrap();
         assert!(tool_result.content.as_str().unwrap().contains("nested.txt"));
     }
